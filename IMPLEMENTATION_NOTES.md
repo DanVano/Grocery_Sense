@@ -20,3 +20,41 @@ Cross-reference: `PORTING.md` (playbook), `CONTRACT_AUDIT.md` (Port/Replace/Defe
 - **GasCostPerKm** kept in the record (cut by the optimizer redesign) but never surfaced —
   normalized-valid, not deleted. Deleting it is a Models change for later.
 - **Skipped `sort_keys`** (no STJ built-in; only affects diff stability, not behavior).
+
+---
+
+## Phase 3 — Price math + preferences
+
+Tasks: UnitNormalization, MultiBuy, IngredientMapping, PriceHistory, single-profile Preferences.
+All Phase-1 skipped fixtures now run green + a preference-merge test. 184 tests, 0 skipped.
+
+- **No `ensure_schema` anywhere.** Python lazily `ALTER TABLE`s `items.default_unit` and
+  `prices.norm_unit_price/norm_unit/norm_note` on first use; in C# those columns come from the migration
+  ledger (`Database.cs`), so the runtime DDL dance is gone.
+- **Connection model:** services that touch the DB take the caller's `conn` (+ optional `tx`) or inject
+  `SqliteConnectionFactory` and open per call (mirrors Python's `connection_scope`) — never a global.
+  DI resolves the factory, so no registration changes. UnitNorm's DB methods (`Normalize`/`GetItemDefaultUnit`/
+  `SetItemDefaultUnitIfMissing`) gained a `conn` param vs the stub so Phase-5 ingest can backfill `default_unit`
+  inside its own transaction.
+- **IngredientMapping / FuzzySharp scoring (per PORTING):** FuzzySharp `TokenSortScorer` returns 0–100; we
+  divide by 100 and compare against the fractional thresholds (accept 0.78, learn 0.90), documented at the
+  call site. The `alias_ambiguity` collision guards (`oil`↛`olive oil`, `cream`↛`ice cream`, bare `chicken`
+  across multiple canonicals) all pass, so FuzzySharp tracks rapidfuzz `token_sort_ratio` closely enough — no
+  custom scorer needed. Auto-learned aliases + cache touches stay buffered and flushed in one transaction.
+- **PriceHistory dict returns → typed records** (`ItemStats`, `StoreStats`, `DealClassification`) per the
+  convention. Ported the full public surface (incl. `record_manual_price`, `get_baseline_prices`,
+  `stats_for_item_by_store`, `describe_item_history`) since Phase-4 Planning/Optimizer consume them.
+- **PreferencesService = single-profile Replace, not a port.** Implemented only
+  `ComputeEffectivePreferences`; **removed (not stubbed)** the v2 / Phase-8-UI methods (`GetMealProfile`,
+  `GetHouseholdBaselineProfile`, `GetEffectiveEditStateForMember`, `ValidateAddExclude`,
+  `ResetSecondaryMemberToHouseholdBaseline`).
+  - `EffectivePreferences` rebuilt as a single-profile data class: hard = allergies + hard_excludes;
+    soft = soft_excludes; proteins/oils/weights from the profile. Member-name **starring** and **strong-soft
+    consensus** dropped (both need ≥2 members → v2); the old `SoftExcluders`/`IsStrongSoftExcluded` API replaced
+    with `IsSoftExcluded`.
+  - **Field-level profile sanitization is done lazily at read time**, not as a ported
+    `ensure_member_profile_defaults`: `Compute()` coerces each value via `NormList`/`NormWeights` (handles both
+    fresh `List`/`Dictionary` and reloaded `JsonElement`). This is where the Task-10 "deferred field-level
+    sanitization" actually landed.
+  - Cache invalidates via the `ConfigStore.Changed` event from Task 10 (Save only; an out-of-band file edit
+    won't refresh until next Save — fine for the single-user app that owns the file).
