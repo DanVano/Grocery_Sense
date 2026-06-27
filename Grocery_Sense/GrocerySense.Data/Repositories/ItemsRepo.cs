@@ -4,24 +4,149 @@ using Microsoft.Data.Sqlite;
 namespace GrocerySense.Data.Repositories;
 
 // Port of reference-python/src/Grocery_Sense/data/repositories/items_repo.py
+// Case-insensitive canonical_name dedupe (lookups fold case though the UNIQUE index is binary).
 public static class ItemsRepo
 {
-    public static Item CreateItem(SqliteConnection conn, string canonicalName, string? category = null, string? defaultUnit = null,
-        double? typicalPackageSize = null, string? typicalPackageUnit = null, bool isTracked = true, string? notes = null)
-        => throw new NotImplementedException();
+    private const string SelectCols =
+        "id, canonical_name, category, default_unit, typical_package_size, typical_package_unit, is_tracked, notes";
 
-    public static Item? GetItemById(SqliteConnection conn, int itemId) => throw new NotImplementedException();
+    private const int ParamChunk = 900; // SQLite default max variables is 999; stay under it.
 
-    public static Item? GetItemByName(SqliteConnection conn, string canonicalName) => throw new NotImplementedException();
+    private static Item Map(SqliteDataReader r) => new(
+        Id: r.GetInt32(0),
+        CanonicalName: r.GetString(1),
+        Category: r.GetStringOrNull(2),
+        DefaultUnit: r.GetStringOrNull(3),
+        TypicalPackageSize: r.GetDoubleOrNull(4),
+        TypicalPackageUnit: r.GetStringOrNull(5),
+        IsTracked: r.GetBoolean(6),
+        Notes: r.GetStringOrNull(7));
 
-    public static IReadOnlyList<(int Id, string CanonicalName)> ListAllItemNames(SqliteConnection conn) => throw new NotImplementedException();
+    public static Item CreateItem(SqliteConnection conn, string canonicalName, string? category = null,
+        string? defaultUnit = null, double? typicalPackageSize = null, string? typicalPackageUnit = null,
+        bool isTracked = true, string? notes = null, SqliteTransaction? tx = null)
+    {
+        var name = (canonicalName ?? "").Trim();
+        if (name.Length == 0) throw new ArgumentException("canonical_name cannot be empty", nameof(canonicalName));
 
-    public static IReadOnlyList<Item> ListItems(SqliteConnection conn, bool includeUntracked = false) => throw new NotImplementedException();
+        // Case-insensitive dedupe: return the existing row rather than splitting price history.
+        var existing = GetItemByName(conn, name, tx);
+        if (existing is not null) return existing;
 
-    public static void SetItemTracked(SqliteConnection conn, int itemId, bool isTracked) => throw new NotImplementedException();
+        using (var cmd = Db.Command(conn, tx,
+            """
+            INSERT OR IGNORE INTO items
+                (canonical_name, category, default_unit, typical_package_size, typical_package_unit, is_tracked, notes)
+            VALUES ($name, $category, $unit, $size, $pkgUnit, $tracked, $notes)
+            """))
+        {
+            cmd.Parameters.AddWithValue("$name", name);
+            cmd.Parameters.AddWithValue("$category", Db.OrNull(category));
+            cmd.Parameters.AddWithValue("$unit", Db.OrNull(defaultUnit));
+            cmd.Parameters.AddWithValue("$size", Db.OrNull(typicalPackageSize));
+            cmd.Parameters.AddWithValue("$pkgUnit", Db.OrNull(typicalPackageUnit));
+            cmd.Parameters.AddWithValue("$tracked", isTracked ? 1 : 0);
+            cmd.Parameters.AddWithValue("$notes", Db.OrNull(notes));
+            var affected = cmd.ExecuteNonQuery();
+            if (affected == 0)
+                return GetItemByName(conn, name, tx)
+                    ?? throw new InvalidOperationException("create_item: row exists but lookup returned null");
+        }
 
-    // Batch readers (chunk IN-lists at 900 params — see reference _SQL_PARAM_CHUNK).
-    public static IReadOnlyDictionary<int, Item> GetItemsByIds(SqliteConnection conn, IReadOnlyList<int> itemIds) => throw new NotImplementedException();
+        return GetItemById(conn, (int)Db.LastRowId(conn, tx), tx)
+            ?? throw new InvalidOperationException("create_item succeeded but could not re-fetch item");
+    }
 
-    public static IReadOnlyDictionary<string, Item> GetItemsByNames(SqliteConnection conn, IReadOnlyList<string> names) => throw new NotImplementedException();
+    public static Item? GetItemById(SqliteConnection conn, int itemId, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM items WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", itemId);
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? Map(r) : null;
+    }
+
+    public static Item? GetItemByName(SqliteConnection conn, string canonicalName, SqliteTransaction? tx = null)
+    {
+        var name = (canonicalName ?? "").Trim();
+        if (name.Length == 0) return null;
+
+        using var cmd = Db.Command(conn, tx,
+            $"SELECT {SelectCols} FROM items WHERE lower(canonical_name) = $name LIMIT 1");
+        cmd.Parameters.AddWithValue("$name", name.ToLowerInvariant());
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? Map(r) : null;
+    }
+
+    public static IReadOnlyList<(int Id, string CanonicalName)> ListAllItemNames(SqliteConnection conn,
+        SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx, "SELECT id, canonical_name FROM items ORDER BY canonical_name ASC");
+        using var r = cmd.ExecuteReader();
+        var names = new List<(int, string)>();
+        while (r.Read()) names.Add((r.GetInt32(0), r.GetString(1)));
+        return names;
+    }
+
+    public static IReadOnlyList<Item> ListItems(SqliteConnection conn, bool includeUntracked = false,
+        SqliteTransaction? tx = null)
+    {
+        var where = includeUntracked ? "" : "WHERE is_tracked = 1";
+        using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM items {where} ORDER BY canonical_name ASC");
+        using var r = cmd.ExecuteReader();
+        var items = new List<Item>();
+        while (r.Read()) items.Add(Map(r));
+        return items;
+    }
+
+    public static void SetItemTracked(SqliteConnection conn, int itemId, bool isTracked, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx, "UPDATE items SET is_tracked = $v WHERE id = $id");
+        cmd.Parameters.AddWithValue("$v", isTracked ? 1 : 0);
+        cmd.Parameters.AddWithValue("$id", itemId);
+        cmd.ExecuteNonQuery();
+    }
+
+    // Batch readers (chunked IN-lists) — replace per-row lookups in service loops. Missing ids/names omitted.
+    public static IReadOnlyDictionary<int, Item> GetItemsByIds(SqliteConnection conn, IReadOnlyList<int> itemIds,
+        SqliteTransaction? tx = null)
+    {
+        var ids = itemIds.Where(x => x > 0).Distinct().ToList();
+        var result = new Dictionary<int, Item>();
+        foreach (var chunk in Chunk(ids))
+        {
+            var names = chunk.Select((_, i) => $"$p{i}").ToList();
+            using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM items WHERE id IN ({string.Join(",", names)})");
+            for (var i = 0; i < chunk.Count; i++) cmd.Parameters.AddWithValue(names[i], chunk[i]);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) { var item = Map(r); result[item.Id] = item; }
+        }
+        return result;
+    }
+
+    public static IReadOnlyDictionary<string, Item> GetItemsByNames(SqliteConnection conn, IReadOnlyList<string> names,
+        SqliteTransaction? tx = null)
+    {
+        var cleaned = names
+            .Select(n => (n ?? "").Trim().ToLowerInvariant())
+            .Where(n => n.Length > 0)
+            .Distinct()
+            .ToList();
+        var result = new Dictionary<string, Item>();
+        foreach (var chunk in Chunk(cleaned))
+        {
+            var ph = chunk.Select((_, i) => $"$p{i}").ToList();
+            using var cmd = Db.Command(conn, tx,
+                $"SELECT {SelectCols} FROM items WHERE lower(canonical_name) IN ({string.Join(",", ph)})");
+            for (var i = 0; i < chunk.Count; i++) cmd.Parameters.AddWithValue(ph[i], chunk[i]);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) { var item = Map(r); result[item.CanonicalName.Trim().ToLowerInvariant()] = item; }
+        }
+        return result;
+    }
+
+    private static IEnumerable<List<T>> Chunk<T>(List<T> seq)
+    {
+        for (var i = 0; i < seq.Count; i += ParamChunk)
+            yield return seq.GetRange(i, Math.Min(ParamChunk, seq.Count - i));
+    }
 }
