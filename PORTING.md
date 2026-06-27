@@ -157,20 +157,31 @@ DI still resolves.
 
 ---
 
-## Phase 1 — Test harness & fixtures (stays GREEN)  ☐
+## Phase 1 — Test harness & fixtures (stays GREEN)  ✅ DONE (2026-06-27)
 Set up the machinery the later phases turn red→green *within their own tasks*. This phase does **not**
-leave anything red.
+leave the test project red. Result: 8 passed / 6 skipped (Phase-3 math hooks) via
+`dotnet test GrocerySense.Tests/GrocerySense.Tests.csproj`.
 
-- [ ] Build a **Python↔C# fixture parity** harness: export canonical input→expected cases from
-      `reference-python/tests/price_intelligence/test_unit_normalization.py`,
-      `test_multibuy_parser.py`, and `tests/ingestion/test_ingredient_mapping.py` (incl. the
-      `alias_ambiguity` fixtures) into JSON under `GrocerySense.Tests/Fixtures/`.
-- [ ] Write the xUnit `[Theory]` loaders. Mark the math assertions `[Fact(Skip="impl in Phase 3")]` (so
-      the suite is green) — the skip is removed *inside* the implementing task.
-- [ ] **DI resolution smoke test:** build the provider from `AddGrocerySenseServices`, resolve every
-      registered service, assert non-null. Catches graph/wiring breaks immediately.
+- [x] Build a **Python↔C# fixture parity** harness — JSON under `GrocerySense.Tests/Fixtures/`:
+      `unit_convert.json`, `unit_aliases.json`, `guess_unit_from_text.json` (from
+      `test_unit_normalization.py`), `multibuy_phrases.json` (vendored), `ingredient_normalize_pipeline.json`
+      + `alias_ambiguity.json` (vendored). Loader + row records in `Fixtures.cs` (snake_case ↔ records,
+      one `JsonSerializerOptions`). **Scope note:** DB-backed `normalize()` end-to-end + volume
+      round-trips stay as Phase-3 integration tests, not the pure parity table.
+- [x] xUnit loaders: one non-skipped `[Fact] *_fixtures_load` per domain (parses JSON, spot-checks a
+      row → this is the "fixtures load" green gate) + a `[Theory(Skip="Phase 3…")]` hook per domain
+      (`DisableDiscoveryEnumeration` so skipped theories don't pre-serialize). Phase 3 fills the body
+      and removes the Skip.
+- [x] **DI resolution smoke test** (`DiResolutionSmokeTests`): builds the provider from
+      `AddGrocerySenseCore` + fake seams, enumerates every descriptor, resolves each with
+      `GetRequiredService`.
+      **Design change:** registration was split — `Core.AddGrocerySenseCore(dbPath)` (Core/Data, MAUI-free,
+      testable) + App's `AddGrocerySenseServices()` wrapper (MAUI path + concrete Azure/Flipp bindings).
+      Required because the old `AddGrocerySenseServices` lived in the MAUI App (workload-blocked, and an
+      xUnit project can't reference a MAUI exe head). App's 3 integration bindings are compile-checked in
+      App, not the smoke test.
 
-**Done when:** fixtures load, DI smoke test passes, `dotnet test` green.
+**Done when:** fixtures load, DI smoke test passes, test project green.
 
 ---
 
