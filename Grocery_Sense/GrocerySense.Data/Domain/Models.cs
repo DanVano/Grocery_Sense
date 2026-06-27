@@ -116,6 +116,15 @@ public record SpendTrendPoint(string Month, decimal Total, int ReceiptCount);
 
 public record DeletedBackup(int BackupId, int? OriginalReceiptId, string? DeletedAt);
 
+// Flyer deal row (port of the flyer_deals shape). Money columns are decimal (TEXT-backed). Used as
+// both the insert input (Id/CreatedAt ignored on write) and the read shape.
+public record FlyerDeal(
+    int Id, int FlyerId, int? AssetId, int StoreId, int? PageIndex,
+    string? Title, string? Description, string? PriceText,
+    double? DealQty, decimal? DealTotal, decimal? UnitPrice, string? Unit,
+    decimal? NormUnitPrice, string? NormUnit, string? NormNote,
+    int? ItemId, double? MappingConfidence, double? Confidence, string? CreatedAt);
+
 public record ItemAlias(
     int Id,
     string AliasText,

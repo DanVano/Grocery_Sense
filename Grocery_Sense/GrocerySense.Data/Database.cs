@@ -197,6 +197,70 @@ public static class Database
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE CASCADE
         );
+
+        -- Flyer subsystem: feature-local tables flyers_repo.py self-creates (folded in here per the
+        -- playbook). store_id stays a loose int (no FK, matching Python). Money columns are TEXT;
+        -- item_id is INTEGER from the start (the legacy TEXT->INT rebuild is N/A for a clean start).
+        CREATE TABLE flyer_batches (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            store_id    INTEGER NOT NULL,
+            valid_from  TEXT,
+            valid_to    TEXT,
+            source_type TEXT,
+            source_ref  TEXT,
+            note        TEXT,
+            status      TEXT DEFAULT 'active',
+            imported_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_flyer_batches_store_id ON flyer_batches(store_id);
+        CREATE INDEX idx_flyer_batches_status ON flyer_batches(status);
+        CREATE INDEX idx_flyer_batches_valid ON flyer_batches(valid_from, valid_to);
+
+        CREATE TABLE flyer_assets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            flyer_id   INTEGER NOT NULL,
+            asset_type TEXT NOT NULL,
+            path       TEXT NOT NULL,
+            sha256     TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (flyer_id) REFERENCES flyer_batches(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE flyer_raw_json (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            flyer_id   INTEGER NOT NULL,
+            sha256     TEXT,
+            json       TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (flyer_id) REFERENCES flyer_batches(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE flyer_deals (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            flyer_id           INTEGER NOT NULL,
+            asset_id           INTEGER,
+            store_id           INTEGER NOT NULL,
+            page_index         INTEGER,
+            title              TEXT,
+            description        TEXT,
+            price_text         TEXT,
+            deal_qty           REAL,
+            deal_total         TEXT,
+            unit_price         TEXT,
+            unit               TEXT,
+            norm_unit_price    TEXT,
+            norm_unit          TEXT,
+            norm_note          TEXT,
+            item_id            INTEGER,
+            mapping_confidence REAL,
+            confidence         REAL,
+            created_at         TEXT NOT NULL,
+            FOREIGN KEY (flyer_id) REFERENCES flyer_batches(id) ON DELETE CASCADE,
+            FOREIGN KEY (asset_id) REFERENCES flyer_assets(id) ON DELETE SET NULL
+        );
+        CREATE INDEX idx_flyer_deals_flyer_id ON flyer_deals(flyer_id);
+        CREATE INDEX idx_flyer_deals_store_id ON flyer_deals(store_id);
+        CREATE INDEX idx_flyer_deals_item_id ON flyer_deals(item_id);
         """,
     };
 

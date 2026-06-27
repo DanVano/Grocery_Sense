@@ -27,6 +27,7 @@ public sealed class DatabaseMigrationTests : IDisposable
             "schema_version", "stores", "items", "receipts", "flyer_sources", "prices",
             "receipt_line_items", "item_aliases", "shopping_list", "deleted_receipt_backups",
             "receipt_raw_json", "receipt_file_hashes", "receipt_signatures",
+            "flyer_batches", "flyer_assets", "flyer_raw_json", "flyer_deals",
         };
         foreach (var t in expected)
             Assert.Contains(t, tables);
