@@ -129,23 +129,28 @@ enumerated (the batch readers the scaffold omitted). Phase 2 can proceed without
   - Other omitted helpers: `ShoppingListRepo` bulk variants, `ReceiptsRepo.list_deleted_backups` /
     restore-conflict shape, etc. → audit them all.
 
-### 0.C Fix dependency direction (interfaces) — do before porting logic  ☐
+### 0.C Fix dependency direction (interfaces) — do before porting logic  ✅ DONE (2026-06-26)
 Current scaffold has `Core → Integrations` (concrete `AzureReceiptOcrClient`), which makes canned-OCR
 tests awkward and inverts the testable direction.
 
-- [ ] Define `IReceiptOcrClient` and `IFlyerProvider` in **Core** (`GrocerySense.Core/Abstractions/`).
-- [ ] Make **Integrations reference Core** and implement them
+- [x] Define `IReceiptOcrClient` and `IFlyerProvider` in **Core** (`GrocerySense.Core/Abstractions/`).
+- [x] Make **Integrations reference Core** and implement them
       (`AzureReceiptOcrClient : IReceiptOcrClient`, `FlippClient : IFlyerProvider`).
-- [ ] **Remove the `Core → Integrations` project reference.** `ReceiptIngestionService` depends on
+- [x] **Remove the `Core → Integrations` project reference.** `ReceiptIngestionService` depends on
       `IReceiptOcrClient`, never the concrete class.
-- [ ] App composition root binds concrete → interface and supplies credentials.
-- [ ] New graph: `Data→none`, `Core→Data`, `Integrations→Core+Data`, `App`/`Tests→all`.
+- [x] App composition root binds concrete → interface (`IReceiptOcrClient`→`AzureReceiptOcrClient`,
+      `IFlyerProvider`→`FlippClient`). Cred supply still TODO with the Phase-5 client build.
+- [x] New graph: `Data→none`, `Core→Data`, `Integrations→Core`, `App`/`Tests→all`.
+      **Deviation:** Integrations references **Core only**, not `Core+Data` — the integration clients
+      are pure API-in/JSON-out (no DB), so a Data ref would be dead. Add Data if that ever changes.
 
 > Payoff: Core unit-tests run against a fake `IReceiptOcrClient` returning canned JSON — no Azure, no network.
 
-### 0.D Creds  ☐
-- [ ] `dotnet user-secrets` on `GrocerySense.Integrations` (or git-ignored `appsettings.Development.json`);
-      read in the OCR client ctor. Never hardcode or commit keys.
+### 0.D Creds  ☐ (store wired; ctor-read deferred to Phase 5)
+- [x] `dotnet user-secrets init` on `GrocerySense.Integrations` (UserSecretsId in csproj). Nothing
+      hardcoded — `AzureReceiptOcrClient` ctor already takes endpoint/apiKey params (default null).
+- [ ] Read creds in the OCR client ctor — **deferred to Phase 5**: the client is a throwing stub with
+      no `DocumentIntelligenceClient` construction yet, so config wiring now would be dead code.
 
 **Done when:** net10 build + test green; `CONTRACT_AUDIT.md` exists and is seeded; interfaces in place;
 DI still resolves.
