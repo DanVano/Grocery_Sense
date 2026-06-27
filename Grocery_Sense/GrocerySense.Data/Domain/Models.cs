@@ -15,8 +15,7 @@ public record Store(
     int Priority = 0,
     bool ShopHere = true,
     bool IsActive = true,
-    string? Notes = null,
-    double? DistanceKm = null);
+    string? Notes = null);
 
 public record Item(
     int Id,
