@@ -425,6 +425,10 @@ test-results/
 # Mac bundle stuff
 *.dmg
 *.app
+!GrocerySense.App/
+!GrocerySense.App/**
+**/GrocerySense.App/[Bb]in/
+**/GrocerySense.App/[Oo]bj/
 
 # content below from: https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 # General
