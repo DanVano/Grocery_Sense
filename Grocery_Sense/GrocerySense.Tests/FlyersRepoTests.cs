@@ -68,6 +68,18 @@ public sealed class FlyersRepoTests
         Assert.Equal("Live", active[0].Title);
     }
 
+    [Fact]
+    public void ListActiveDeals_empty_store_filter_returns_none()
+    {
+        using var db = new TempDb();
+        var repo = new FlyersRepo();
+        var storeId = repo.UpsertStore(db.Conn, "Sobeys");
+        var batch = repo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow);
+        repo.AddDeals(db.Conn, new[] { Deal(batch, storeId, "Live") });
+
+        Assert.Empty(repo.ListActiveDeals(db.Conn, storeIds: Array.Empty<int>()));
+    }
+
     private static FlyerDeal Deal(int flyerId, int storeId, string title) =>
         new(0, flyerId, null, storeId, null, title, null, null,
             null, null, null, null, null, null, null, null, null, null, null);

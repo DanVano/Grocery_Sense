@@ -3,8 +3,6 @@ using Microsoft.Data.Sqlite;
 
 namespace GrocerySense.Data.Repositories;
 
-// Port of reference-python/src/Grocery_Sense/data/repositories/items_repo.py
-// Case-insensitive canonical_name dedupe (lookups fold case though the UNIQUE index is binary).
 public static class ItemsRepo
 {
     private const string SelectCols =
@@ -106,17 +104,16 @@ public static class ItemsRepo
         cmd.ExecuteNonQuery();
     }
 
-    // Batch readers (chunked IN-lists) — replace per-row lookups in service loops. Missing ids/names omitted.
     public static IReadOnlyDictionary<int, Item> GetItemsByIds(SqliteConnection conn, IReadOnlyList<int> itemIds,
         SqliteTransaction? tx = null)
     {
         var ids = itemIds.Where(x => x > 0).Distinct().ToList();
         var result = new Dictionary<int, Item>();
-        foreach (var chunk in Chunk(ids))
+        foreach (var chunk in ids.Chunk(ParamChunk))
         {
             var names = chunk.Select((_, i) => $"$p{i}").ToList();
             using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM items WHERE id IN ({string.Join(",", names)})");
-            for (var i = 0; i < chunk.Count; i++) cmd.Parameters.AddWithValue(names[i], chunk[i]);
+            for (var i = 0; i < chunk.Length; i++) cmd.Parameters.AddWithValue(names[i], chunk[i]);
             using var r = cmd.ExecuteReader();
             while (r.Read()) { var item = Map(r); result[item.Id] = item; }
         }
@@ -132,21 +129,15 @@ public static class ItemsRepo
             .Distinct()
             .ToList();
         var result = new Dictionary<string, Item>();
-        foreach (var chunk in Chunk(cleaned))
+        foreach (var chunk in cleaned.Chunk(ParamChunk))
         {
             var ph = chunk.Select((_, i) => $"$p{i}").ToList();
             using var cmd = Db.Command(conn, tx,
                 $"SELECT {SelectCols} FROM items WHERE lower(canonical_name) IN ({string.Join(",", ph)})");
-            for (var i = 0; i < chunk.Count; i++) cmd.Parameters.AddWithValue(ph[i], chunk[i]);
+            for (var i = 0; i < chunk.Length; i++) cmd.Parameters.AddWithValue(ph[i], chunk[i]);
             using var r = cmd.ExecuteReader();
             while (r.Read()) { var item = Map(r); result[item.CanonicalName.Trim().ToLowerInvariant()] = item; }
         }
         return result;
-    }
-
-    private static IEnumerable<List<T>> Chunk<T>(List<T> seq)
-    {
-        for (var i = 0; i < seq.Count; i += ParamChunk)
-            yield return seq.GetRange(i, Math.Min(ParamChunk, seq.Count - i));
     }
 }

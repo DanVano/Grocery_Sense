@@ -3,11 +3,6 @@ using Microsoft.Data.Sqlite;
 
 namespace GrocerySense.Data.Repositories;
 
-// Port of reference-python/src/Grocery_Sense/data/repositories/flyers_repo.py — CRUD ONLY.
-// The Python repo bakes preference-aware deal filtering into list_*_deals; per the playbook that layering
-// leak moves up into PreferencesService (Phase 3), so ListActiveDeals here is a plain valid-date query.
-// Schema (flyer_batches/assets/raw_json/deals) lives in the Database migration ledger. Instance-based so
-// the Phase-6 flyer ingest service can hold it; connection is always supplied by the caller.
 public sealed class FlyersRepo
 {
     private const string DealCols =
@@ -141,11 +136,11 @@ public sealed class FlyersRepo
         return deals.Count;
     }
 
-    // Plain active-deals query (no preference filtering — that lives in PreferencesService, Phase 3).
-    // "Active" = batch status 'active' and the batch's validity window covers onDate (default: today).
     public IReadOnlyList<FlyerDeal> ListActiveDeals(SqliteConnection conn, int? storeId = null,
         IReadOnlyList<int>? storeIds = null, string? onDate = null, int limit = 5000, SqliteTransaction? tx = null)
     {
+        if (storeIds is { Count: 0 }) return Array.Empty<FlyerDeal>();
+
         onDate ??= DateTime.UtcNow.ToString("yyyy-MM-dd");
         var sql =
             $"SELECT {PrefixCols("d")} FROM flyer_deals d JOIN flyer_batches b ON b.id = d.flyer_id " +
