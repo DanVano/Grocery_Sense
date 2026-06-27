@@ -1,0 +1,21 @@
+[
+  { "text": "Chicken breast $10/kg", "expected": "kg" },
+  { "text": "Apples 500g bag", "expected": "g" },
+  { "text": "Ground beef per lb", "expected": "lb" },
+  { "text": "Ham 12 oz", "expected": "oz" },
+  { "text": "Milk 2 L carton", "expected": "L" },
+  { "text": "Olive oil 500 ml", "expected": "ml" },
+  { "text": "Vanilla 1 fl oz", "expected": "fl_oz" },
+  { "text": "Butter 1 cup", "expected": "cup" },
+  { "text": "Sugar 2 tbsp", "expected": "tbsp" },
+  { "text": "Salt tsp", "expected": "tsp" },
+  { "text": "Paint 1 gallon", "expected": "gal" },
+  { "text": "Ice cream pint", "expected": "pint" },
+  { "text": "Eggs dozen", "expected": "dozen" },
+  { "text": "Bananas bunch", "expected": "bunch" },
+  { "text": "24-pack cola", "expected": "pack" },
+  { "text": "Case of water", "expected": "case" },
+  { "text": "Apples each", "expected": "each" },
+  { "text": "unlabelled garbage", "expected": "unknown" },
+  { "text": "Soda 12 fl oz can", "expected": "fl_oz" }
+]

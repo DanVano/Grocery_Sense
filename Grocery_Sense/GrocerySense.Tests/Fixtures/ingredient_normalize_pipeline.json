@@ -1,0 +1,12 @@
+[
+  { "raw": "Chicken Breast", "expected": "chicken breast" },
+  { "raw": "CHICKEN-BREAST!!!", "expected": "chicken breast" },
+  { "raw": "   multi    space   ", "expected": "multi space" },
+  { "raw": "chk brst", "expected": "chicken breast" },
+  { "raw": "GRND BF", "expected": "ground beef" },
+  { "raw": "Skls Bnls THG", "expected": "skinless boneless thigh" },
+  { "raw": "Chicken Breast Value Pack", "expected": "chicken breast" },
+  { "raw": "Chicken Breast FAMILY pack", "expected": "chicken breast" },
+  { "raw": "", "expected": "" },
+  { "raw": "   ", "expected": "" }
+]

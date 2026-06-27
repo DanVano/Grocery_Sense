@@ -1,0 +1,20 @@
+[
+  { "case": "kg_to_kg",        "price_from": 1.0,  "from": "kg",   "to": "kg",    "expected": 1.0 },
+  { "case": "lb_to_kg",        "price_from": 1.0,  "from": "lb",   "to": "kg",    "expected": 2.2046226218 },
+  { "case": "kg_to_lb",        "price_from": 1.0,  "from": "kg",   "to": "lb",    "expected": 0.45359237 },
+  { "case": "lb2_to_kg",       "price_from": 2.0,  "from": "lb",   "to": "kg",    "expected": 4.4092452436 },
+  { "case": "g_to_kg",         "price_from": 1.0,  "from": "g",    "to": "kg",    "expected": 1000.0 },
+  { "case": "kg_to_g",         "price_from": 1.0,  "from": "kg",   "to": "g",     "expected": 0.001 },
+  { "case": "oz_to_kg",        "price_from": 1.0,  "from": "oz",   "to": "kg",    "expected": 35.273961949 },
+  { "case": "L_to_ml",         "price_from": 1.0,  "from": "L",    "to": "ml",    "expected": 0.001 },
+  { "case": "ml_to_L",         "price_from": 1.0,  "from": "ml",   "to": "L",     "expected": 1000.0 },
+  { "case": "each_to_dozen",   "price_from": 1.0,  "from": "each", "to": "dozen", "expected": 12.0 },
+  { "case": "dozen_to_each",   "price_from": 12.0, "from": "dozen","to": "each",  "expected": 1.0 },
+
+  { "case": "reject_kg_to_L",  "price_from": 1.0,  "from": "kg",   "to": "L",     "expected": null },
+  { "case": "reject_L_to_kg",  "price_from": 1.0,  "from": "L",    "to": "kg",    "expected": null },
+  { "case": "reject_each_to_kg","price_from": 1.0, "from": "each", "to": "kg",    "expected": null },
+  { "case": "reject_kg_to_each","price_from": 1.0, "from": "kg",   "to": "each",  "expected": null },
+  { "case": "reject_pack_to_kg","price_from": 1.0, "from": "pack", "to": "kg",    "expected": null },
+  { "case": "reject_ml_to_g",  "price_from": 1.0,  "from": "ml",   "to": "g",     "expected": null }
+]
