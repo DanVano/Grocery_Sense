@@ -81,18 +81,21 @@ public record ShoppingListItem(
     int? AddedByMemberId = null);
 
 // Repo-local return shapes (ports of dataclasses defined inside *_repo.py).
+// Mirrors shopping_list_repo.ShoppingListRow: quantity/unit/category/notes are coalesced non-null,
+// and is_active is carried (list_all_items / get_item return inactive rows too).
 public record ShoppingListRow(
     int Id,
     string DisplayName,
-    double? Quantity,
-    string? Unit,
-    string? Category,
-    int? ItemId,
-    int? PlannedStoreId,
+    double Quantity,
+    string Unit,
+    string Category,
+    bool IsCheckedOff,
+    string Notes,
     string? AddedBy,
     int? AddedByMemberId,
-    bool IsCheckedOff,
-    string? Notes);
+    bool IsActive,
+    int? PlannedStoreId,
+    int? ItemId = null);
 
 public record ItemAlias(
     int Id,
