@@ -1,4 +1,4 @@
-using GrocerySense.Integrations;
+using GrocerySense.Core.Abstractions;
 
 namespace GrocerySense.Core;
 
@@ -8,9 +8,9 @@ namespace GrocerySense.Core;
 // stores/items/receipts/line_items/prices writes. replace_existing is the only delete+re-ingest path.
 public sealed class ReceiptIngestionService
 {
-    private readonly AzureReceiptOcrClient _ocr;
+    private readonly IReceiptOcrClient _ocr;
 
-    public ReceiptIngestionService(AzureReceiptOcrClient ocr) => _ocr = ocr;
+    public ReceiptIngestionService(IReceiptOcrClient ocr) => _ocr = ocr;
 
     public Task<IngestOutcome> IngestReceiptFileAsync(string filePath, bool replaceExisting = false,
         CancellationToken ct = default) => throw new NotImplementedException();

@@ -2,7 +2,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GrocerySense.Data\GrocerySense.Data.csproj" />
-    <ProjectReference Include="..\GrocerySense.Integrations\GrocerySense.Integrations.csproj" />
   </ItemGroup>
 
   <ItemGroup>
