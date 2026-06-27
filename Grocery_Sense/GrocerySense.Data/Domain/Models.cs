@@ -97,6 +97,25 @@ public record ShoppingListRow(
     int? PlannedStoreId,
     int? ItemId = null);
 
+// Receipt read shapes (ports of the row dicts in receipts_repo.py). Money is decimal (TEXT-backed).
+public record ReceiptSummary(
+    int Id, string PurchaseDate, decimal? TotalAmount, decimal? SubtotalAmount, decimal? TaxAmount,
+    int StoreId, string StoreName, string? FilePath, string? CreatedAt, int ItemCount);
+
+public record ReceiptDetail(
+    int Id, string PurchaseDate, decimal? TotalAmount, decimal? SubtotalAmount, decimal? TaxAmount,
+    int StoreId, string StoreName, string? FilePath, string Source, string? AzureRequestId, string? CreatedAt);
+
+public record ReceiptLineItemRow(
+    int Id, int LineIndex, int? ItemId, string CanonicalName, string Description,
+    double? Quantity, decimal? UnitPrice, decimal? LineTotal, decimal? Discount, int? Confidence);
+
+public record MonthSpend(string Month, decimal Total, int ReceiptCount);
+
+public record SpendTrendPoint(string Month, decimal Total, int ReceiptCount);
+
+public record DeletedBackup(int BackupId, int? OriginalReceiptId, string? DeletedAt);
+
 public record ItemAlias(
     int Id,
     string AliasText,
