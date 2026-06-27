@@ -1,3 +1,5 @@
+using GrocerySense.Core;
+using GrocerySense.Data.Repositories;
 using Xunit;
 
 namespace GrocerySense.Tests;
@@ -16,12 +18,13 @@ public class IngredientMappingFixtureTests
         Assert.Contains(cases, c => c.Raw == "" && c.Expected == "");
     }
 
-    [Theory(Skip = "Phase 3: implement IngredientMappingService normalization pipeline.")]
+    [Theory]
     [MemberData(nameof(NormalizeCases), DisableDiscoveryEnumeration = true)]
     public void NormalizePipeline_matches_python(NormalizeCase c)
     {
-        // Phase 3: Assert.Equal(c.Expected, mapper.NormalizePipeline(c.Raw));
-        _ = c;
+        using var db = new TempDb();
+        var mapper = new IngredientMappingService(db.Factory);
+        Assert.Equal(c.Expected, mapper.NormalizePipeline(c.Raw));
     }
 
     public static IEnumerable<object[]> AmbiguityCases() =>
@@ -38,11 +41,16 @@ public class IngredientMappingFixtureTests
         Assert.Contains(cases, c => c.Case == "exact_match" && c.Canonicals.Length == 2);
     }
 
-    [Theory(Skip = "Phase 3: implement IngredientMappingService.MapToItem against a seeded temp DB.")]
+    [Theory]
     [MemberData(nameof(AmbiguityCases), DisableDiscoveryEnumeration = true)]
     public void MapToItem_matches_python(AmbiguityCase c)
     {
-        // Phase 3: seed canonicals into a temp DB, map raw, assert method + canonical.
-        _ = c;
+        using var db = new TempDb();
+        foreach (var name in c.Canonicals) ItemsRepo.CreateItem(db.Conn, name);
+
+        var result = new IngredientMappingService(db.Factory).MapToItem(c.Raw);
+
+        Assert.Equal(c.ExpectedMethod, result.Method);
+        Assert.Equal(c.ExpectedCanonical, result.CanonicalName);
     }
 }
