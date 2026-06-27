@@ -42,10 +42,13 @@ public sealed class SqliteConnectionFactory
         return conn;
     }
 
-    /// <summary>Creates tables + runs migrations once at app startup.</summary>
+    /// <summary>Runs the migration ledger once at app startup (creates tables, applies pending steps).</summary>
     public Task InitializeAsync(CancellationToken ct = default)
-        => throw new NotImplementedException(
-            "Next Phase-2 step: Database migration ledger (schema_version + ordered migrations).");
+    {
+        ct.ThrowIfCancellationRequested();
+        Database.Initialize(this);
+        return Task.CompletedTask;
+    }
 
     private void EnsureIntegrityChecked(SqliteConnection conn)
     {
