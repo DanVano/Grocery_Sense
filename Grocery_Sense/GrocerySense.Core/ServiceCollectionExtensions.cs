@@ -9,7 +9,9 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton(_ => new SqliteConnectionFactory(databasePath));
 
-        services.AddSingleton<ConfigStore>();
+        // ConfigStore writes user_config.json / deals_cache.json beside the DB in the app-data dir.
+        var configDir = Path.GetDirectoryName(databasePath) is { Length: > 0 } d ? d : ".";
+        services.AddSingleton(_ => new ConfigStore(configDir));
         services.AddSingleton<PreferencesService>();
         services.AddSingleton<UnitNormalizationService>();
         services.AddSingleton<MultiBuyDealService>();
