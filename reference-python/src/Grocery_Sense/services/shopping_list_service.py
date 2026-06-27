@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from Grocery_Sense.data.repositories import shopping_list_repo
+from Grocery_Sense.data.repositories.shopping_list_repo import ShoppingListRow
+
+
+class ShoppingListService:
+    """
+    Object-oriented wrapper around the shopping_list module-level functions.
+    Provides the interface expected by tests and UI code that instantiates this class.
+    """
+
+    def add_items_from_text(
+        self,
+        text: str,
+        *,
+        planned_store_id: Optional[int] = None,
+        added_by: Optional[str] = None,
+        member_id: Optional[int] = None,
+    ) -> List[ShoppingListRow]:
+        """
+        Parse a comma-separated string of item names and add each to the list.
+        Returns the newly created ShoppingListRow objects.
+        """
+        created: List[ShoppingListRow] = []
+        for raw in text.split(","):
+            name = raw.strip()
+            if not name:
+                continue
+            row_id = shopping_list_repo.add_item(
+                display_name=name,
+                added_by=added_by,
+                added_by_member_id=member_id,
+            )
+            if planned_store_id is not None:
+                shopping_list_repo.set_planned_store_id(row_id, planned_store_id)
+            match = shopping_list_repo.get_item(row_id)
+            if match:
+                created.append(match)
+        return created
+
+    def summarize_list_for_display(self, *, include_checked_off: bool = False) -> str:
+        """Return a plain-text summary of the current shopping list."""
+        if include_checked_off:
+            items = shopping_list_repo.list_all_items()
+        else:
+            items = shopping_list_repo.list_active_items()
+        if not items:
+            return "(empty)"
+        lines = []
+        for it in items:
+            status = "[x]" if it.is_checked_off else "[ ]"
+            qty = f" x{it.quantity}" if it.quantity and it.quantity != 1.0 else ""
+            unit = f" {it.unit}" if it.unit else ""
+            lines.append(f"  {status} {it.display_name}{qty}{unit}")
+        return "\n".join(lines)
+
+    def get_active_items(self, *, store_id: Optional[int] = None, include_checked_off: bool = False):
+        return shopping_list_repo.list_active_items(store_id=store_id, include_checked_off=include_checked_off)
+
+    def add_single_item(
+        self,
+        name: str,
+        quantity: Optional[float] = None,
+        unit: str = "",
+        planned_store_id: Optional[int] = None,
+        notes: Optional[str] = None,
+        added_by: Optional[str] = None,
+        added_by_member_id: Optional[int] = None,
+        item_id: Optional[int] = None,
+        auto_map: bool = False,
+    ) -> int:
+        row_id = shopping_list_repo.add_item(
+            display_name=name,
+            quantity=float(quantity) if quantity is not None else 1.0,
+            unit=unit or "",
+            notes=notes or "",
+            added_by=added_by,
+            added_by_member_id=added_by_member_id,
+            planned_store_id=planned_store_id,
+            item_id=item_id,
+        )
+        return row_id
+
+    def soft_delete_item(self, item_id: int) -> None:
+        shopping_list_repo.delete_item(item_id)
+
+    def check_off_item(self, item_id: int, *, checked: bool = True) -> None:
+        shopping_list_repo.set_checked_off(item_id, checked)
+
+    def clear_all_checked_off(self) -> None:
+        """Mark all checked-off active items as deleted."""
+        shopping_list_repo.clear_checked_off_items()
+
+
+def get_active_items(*, store_id: Optional[int] = None, include_checked_off: bool = False):
+    return shopping_list_repo.list_active_items(store_id=store_id, include_checked_off=include_checked_off)
+
+
+def get_all_items():
+    return shopping_list_repo.list_all_items()
+
+
+def add_item(
+    display_name: str,
+    *,
+    quantity: float = 1.0,
+    unit: str = "",
+    category: str = "",
+    notes: str = "",
+    added_by_member_id: Optional[int] = None,
+) -> int:
+    return shopping_list_repo.add_item(
+        display_name=display_name,
+        quantity=quantity,
+        unit=unit,
+        category=category,
+        notes=notes,
+        added_by_member_id=added_by_member_id,
+    )
+
+
+def set_checked_off(item_id: int, checked: bool) -> None:
+    shopping_list_repo.set_checked_off(item_id, checked)
+
+
+def delete_item(item_id: int) -> None:
+    shopping_list_repo.delete_item(item_id)
+
+
+def clear_all_items() -> None:
+    shopping_list_repo.clear_all_items()
+
+
+def clear_all_checked_off() -> None:
+    """Soft-delete only the checked-off active items."""
+    shopping_list_repo.clear_checked_off_items()
+
+
+# ---------------------------------------------------------------------------
+# NEW: Apply basket optimizer plan back into shopping list (planned_store_id)
+# ---------------------------------------------------------------------------
+
+def clear_planned_stores_for_active_list(*, include_checked_off: bool = False) -> int:
+    return shopping_list_repo.clear_planned_store_ids_for_active_items(include_checked_off=include_checked_off)
+
+
+def apply_optimizer_plan_to_active_list(
+    optimizer_result: Any,
+    *,
+    mode: str = "fast",
+    clear_first: bool = True,
+) -> Dict[str, Any]:
+    """
+    Takes BasketOptimizationResult from basket_optimizer_service and assigns planned_store_id
+    onto the ACTIVE shopping list items.
+
+    mode:
+      - "fast": use best_single_store_plan
+      - "savings": use best_two_store_plan
+
+    Behavior:
+      - clears existing planned_store_id for active items (optional)
+      - assigns planned_store_id per planned line
+      - if a line is HARD EXCLUDED, it will be left unassigned (planned_store_id = NULL)
+        so it stands out as “unplanned” and you can show a warning.
+
+    Returns a summary dict for UI.
+    """
+    mode_key = (mode or "fast").strip().lower()
+    stores_in_result = list(getattr(optimizer_result, "stores", []) or [])
+
+    if not stores_in_result:
+        return {
+            "ok": False,
+            "error": "No plan available to apply.",
+            "mode": mode_key,
+            "assigned": 0,
+            "unassigned": 0,
+            "cleared": 0,
+        }
+
+    result_mode = getattr(optimizer_result, "mode", "")
+    if result_mode == "one_store":
+        plan_label = "Fast trip (one store)"
+    else:
+        plan_label = "Savings (up to two stores)"
+
+    if clear_first:
+        cleared = clear_planned_stores_for_active_list(include_checked_off=False)
+    else:
+        cleared = 0
+
+    assignments: List[Tuple[int, Optional[int]]] = []
+    unassigned_hard_excluded = 0
+    skipped_no_id = 0
+
+    for store_plan in stores_in_result:
+        store_id = getattr(store_plan, "store_id", None)
+        for item_plan in list(getattr(store_plan, "items", []) or []):
+            item_id = getattr(item_plan, "item_id", None)
+            if item_id is None:
+                skipped_no_id += 1
+                continue
+
+            is_hard = bool(getattr(item_plan, "hard_excluded", False))
+            assigned_store = None if is_hard else store_id
+
+            if is_hard:
+                unassigned_hard_excluded += 1
+
+            assignments.append((int(item_id), int(assigned_store) if assigned_store is not None else None))
+
+    updated = shopping_list_repo.bulk_set_planned_store_ids_by_item_id(assignments)
+
+    warnings = list(getattr(optimizer_result, "warnings", []) or [])
+    if unassigned_hard_excluded > 0:
+        warnings = warnings + [f"{unassigned_hard_excluded} item(s) were hard-excluded by household preferences and were left unplanned."]
+
+    return {
+        "ok": True,
+        "mode": mode_key,
+        "plan_label": plan_label,
+        "cleared": cleared,
+        "attempted": len(assignments),
+        "updated": updated,
+        "assigned": sum(1 for _id, sid in assignments if sid is not None),
+        "unassigned": sum(1 for _id, sid in assignments if sid is None),
+        "unassigned_hard_excluded": unassigned_hard_excluded,
+        "skipped_no_id": skipped_no_id,
+        "warnings": warnings,
+    }
