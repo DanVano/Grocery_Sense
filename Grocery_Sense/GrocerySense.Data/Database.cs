@@ -98,6 +98,9 @@ public static class Database
             total_price      TEXT,
             raw_name         TEXT,
             confidence       INTEGER,
+            norm_unit_price  REAL,              -- normalized comparison price (per kg/each); set by UnitNormalization (Phase 3)
+            norm_unit        TEXT,
+            norm_note        TEXT,
             created_at       TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (item_id)         REFERENCES items(id)         ON DELETE CASCADE,
             FOREIGN KEY (store_id)        REFERENCES stores(id)        ON DELETE CASCADE,

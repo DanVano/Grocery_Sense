@@ -65,6 +65,10 @@ public record PriceStats(
     double? AvgPrice,
     int Count);
 
+// Best-effort current quote for an item/store (ports the dicts prices_repo returns). Unit is populated
+// for active-flyer quotes (norm_unit/unit/'each'); null for the most-recent-price fallback.
+public record PriceQuote(double UnitPrice, string Source, string? Unit = null);
+
 public record ShoppingListItem(
     int Id,
     string DisplayName,
