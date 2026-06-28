@@ -1,10 +1,48 @@
+using System.Text.Json;
+using Azure;
+using Azure.AI.DocumentIntelligence;
+using GrocerySense.Core.Abstractions;
+
 namespace GrocerySense.Integrations;
 
-// Port of reference-python/.../integrations/flyer_docint_client.py — Azure layout model for flyers.
-public sealed class FlyerDocIntClient
+// External layout OCR only; DB writes live in Core's FlyerIngestService. Mirrors AzureReceiptOcrClient
+// but uses the prebuilt-layout model (flyers are free-form pages, not a receipt schema). Network/cred-gated
+// and not unit-testable offline — verified by `dotnet build GrocerySense.Integrations` only.
+public sealed class FlyerDocIntClient : IFlyerLayoutClient
 {
-    public Task<AzureLayoutResult> AnalyzeLayoutFileAsync(string filePath, CancellationToken ct = default)
-        => throw new NotImplementedException("Port from flyer_docint_client.analyze_layout_file");
-}
+    private readonly string? _endpoint;
+    private readonly string? _apiKey;
+    private readonly string _locale;
 
-public record AzureLayoutResult(string Text, IReadOnlyList<Dictionary<string, object?>> Tables);
+    public FlyerDocIntClient(string? endpoint = null, string? apiKey = null, string locale = "en-US")
+    {
+        _endpoint = endpoint;
+        _apiKey = apiKey;
+        _locale = locale;
+    }
+
+    public async Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeLayoutFileAsync(
+        string filePath, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_endpoint) || string.IsNullOrWhiteSpace(_apiKey))
+            throw new InvalidOperationException(
+                "Azure DocumentIntelligence endpoint/apiKey are not configured. Supply them from the App composition root.");
+
+        var client = new DocumentIntelligenceClient(new Uri(_endpoint), new AzureKeyCredential(_apiKey));
+
+        var bytes = await File.ReadAllBytesAsync(filePath, ct);
+        var options = new AnalyzeDocumentOptions("prebuilt-layout", BinaryData.FromBytes(bytes)) { Locale = _locale };
+        var operation = await client.AnalyzeDocumentAsync(WaitUntil.Completed, options, ct);
+
+        // Use the raw response JSON (REST field shape) rather than the typed model, so the dict matches what
+        // FlyerIngestService navigates. The operation result is { status, analyzeResult: {...} }.
+        using var doc = JsonDocument.Parse(operation.GetRawResponse().Content);
+        var analyzeResult = doc.RootElement.TryGetProperty("analyzeResult", out var ar) ? ar : doc.RootElement;
+        var rawJson = JsonSerializer.Deserialize<Dictionary<string, object?>>(analyzeResult.GetRawText())
+                      ?? new Dictionary<string, object?>();
+
+        string operationId;
+        try { operationId = operation.Id; } catch { operationId = Guid.NewGuid().ToString("N"); }
+        return (operationId, rawJson);
+    }
+}
