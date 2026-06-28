@@ -1,3 +1,6 @@
+using System.Text.Json;
+using Azure;
+using Azure.AI.DocumentIntelligence;
 using GrocerySense.Core.Abstractions;
 
 namespace GrocerySense.Integrations;
@@ -5,14 +8,39 @@ namespace GrocerySense.Integrations;
 // External OCR only; DB writes live in Core's ReceiptIngestionService.
 public sealed class AzureReceiptOcrClient : IReceiptOcrClient
 {
+    private readonly string? _endpoint;
+    private readonly string? _apiKey;
+    private readonly string _locale;
+
     public AzureReceiptOcrClient(string? endpoint = null, string? apiKey = null, string locale = "en-US")
     {
-        // PORT: resolve creds from injected config; construct DocumentIntelligenceClient.
+        _endpoint = endpoint;
+        _apiKey = apiKey;
+        _locale = locale;
     }
 
-    public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
-        string filePath, int maxAttempts = 3, CancellationToken ct = default)
-        => throw new NotImplementedException("Port from azure_docint_client.AzureReceiptClient.analyze_receipt_file");
-}
+    public async Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
+        string filePath, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_endpoint) || string.IsNullOrWhiteSpace(_apiKey))
+            throw new InvalidOperationException(
+                "Azure DocumentIntelligence endpoint/apiKey are not configured. Supply them from the App composition root.");
 
-public record AzureReceiptResult(string Status, double? Confidence, Dictionary<string, object?> RawJson);
+        var client = new DocumentIntelligenceClient(new Uri(_endpoint), new AzureKeyCredential(_apiKey));
+
+        var bytes = await File.ReadAllBytesAsync(filePath, ct);
+        var options = new AnalyzeDocumentOptions("prebuilt-receipt", BinaryData.FromBytes(bytes)) { Locale = _locale };
+        var operation = await client.AnalyzeDocumentAsync(WaitUntil.Completed, options, ct);
+
+        // Use the raw response JSON (REST field shape) rather than the typed model, so the dict matches what
+        // ReceiptIngestionService navigates. The operation result is { status, analyzeResult: {...} }.
+        using var doc = JsonDocument.Parse(operation.GetRawResponse().Content);
+        var analyzeResult = doc.RootElement.TryGetProperty("analyzeResult", out var ar) ? ar : doc.RootElement;
+        var rawJson = JsonSerializer.Deserialize<Dictionary<string, object?>>(analyzeResult.GetRawText())
+                      ?? new Dictionary<string, object?>();
+
+        string operationId;
+        try { operationId = operation.Id; } catch { operationId = Guid.NewGuid().ToString("N"); }
+        return (operationId, rawJson);
+    }
+}

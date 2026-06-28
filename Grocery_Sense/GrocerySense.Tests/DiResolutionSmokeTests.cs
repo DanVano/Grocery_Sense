@@ -10,7 +10,7 @@ public class DiResolutionSmokeTests
     private sealed class FakeOcrClient : IReceiptOcrClient
     {
         public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
-            string filePath, int maxAttempts = 3, CancellationToken ct = default)
+            string filePath, CancellationToken ct = default)
             => Task.FromResult(("fake-op", new Dictionary<string, object?>()));
     }
 
