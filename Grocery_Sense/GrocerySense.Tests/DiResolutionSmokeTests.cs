@@ -21,6 +21,13 @@ public class DiResolutionSmokeTests
             => Task.FromResult<IReadOnlyList<Dictionary<string, object?>>>(Array.Empty<Dictionary<string, object?>>());
     }
 
+    private sealed class FakeFlyerLayoutClient : IFlyerLayoutClient
+    {
+        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeLayoutFileAsync(
+            string filePath, CancellationToken ct = default)
+            => Task.FromResult(("fake-op", new Dictionary<string, object?>()));
+    }
+
     [Fact]
     public void Every_registered_service_resolves()
     {
@@ -29,6 +36,7 @@ public class DiResolutionSmokeTests
         services.AddGrocerySenseCore(dbPath);
         services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
         services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
+        services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
 
         using var provider = services.BuildServiceProvider(validateScopes: true);
 
