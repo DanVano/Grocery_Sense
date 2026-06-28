@@ -265,6 +265,39 @@ public static class Database
         CREATE INDEX idx_flyer_deals_store_id ON flyer_deals(store_id);
         CREATE INDEX idx_flyer_deals_item_id ON flyer_deals(item_id);
         """,
+
+        // ----- Migration 2: price-drop alerts (PriceDropAlertService, Phase 4) -----
+        // Port of the table price_drop_alert_service.py self-creates. Prices are unit-price doubles (REAL),
+        // matching the engine math + the PriceDropAlert record. The Python "add missing column" ALTER cruft
+        // is N/A on a clean start. suggested_qty is computed-but-not-persisted (Python omits it too).
+        """
+        CREATE TABLE price_drop_alerts (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id               INTEGER,
+            store_id              INTEGER,
+            store_name            TEXT,
+            item_name             TEXT,
+            current_price         REAL,
+            usual_price           REAL,
+            pct_below_usual       REAL,
+            six_month_low         REAL,
+            pct_above_low         REAL,
+            alert_kind            TEXT,
+            is_staple             INTEGER NOT NULL DEFAULT 0,
+            receipt_samples       INTEGER NOT NULL DEFAULT 0,
+            basis                 TEXT,
+            source                TEXT,
+            last_seen_at_or_below TEXT,
+            notes                 TEXT,
+            created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            status                TEXT NOT NULL DEFAULT 'open',
+            dismissed_at          TEXT
+        );
+        CREATE INDEX idx_price_drop_alerts_status ON price_drop_alerts(status);
+        CREATE INDEX idx_price_drop_alerts_created_at ON price_drop_alerts(created_at);
+        CREATE INDEX idx_price_drop_alerts_dismissed
+            ON price_drop_alerts(dismissed_at) WHERE dismissed_at IS NOT NULL;
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

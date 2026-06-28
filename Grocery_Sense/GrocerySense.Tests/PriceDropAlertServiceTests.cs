@@ -1,0 +1,91 @@
+using GrocerySense.Core;
+using GrocerySense.Data.Repositories;
+using Microsoft.Data.Sqlite;
+using Xunit;
+
+namespace GrocerySense.Tests;
+
+public sealed class PriceDropAlertServiceTests
+{
+    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
+
+    private static int AddReceipt(SqliteConnection conn, int storeId, string date)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
+        cmd.Parameters.AddWithValue("$s", storeId);
+        cmd.Parameters.AddWithValue("$d", date);
+        return (int)(long)cmd.ExecuteScalar()!;
+    }
+
+    // Staple item: 4 receipts @ $10 (the usual), plus a recent $7 (30% below). Returns (item, store).
+    private static (int Item, int Store) SeedStapleWithDrop(TempDb db)
+    {
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        foreach (var d in new[] { 40, 30, 20, 10 })
+        {
+            var rid = AddReceipt(db.Conn, store, DaysAgo(d));
+            PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "receipt", date: DaysAgo(d), receiptId: rid);
+        }
+        var recent = AddReceipt(db.Conn, store, DaysAgo(0));
+        PricesRepo.AddPricePoint(db.Conn, item, store, 7.0, "each", source: "receipt", date: DaysAgo(0), receiptId: recent);
+        return (item, store);
+    }
+
+    [Fact]
+    public void Engine_emits_below_usual_alert_for_a_staple_drop()
+    {
+        using var db = new TempDb();
+        SeedStapleWithDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.RefreshEngineAlerts());
+
+        var a = Assert.Single(svc.GetAlerts());
+        Assert.Equal("below_usual", a.AlertKind);
+        Assert.Equal(7.0, a.CurrentPrice, 4);
+        Assert.Equal(10.0, a.UsualPrice!.Value, 4);
+        Assert.Equal(30.0, a.PctBelowUsual!.Value, 1);
+        Assert.True(a.IsStaple);
+        Assert.Equal("receipt_median", a.Basis);
+        Assert.Equal("engine", a.Source);
+    }
+
+    [Fact]
+    public void Dismiss_suppresses_the_same_alert_on_refresh()
+    {
+        using var db = new TempDb();
+        SeedStapleWithDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+        svc.RefreshEngineAlerts();
+
+        svc.DismissAlert(svc.GetAlerts().Single().Id!.Value);
+
+        Assert.Equal(0, svc.RefreshEngineAlerts()); // within the 30-day suppression window
+        Assert.Empty(svc.GetAlerts());
+    }
+
+    [Fact]
+    public void ScanRecentReceipts_opens_one_alert_per_item_store_for_cheap_lines()
+    {
+        using var db = new TempDb();
+        SeedStapleWithDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.ScanRecentReceipts(21));
+
+        var a = Assert.Single(svc.GetOpenAlerts());
+        Assert.Equal("below_usual", a.AlertKind);
+        Assert.Equal("receipt", a.Source);
+        Assert.Equal(7.0, a.CurrentPrice, 4);
+    }
+
+    [Fact]
+    public void No_stores_yields_no_alerts()
+    {
+        using var db = new TempDb();
+        Assert.Empty(new PriceDropAlertService(db.Factory).ComputeEngineAlerts());
+    }
+}
