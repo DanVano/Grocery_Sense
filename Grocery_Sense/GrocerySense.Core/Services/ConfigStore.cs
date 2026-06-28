@@ -185,6 +185,10 @@ public sealed class ConfigStore
         FavoriteStoreIds = c.FavoriteStoreIds ?? new List<int>(),
         MonthlyBudget = c.MonthlyBudget is > 0 ? c.MonthlyBudget : null,
         GasCostPerKm = c.GasCostPerKm > 0 ? c.GasCostPerKm : 0.18, // gas unused (optimizer redesign) but kept valid.
+        // Optimizer settings: clamp missing/invalid (e.g. 0 from an older config) back to the defaults.
+        MaxStores = c.MaxStores > 0 ? c.MaxStores : 3,
+        MinItemSavingPct = c.MinItemSavingPct > 0 ? c.MinItemSavingPct : 0.10,
+        MinStoreSaving = c.MinStoreSaving > 0 ? c.MinStoreSaving : 5.0,
         Household = EnsureHousehold(c.Household),
     };
 
