@@ -293,20 +293,24 @@ Plus planning tests (mirror `tests/planning/`) + no-partial-rows test on plan wr
 
 ---
 
-## Phase 6 — Flyer pipeline (interface-based)  ☐
+## Phase 6 — Flyer pipeline (interface-based)  ✅ DONE (2026-06-28)
 
 | Port FROM | Port INTO |
 |---|---|
-| `integrations/flyer_docint_client.py` | `Integrations/FlyerDocIntClient.cs` |
+| `integrations/flyer_docint_client.py` | `Integrations/FlyerDocIntClient.cs : IFlyerLayoutClient` |
 | `integrations/flipp_client.py` | `Integrations/FlippClient.cs : IFlyerProvider` (stub, empty) |
 | `services/flyer_ingest_service.py` | `Core/Services/FlyerIngestService.cs` |
 | `services/flyer_sync_service.py` + `flyer_sync_scheduler.py` | `Core/Services/FlyerSyncService.cs` + `FlyerSyncScheduler.cs` |
 
-- [ ] `FlippClient` stays empty — **don't fabricate deals.** Behind `IFlyerProvider` so a real provider
+- [x] `FlippClient` stays empty — **don't fabricate deals.** Behind `IFlyerProvider` so a real provider
       drops in later.
-- [ ] Flyer ingestion in a transaction.
-- [ ] Mobile: replace the `threading.Timer` scheduler with **sync-on-resume / manual button**
-      (iOS/Android restrict background execution); hook app lifecycle in the App project.
+- [x] Flyer ingestion in a transaction. (Single tx; prep pre-tx like receipts; no-partial-rows test.)
+- [x] Mobile: replaced the `threading.Timer` scheduler with **sync-on-resume / manual button**
+      (`CheckOnResumeAsync`/`RequestSyncAsync`, single-flighted, `SyncCompleted` event); App lifecycle hook
+      is deferred to the Phase-8 UI.
+- [x] **New `IFlyerLayoutClient` Core seam** for the layout client (distinct from `IFlyerProvider`); decisions
+      in IMPLEMENTATION_NOTES "Phase 6". `FlyerDocIntClient` compile-verified only. **Skipped**
+      `ingest_dealrecords_json` (no v1 route). 262 tests, 0 skipped; App head builds on net10.0-windows.
 
 ---
 

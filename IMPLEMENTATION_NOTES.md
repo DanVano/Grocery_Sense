@@ -90,3 +90,54 @@ transaction (matches Python). 212 tests, 0 skipped.
   also bound as `decimal`. Both read back cleanly (the prices layer reads `unit_price` as `double`, which
   parses the same TEXT). `norm_unit_price`/`quantity` stay `double` (REAL).
 - **`IngestOutcome` expanded** with `DuplicateReason` ("file_hash"|"signature") and `ReplacedExisting`.
+
+---
+
+## Phase 6 — Flyer pipeline
+
+`FlyerDocIntClient` (Azure prebuilt-layout, API half) behind a new `IFlyerLayoutClient` Core seam +
+`FlyerIngestService` (manual asset ingest, DB half) + `FlyerSyncService`/`FlyerSyncScheduler` (provider
+sync, redesigned for mobile). `FlippClient` stays the empty `IFlyerProvider` stub. 262 tests, 0 skipped;
+App head builds on net10.0-windows.
+
+- **New seam `IFlyerLayoutClient` (not `IFlyerProvider`).** Two distinct flyer flows: manual photo →
+  layout OCR → ingest, and auto-sync → provider deals. They need different abstractions. `IFlyerProvider`
+  (FlippClient) is the sync provider; `IFlyerLayoutClient` (FlyerDocIntClient) is the layout client the
+  ingest service depends on — mirrors `IReceiptOcrClient`, keeps `Core ↛ Integrations`.
+- **FlyerDocIntClient mirrors AzureReceiptOcrClient** but uses `"prebuilt-layout"` (flyers are free-form
+  pages, not a receipt schema) and returns the raw `analyzeResult` as `Dictionary<string,object?>`.
+  Compile-verified only (`dotnet build GrocerySense.Integrations`); same cred path as receipts (one Azure
+  DocumentIntelligence resource → reuses `azure_docint_endpoint`/`_api_key`), de-duplicated in the App root.
+- **FlyerIngestService = single transaction (stronger than Python).** Python's `ingest_assets` wrote via
+  per-call repo connections; C# does Azure + extraction + item-mapping/unit-norm prep pre-transaction (mapper
+  opens its own conns, like receipts), then writes batch/asset/raw-json/deal rows in ONE tx with rollback.
+  Deal rows are staged with placeholder `FlyerId`/`AssetId` and stamped via `record with` inside the tx (deals
+  FK the just-inserted asset). Raw layout JSON is also dropped to disk as a reprocess cache; a rolled-back DB
+  write leaves only those harmless files.
+- **Flyers keep `item_id` NULL when unmapped** — unlike receipts, flyer ingest does NOT auto-create items
+  (matches Python `_map_to_item`). Reuses the injected mapper's 0.78 accept (Python flyer used 0.75 — same
+  3-point divergence noted in Phase 5).
+- **Navigator handles plain dicts AND `JsonElement`.** `AsList` accepts `IReadOnlyList`/`IEnumerable`
+  (canned test data) and `JsonElement` arrays (live Azure) — so the canned fake needs no JSON round-trip,
+  unlike the receipt tests.
+- **Scope:** only `ingest_assets` ported (the v1 manual-photo path, the scaffold's surface). Python's
+  `ingest_dealrecords_json` (pre-extracted JSON) has no v1 route → skipped until one needs it.
+- **Money-parse guards** (`SafeFloatMoney` strict-money regex, `ExtractPriceText` flyer forms) ported as
+  `internal` + `InternalsVisibleTo("GrocerySense.Tests")` for direct unit coverage — they are the
+  "never fabricate a price" path (CLAUDE: fail loud, never fake).
+- **Scheduler redesign (locked decision): sync-on-resume + manual button, no background timer.** Python armed
+  a `threading.Timer` hourly poll; iOS/Android restrict background execution. `FlyerSyncScheduler` exposes
+  `CheckOnResumeAsync` (throttled) + `RequestSyncAsync` (manual force), single-flighted via a `SemaphoreSlim`
+  (a resume tick + a button press can race; the loser returns `"busy"`), and fires `SyncCompleted` after a run
+  so the App can trigger the price-drop alert check (the C# analog of Python's `on_sync_complete`). The App
+  wires these to lifecycle/button (deferred — UI is Phase 8).
+- **Sync throttle meta lives beside the DB** (`flyer_sync_meta.json` in the app-data dir, derived from
+  `factory.DbPath`), atomic temp→replace. Unreadable/malformed meta counts as "never synced" (fail toward
+  syncing). 3.5-day interval; `force` bypasses it.
+- **Sync persists raw provider deals (no mapping).** `RunSyncAsync` maps provider dicts → `flyer_deals` rows
+  (mirrors Python `insert_deals`: `deal_total` from `deal_total`/`price`, no unit-norm/item-map) in one tx per
+  store, with per-store error capture. FlippClient stub returns `[]`, so production inserts nothing until a
+  real provider lands — by design (don't fabricate deals).
+- **`FlyerIngestResult` reshaped** from the speculative `(BatchesCreated, DealsCreated, SkippedUrls, Errors)`
+  to `(FlyerId, AssetsCount, DealsCount, RawJsonCount)` to match what a per-call ingest produces.
+  `FlyerSyncResult` was already correct.
