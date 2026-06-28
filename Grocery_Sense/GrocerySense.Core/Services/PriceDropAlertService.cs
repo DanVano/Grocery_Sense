@@ -44,12 +44,6 @@ public sealed class PriceDropAlertService
 
     public IReadOnlyList<PriceDropAlert> GetAlerts(int limit = 250)
     {
-        var open = GetOpenAlerts();
-        return limit > 0 ? open.Take(limit).ToList() : open;
-    }
-
-    public IReadOnlyList<PriceDropAlert> GetOpenAlerts()
-    {
         using var conn = _factory.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
@@ -57,11 +51,18 @@ public sealed class PriceDropAlertService
             "six_month_low, pct_above_low, alert_kind, is_staple, receipt_samples, basis, source, " +
             "last_seen_at_or_below, notes, created_at, status " +
             "FROM price_drop_alerts WHERE status = 'open' ORDER BY created_at DESC";
+        if (limit > 0)
+        {
+            cmd.CommandText += " LIMIT $limit";
+            cmd.Parameters.AddWithValue("$limit", limit);
+        }
         using var r = cmd.ExecuteReader();
         var alerts = new List<PriceDropAlert>();
         while (r.Read()) alerts.Add(MapAlertRow(r));
         return alerts;
     }
+
+    public IReadOnlyList<PriceDropAlert> GetOpenAlerts() => GetAlerts(0);
 
     public void DismissAlert(int alertId)
     {
@@ -82,9 +83,8 @@ public sealed class PriceDropAlertService
 
         var stapleItemIds = PricesRepo.ListStapleItemIds(conn, StapleLookbackDays, 3, 4)
             .ToDictionary(s => s.ItemId, s => (s.LineCount, s.DistinctReceipts));
-        if (staplesOnly && stapleItemIds.Count == 0) return Array.Empty<PriceDropAlert>();
-
-        var itemIds = stapleItemIds.Keys.ToList();
+        var itemIds = staplesOnly ? stapleItemIds.Keys.ToList() : ItemsRepo.ListItems(conn).Select(i => i.Id).ToList();
+        if (itemIds.Count == 0) return Array.Empty<PriceDropAlert>();
         var storeIds = stores.Select(s => s.Id).ToList();
         var storeNameMap = stores.ToDictionary(s => s.Id, s => s.Name);
 
@@ -267,10 +267,19 @@ public sealed class PriceDropAlertService
                 pctBelow, sixLow, pctAboveLow, "below_usual", false, samples, basis, "receipt", null, notes);
         }
 
+        var inserted = 0;
         using var tx = conn.BeginTransaction();
-        foreach (var a in best.Values) InsertAlert(conn, tx, a, source: "receipt");
+        var open = LoadOpenKeys(conn, tx, "receipt");
+        foreach (var a in best.Values)
+        {
+            var key = new AlertKey(a.ItemId, a.StoreId, a.AlertKind);
+            if (open.Contains(key)) continue;
+            InsertAlert(conn, tx, a, source: "receipt");
+            open.Add(key);
+            inserted++;
+        }
         tx.Commit();
-        return best.Count;
+        return inserted;
     }
 
     // ----------------------- persistence -----------------------
@@ -332,6 +341,20 @@ public sealed class PriceDropAlertService
             "SELECT item_id, store_id, alert_kind FROM price_drop_alerts " +
             "WHERE status = 'dismissed' AND dismissed_at IS NOT NULL AND date(dismissed_at) >= date('now', $window)");
         cmd.Parameters.AddWithValue("$window", $"-{AlertSuppressionDays} days");
+        using var r = cmd.ExecuteReader();
+        var keys = new HashSet<AlertKey>();
+        while (r.Read())
+            keys.Add(new AlertKey(r.IsDBNull(0) ? 0 : r.GetInt32(0), r.IsDBNull(1) ? 0 : r.GetInt32(1),
+                r.IsDBNull(2) ? "" : r.GetString(2)));
+        return keys;
+    }
+
+    private static HashSet<AlertKey> LoadOpenKeys(SqliteConnection conn, SqliteTransaction? tx, string? source = null)
+    {
+        var sql = "SELECT item_id, store_id, alert_kind FROM price_drop_alerts WHERE status = 'open'";
+        if (!string.IsNullOrEmpty(source)) sql += " AND source = $source";
+        using var cmd = Cmd(conn, tx, sql);
+        if (!string.IsNullOrEmpty(source)) cmd.Parameters.AddWithValue("$source", source);
         using var r = cmd.ExecuteReader();
         var keys = new HashSet<AlertKey>();
         while (r.Read())

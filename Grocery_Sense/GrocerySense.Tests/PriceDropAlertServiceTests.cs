@@ -34,6 +34,16 @@ public sealed class PriceDropAlertServiceTests
         return (item, store);
     }
 
+    private static (int Item, int Store) SeedNonStapleManualDrop(TempDb db)
+    {
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Saffron").Id;
+        foreach (var d in new[] { 40, 30, 20 })
+            PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "manual", date: DaysAgo(d));
+        PricesRepo.AddPricePoint(db.Conn, item, store, 7.0, "each", source: "manual", date: DaysAgo(0));
+        return (item, store);
+    }
+
     [Fact]
     public void Engine_emits_below_usual_alert_for_a_staple_drop()
     {
@@ -80,6 +90,33 @@ public sealed class PriceDropAlertServiceTests
         Assert.Equal("below_usual", a.AlertKind);
         Assert.Equal("receipt", a.Source);
         Assert.Equal(7.0, a.CurrentPrice, 4);
+    }
+
+    [Fact]
+    public void ScanRecentReceipts_does_not_duplicate_existing_open_receipt_alert()
+    {
+        using var db = new TempDb();
+        SeedStapleWithDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.ScanRecentReceipts(21));
+        Assert.Equal(0, svc.ScanRecentReceipts(21));
+
+        Assert.Single(svc.GetOpenAlerts());
+    }
+
+    [Fact]
+    public void StaplesOnly_false_scans_non_staple_tracked_items()
+    {
+        using var db = new TempDb();
+        SeedNonStapleManualDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Empty(svc.ComputeEngineAlerts(staplesOnly: true));
+
+        var alert = Assert.Single(svc.ComputeEngineAlerts(staplesOnly: false));
+        Assert.False(alert.IsStaple);
+        Assert.Equal("below_usual", alert.AlertKind);
     }
 
     [Fact]
