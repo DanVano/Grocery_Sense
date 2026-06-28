@@ -114,6 +114,18 @@ public record ReceiptLineItemRow(
     int Id, int LineIndex, int? ItemId, string CanonicalName, string Description,
     double? Quantity, decimal? UnitPrice, decimal? LineTotal, decimal? Discount, int? Confidence);
 
+// Ingest write inputs (built by ReceiptIngestionService, written atomically by ReceiptsRepo.IngestReceipt).
+// Money stays as double through parsing; the repo converts to decimal at the receipts/line-items boundary
+// and binds prices as double (matching how the rest of the prices layer treats unit_price).
+public record ReceiptIngestLine(
+    int LineIndex, int? ItemId, string Description, double? Quantity, double? UnitPrice, double? LineTotal,
+    double? Discount, int? Confidence, string Unit, double? NormUnitPrice, string? NormUnit, string? NormNote);
+
+public record ReceiptIngest(
+    int StoreId, string PurchaseDate, double? Subtotal, double? Tax, double? Total, string FilePath,
+    int? ImageConfidence, string OperationId, string? JsonPath, string RawJson, string? FileHash,
+    string? Signature, IReadOnlyList<ReceiptIngestLine> Lines);
+
 public record MonthSpend(string Month, decimal Total, int ReceiptCount);
 
 public record SpendTrendPoint(string Month, decimal Total, int ReceiptCount);

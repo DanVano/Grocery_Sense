@@ -144,6 +144,139 @@ public static class ReceiptsRepo
         return agg.Select(kv => new SpendTrendPoint(kv.Key, kv.Value.Total, kv.Value.Count)).ToList();
     }
 
+    // ---- Ingest dedupe lookups + transactional receipt write (ReceiptIngestionService, Phase 5) ----
+
+    public static int? FindReceiptIdByFileHash(SqliteConnection conn, string fileHash, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx, "SELECT receipt_id FROM receipt_file_hashes WHERE file_hash = $h");
+        cmd.Parameters.AddWithValue("$h", fileHash);
+        return cmd.ExecuteScalar() is { } v and not DBNull ? Convert.ToInt32(v) : null;
+    }
+
+    public static int? FindReceiptIdBySignature(SqliteConnection conn, string signature, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx, "SELECT receipt_id FROM receipt_signatures WHERE signature = $s");
+        cmd.Parameters.AddWithValue("$s", signature);
+        return cmd.ExecuteScalar() is { } v and not DBNull ? Convert.ToInt32(v) : null;
+    }
+
+    // Writes receipt + raw_json + line_items + prices + dedupe links. Caller owns the transaction.
+    public static int IngestReceipt(SqliteConnection conn, ReceiptIngest r, SqliteTransaction tx)
+    {
+        var now = Db.NowIso();
+        using (var cmd = Db.Command(conn, tx,
+            """
+            INSERT INTO receipts (store_id, purchase_date, subtotal_amount, tax_amount, total_amount,
+                source, file_path, image_overall_confidence, keep_image_until, azure_request_id, created_at)
+            VALUES ($store, $date, $sub, $tax, $total, 'receipt', $path, $conf, NULL, $op, $now)
+            """))
+        {
+            cmd.Parameters.AddWithValue("$store", r.StoreId);
+            cmd.Parameters.AddWithValue("$date", r.PurchaseDate);
+            cmd.Parameters.AddWithValue("$sub", Db.OrNull(Dec(r.Subtotal)));
+            cmd.Parameters.AddWithValue("$tax", Db.OrNull(Dec(r.Tax)));
+            cmd.Parameters.AddWithValue("$total", Db.OrNull(Dec(r.Total)));
+            cmd.Parameters.AddWithValue("$path", r.FilePath);
+            cmd.Parameters.AddWithValue("$conf", Db.OrNull(r.ImageConfidence));
+            cmd.Parameters.AddWithValue("$op", r.OperationId);
+            cmd.Parameters.AddWithValue("$now", now);
+            cmd.ExecuteNonQuery();
+        }
+        var receiptId = (int)Db.LastRowId(conn, tx);
+
+        using (var cmd = Db.Command(conn, tx,
+            """
+            INSERT INTO receipt_raw_json (receipt_id, operation_id, json_path, raw_json, created_at)
+            VALUES ($rid, $op, $path, $json, $now)
+            """))
+        {
+            cmd.Parameters.AddWithValue("$rid", receiptId);
+            cmd.Parameters.AddWithValue("$op", r.OperationId);
+            cmd.Parameters.AddWithValue("$path", Db.OrNull(r.JsonPath));
+            cmd.Parameters.AddWithValue("$json", r.RawJson);
+            cmd.Parameters.AddWithValue("$now", now);
+            cmd.ExecuteNonQuery();
+        }
+
+        foreach (var li in r.Lines)
+        {
+            using var cmd = Db.Command(conn, tx,
+                """
+                INSERT INTO receipt_line_items (receipt_id, line_index, item_id, description, quantity,
+                    unit_price, line_total, discount, confidence, created_at)
+                VALUES ($rid, $idx, $item, $desc, $qty, $price, $linetotal, $disc, $conf, $now)
+                """);
+            cmd.Parameters.AddWithValue("$rid", receiptId);
+            cmd.Parameters.AddWithValue("$idx", li.LineIndex);
+            cmd.Parameters.AddWithValue("$item", Db.OrNull(li.ItemId));
+            cmd.Parameters.AddWithValue("$desc", li.Description);
+            cmd.Parameters.AddWithValue("$qty", Db.OrNull(li.Quantity));
+            cmd.Parameters.AddWithValue("$price", Db.OrNull(Dec(li.UnitPrice)));
+            cmd.Parameters.AddWithValue("$linetotal", Db.OrNull(Dec(li.LineTotal)));
+            cmd.Parameters.AddWithValue("$disc", Db.OrNull(Dec(li.Discount)));
+            cmd.Parameters.AddWithValue("$conf", Db.OrNull(li.Confidence));
+            cmd.Parameters.AddWithValue("$now", now);
+            cmd.ExecuteNonQuery();
+
+            if (li.UnitPrice is null || li.ItemId is null) continue;
+            using var pcmd = Db.Command(conn, tx,
+                """
+                INSERT INTO prices (item_id, store_id, receipt_id, flyer_source_id, source, date,
+                    unit_price, unit, quantity, total_price, raw_name, confidence, norm_unit_price, norm_unit,
+                    norm_note, created_at)
+                VALUES ($item, $store, $rid, NULL, 'receipt', $date, $price, $unit, $qty, $total, $raw, $conf,
+                    $nuprice, $nunit, $nnote, $now)
+                """);
+            pcmd.Parameters.AddWithValue("$item", li.ItemId.Value);
+            pcmd.Parameters.AddWithValue("$store", r.StoreId);
+            pcmd.Parameters.AddWithValue("$rid", receiptId);
+            pcmd.Parameters.AddWithValue("$date", r.PurchaseDate);
+            pcmd.Parameters.AddWithValue("$price", Dec(li.UnitPrice)!);
+            pcmd.Parameters.AddWithValue("$unit", li.Unit);
+            pcmd.Parameters.AddWithValue("$qty", Db.OrNull(li.Quantity));
+            pcmd.Parameters.AddWithValue("$total", Db.OrNull(Dec(li.LineTotal)));
+            pcmd.Parameters.AddWithValue("$raw", li.Description);
+            pcmd.Parameters.AddWithValue("$conf", Db.OrNull(li.Confidence));
+            pcmd.Parameters.AddWithValue("$nuprice", Db.OrNull(li.NormUnitPrice));
+            pcmd.Parameters.AddWithValue("$nunit", Db.OrNull(li.NormUnit));
+            pcmd.Parameters.AddWithValue("$nnote", Db.OrNull(li.NormNote));
+            pcmd.Parameters.AddWithValue("$now", now);
+            pcmd.ExecuteNonQuery();
+        }
+
+        if (!string.IsNullOrEmpty(r.FileHash))
+            InsertFileHash(conn, tx, r.FileHash, receiptId, r.FilePath, now);
+        if (!string.IsNullOrEmpty(r.Signature))
+            InsertSignature(conn, tx, r.Signature, receiptId, now);
+
+        return receiptId;
+    }
+
+    private static void InsertFileHash(SqliteConnection conn, SqliteTransaction tx, string fileHash, int receiptId,
+        string? filePath, string now)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "INSERT INTO receipt_file_hashes (file_hash, receipt_id, file_path, created_at) VALUES ($h, $rid, $p, $now)");
+        cmd.Parameters.AddWithValue("$h", fileHash);
+        cmd.Parameters.AddWithValue("$rid", receiptId);
+        cmd.Parameters.AddWithValue("$p", Db.OrNull(filePath));
+        cmd.Parameters.AddWithValue("$now", now);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void InsertSignature(SqliteConnection conn, SqliteTransaction tx, string signature, int receiptId,
+        string now)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "INSERT INTO receipt_signatures (signature, receipt_id, created_at) VALUES ($s, $rid, $now)");
+        cmd.Parameters.AddWithValue("$s", signature);
+        cmd.Parameters.AddWithValue("$rid", receiptId);
+        cmd.Parameters.AddWithValue("$now", now);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static decimal? Dec(double? v) => v is { } x ? (decimal)x : null;
+
     public static void DeleteReceiptCascade(SqliteConnection conn, int receiptId, SqliteTransaction? tx = null)
         => InTransaction(conn, tx, t => DeleteReceiptRows(conn, t, receiptId));
 
