@@ -67,7 +67,8 @@ public record ApplyPlanResult(
     bool Ok, string Mode, string? PlanLabel, int Cleared, int Attempted, int Updated,
     int Assigned, int Unassigned, int UnassignedHardExcluded, IReadOnlyList<string> Warnings, string? Error);
 
-public record FlyerIngestResult(int BatchesCreated, int DealsCreated, IReadOnlyList<string> SkippedUrls, IReadOnlyList<string> Errors);
+// Outcome of a manual flyer ingest (one batch per call). Mirrors the Python FlyerIngestResult.
+public record FlyerIngestResult(int FlyerId, int AssetsCount, int DealsCount, int RawJsonCount);
 
 public record FlyerSyncResult(int StoresSynced, int DealsInserted, string? SkippedReason, IReadOnlyList<string> Errors)
 {

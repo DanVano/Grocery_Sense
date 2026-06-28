@@ -5,6 +5,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Flyer money-parse guards (SafeFloatMoney/ExtractPriceText) are internal but get direct test coverage. -->
+    <InternalsVisibleTo Include="GrocerySense.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FuzzySharp" Version="2.0.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
   </ItemGroup>
