@@ -58,3 +58,35 @@ All Phase-1 skipped fixtures now run green + a preference-merge test. 184 tests,
     sanitization" actually landed.
   - Cache invalidates via the `ConfigStore.Changed` event from Task 10 (Save only; an out-of-band file edit
     won't refresh until next Save — fine for the single-user app that owns the file).
+
+---
+
+## Phase 5 — Receipt ingest
+
+`ReceiptIngestionService` (DB half) + `AzureReceiptOcrClient` (API half) behind `IReceiptOcrClient`.
+Pipeline: file-SHA256 dedupe -> OCR -> signature dedupe (merchant+date+total) -> per-line resolve
+(IngredientMapping + UnitNormalization + MultiBuy) -> single-transaction write of
+receipts/raw_json/line_items/prices + dedupe links. Item/alias/unit writes happen BEFORE the receipt
+transaction (matches Python). 212 tests, 0 skipped.
+
+- **SQL stays in `ReceiptsRepo`.** Added `FindReceiptIdByFileHash`, `FindReceiptIdBySignature`, and a
+  transactional `IngestReceipt(...)`; the service owns the receipt transaction. Failure leaves zero
+  receipt/raw/line/price/dedupe rows; item/alias prep may already have happened.
+- **Raw-JSON parser uses the Azure shape.** Tests serialize their canned dictionaries through `JsonSerializer`
+  first, so parser coverage uses the same top-level `Dictionary` + nested `JsonElement` shape as live OCR.
+- **OCR client returns the raw `analyzeResult` JSON** (REST field shape: `valueString`/`valueArray`/
+  `valueCurrency.amount`/...), not the typed SDK model — so the dict matches what the parser navigates. Real
+  Azure SDK 1.0.0 signature confirmed against the installed package:
+  `new AnalyzeDocumentOptions("prebuilt-receipt", BinaryData.FromBytes(bytes)) { Locale = … }` ->
+  `AnalyzeDocumentAsync(WaitUntil.Completed, options, ct)`; operation id via `operation.Id` (try/catch -> GUID).
+- **`AzureReceiptOcrClient` is compile-verified only** — needs a live endpoint + key. App composition reads env
+  (`GROCERY_SENSE_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` / `_API_KEY`) or SecureStorage keys
+  (`azure_docint_endpoint` / `azure_docint_api_key`). Behavior is confirmed on-device later; Phase 9 routes it
+  through a backend proxy before release. `dotnet test` (Tests project) does not build Integrations, so this file
+  is checked with a separate `dotnet build GrocerySense.Integrations`.
+- **Ingest uses the injected mapper's 0.78 accept threshold**; Python receipt-ingest used 0.75 — a 3-point
+  divergence, not worth a second mapper instance + DI default-value risk.
+- **Money binding:** receipts + line-items bound as `decimal` (TEXT columns); prices `unit_price`/`total_price`
+  also bound as `decimal`. Both read back cleanly (the prices layer reads `unit_price` as `double`, which
+  parses the same TEXT). `norm_unit_price`/`quantity` stay `double` (REAL).
+- **`IngestOutcome` expanded** with `DuplicateReason` ("file_hash"|"signature") and `ReplacedExisting`.
