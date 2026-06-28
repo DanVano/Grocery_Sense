@@ -89,7 +89,10 @@ public record PriceDropAlert(
     double? SuggestedQty = null, string? SuggestedQtyNote = null,
     int? Id = null, string? CreatedAt = null, string? Status = null);
 
-public record IngestOutcome(int? ReceiptId, bool WasDuplicate, string? OperationId, string? Error);
+// Outcome of a receipt ingest. DuplicateReason is "file_hash" | "signature" when WasDuplicate.
+public record IngestOutcome(
+    int? ReceiptId, bool WasDuplicate, string? OperationId, string? Error,
+    string? DuplicateReason = null, bool ReplacedExisting = false);
 
 // Recipe wrapper — port of recipes/recipe_engine.py Recipe.
 public sealed record Recipe(Dictionary<string, object?> Raw)
