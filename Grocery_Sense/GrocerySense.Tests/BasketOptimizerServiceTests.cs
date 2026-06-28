@@ -24,10 +24,10 @@ public sealed class BasketOptimizerServiceTests : IDisposable
     private static int Store(TempDb db, string name) => StoresRepo.CreateStore(db.Conn, name).Id;
 
     // Create an item, add it to the active list, return its id.
-    private static int Listed(TempDb db, string name)
+    private static int Listed(TempDb db, string name, double quantity = 1.0)
     {
         var id = ItemsRepo.CreateItem(db.Conn, name).Id;
-        ShoppingListRepo.AddItem(db.Conn, name, itemId: id);
+        ShoppingListRepo.AddItem(db.Conn, name, quantity, itemId: id);
         return id;
     }
 
@@ -187,6 +187,39 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         Assert.Equal("fewest_stops", r.Mode);
     }
 
+    [Fact]
+    public void Totals_are_quantity_weighted()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var store = Store(db, "A");
+        var milk = Listed(db, "milk", quantity: 3);
+        Price(db, milk, store, 2);
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Equal(6, r.BasketTotalEstimated);
+        Assert.Equal(6, Assert.Single(r.Stores).TotalEstimated);
+    }
+
+    [Fact]
+    public void Hybrid_assignment_does_not_exceed_max_stores()
+    {
+        using var db = new TempDb();
+        var (svc, config) = Build(db);
+        config.Save(config.Load() with { MaxStores = 2 });
+
+        int a = Store(db, "A"), b = Store(db, "B"), c = Store(db, "C");
+        int x = Listed(db, "x"), y = Listed(db, "y"), z = Listed(db, "z");
+        Price(db, x, a, 1);
+        Price(db, y, b, 10);
+        Price(db, z, c, 10);
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.True(r.Stores.Count <= 2);
+    }
+
     // Plan write-back: planned_store_id assigned per the plan, in one transaction.
     [Fact]
     public void ApplyOptimizerPlan_writes_planned_store_ids()
@@ -232,5 +265,24 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         // The pre-set assignment survived (clear + write rolled back together).
         var row = ShoppingListRepo.ListActiveItems(db.Conn).Single(r => r.ItemId == item);
         Assert.Equal(store, row.PlannedStoreId);
+    }
+
+    [Fact]
+    public void ApplyOptimizerPlan_does_not_duplicate_hard_excluded_warning()
+    {
+        using var db = new TempDb();
+        var (svc, config) = Build(db);
+        var cfg = config.Load();
+        cfg.Household.Members[0].Profile["hard_excludes"] = new List<string> { "pork" };
+        config.Save(cfg);
+
+        var store = Store(db, "A");
+        var pork = Listed(db, "pork chops");
+        Price(db, pork, store, 8);
+
+        var result = svc.Optimize("best_savings");
+        var applied = new ShoppingListService(db.Factory).ApplyOptimizerPlanToActiveList(result);
+
+        Assert.Single(applied.Warnings, w => w.Contains("hard-excluded"));
     }
 }

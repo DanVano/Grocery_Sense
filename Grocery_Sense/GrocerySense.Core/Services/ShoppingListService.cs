@@ -93,7 +93,10 @@ public sealed class ShoppingListService
 
         var warnings = result.Warnings.ToList();
         if (unassignedHard > 0)
-            warnings.Add($"{unassignedHard} item(s) were hard-excluded by household preferences and were left unplanned.");
+        {
+            var warning = $"{unassignedHard} item(s) were hard-excluded by household preferences and were left unplanned.";
+            if (!warnings.Contains(warning)) warnings.Add(warning);
+        }
 
         return new ApplyPlanResult(true, modeKey, planLabel, cleared, assignments.Count, updated,
             assignments.Count(a => a.StoreId is not null), assignments.Count(a => a.StoreId is null),

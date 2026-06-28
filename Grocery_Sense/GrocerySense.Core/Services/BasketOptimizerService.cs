@@ -126,6 +126,8 @@ public sealed class BasketOptimizerService
             plan[id] = a;
         }
 
+        if (plannedStores.Count > maxStores)
+            TrimPlannedStores(plan, plannedStores, primary.Id, maxStores);
         if (hybrid) GreedyAddStores(stores, priceable, priceByStore, plan, plannedStores, maxStores, pct, minSave);
 
         return BuildResult(effMode, stores, primary.Id, plan, hardIds, itemsMap, qtyByItem, usualAvg, sixLow, plannedStores);
@@ -187,6 +189,28 @@ public sealed class BasketOptimizerService
         }
     }
 
+    private static void TrimPlannedStores(Dictionary<int, Assignment> plan, HashSet<int> plannedStores, int primaryId,
+        int maxStores)
+    {
+        var keep = plannedStores.Where(s => s != primaryId)
+            .OrderByDescending(s => plan.Values.Where(a => a.StoreId == s).Sum(a => (a.UnitPrice ?? 0) * a.Qty))
+            .ThenBy(s => s)
+            .Take(Math.Max(0, maxStores - 1))
+            .Append(primaryId)
+            .ToHashSet();
+
+        foreach (var a in plan.Values.Where(a => a.StoreId is { } s && !keep.Contains(s)))
+        {
+            a.Unknown = true;
+            a.StoreId = primaryId;
+            a.UnitPrice = null;
+            a.Source = "";
+        }
+
+        plannedStores.Clear();
+        foreach (var s in keep) plannedStores.Add(s);
+    }
+
     private static BasketOptimizationResult BuildResult(string mode, IReadOnlyList<Store> stores, int primaryId,
         Dictionary<int, Assignment> plan, HashSet<int> hardIds, IReadOnlyDictionary<int, Item> itemsMap,
         Dictionary<int, double> qtyByItem, IReadOnlyDictionary<int, double> usualAvg,
@@ -219,7 +243,9 @@ public sealed class BasketOptimizerService
             var items = plan.Values.Where(a => a.StoreId == storeId).Select(ToPlan).ToList();
             if (storeId == primaryId) items.AddRange(hardPlans);
             if (items.Count == 0) continue;
-            var total = items.Where(i => !i.PriceUnknown && !i.HardExcluded).Sum(i => i.UnitPrice ?? 0);
+            var total = plan.Values
+                .Where(a => a.StoreId == storeId && !a.Unknown && a.UnitPrice is not null)
+                .Sum(a => a.UnitPrice!.Value * a.Qty);
             var unknownCount = items.Count(i => i.PriceUnknown);
             plans.Add(new StorePlan(storeId, nameById.GetValueOrDefault(storeId, "Unknown"), items, total, unknownCount));
         }
