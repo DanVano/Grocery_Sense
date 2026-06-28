@@ -45,9 +45,6 @@ public record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList
 
 public record MappingResult(int? ItemId, string? CanonicalName, double Confidence, string Method, string NormalizedInput);
 
-// Basket optimizer result records (redesign — no trip penalty). Mode: fewest_stops | best_savings.
-public record PricePick(int StoreId, string StoreName, double? UnitPrice, string Unit, string Source);
-
 // One basket line in the plan. ChosenStoreId is null when the item is pulled out (hard-excluded). UnitPrice
 // is null when no price is known (PriceUnknown) — such lines are excluded from the store/basket totals.
 public record BasketItemPlan(
