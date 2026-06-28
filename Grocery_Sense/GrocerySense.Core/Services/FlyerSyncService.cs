@@ -121,14 +121,15 @@ public sealed class FlyerSyncService
 
     // ---------------- meta (last-sync timestamp) ----------------
 
+    // Meta is a single ISO-8601 timestamp line (not JSON) — trivially trim-safe for the AOT Android head and
+    // all this file needs. Atomic temp->replace so a crash mid-write can't leave a truncated file.
     private DateTimeOffset? ReadLastSyncUtc()
     {
         if (!File.Exists(_metaPath)) return null;
         try
         {
-            var meta = JsonSerializer.Deserialize<Dictionary<string, string?>>(File.ReadAllText(_metaPath));
-            var ts = meta?.GetValueOrDefault("last_sync_utc");
-            if (string.IsNullOrEmpty(ts)) return null;
+            var ts = File.ReadAllText(_metaPath).Trim();
+            if (ts.Length == 0) return null;
             return DateTimeOffset.Parse(ts, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
         }
         catch
@@ -140,9 +141,8 @@ public sealed class FlyerSyncService
 
     private void WriteLastSyncUtc(DateTimeOffset dt)
     {
-        var meta = new Dictionary<string, string?> { ["last_sync_utc"] = dt.ToString("o") };
         var tmp = _metaPath + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(meta));
+        File.WriteAllText(tmp, dt.ToString("o"));
         if (File.Exists(_metaPath)) File.Replace(tmp, _metaPath, null);
         else File.Move(tmp, _metaPath);
     }

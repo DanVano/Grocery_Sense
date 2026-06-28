@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
@@ -48,8 +47,7 @@ public sealed class FlyerSyncServiceTests : IDisposable
 
     private FlyerSyncService Build(IFlyerProvider provider) => new(provider, _factory, _config);
 
-    private void WriteMeta(DateTimeOffset dt) => File.WriteAllText(_metaPath,
-        JsonSerializer.Serialize(new Dictionary<string, string?> { ["last_sync_utc"] = dt.ToString("o") }));
+    private void WriteMeta(DateTimeOffset dt) => File.WriteAllText(_metaPath, dt.ToString("o"));
 
     // ---------------- NeedsSync throttle ----------------
 
