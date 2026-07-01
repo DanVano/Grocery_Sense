@@ -1,4 +1,7 @@
+@using GrocerySense.App.Services
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject AppStartup Startup
 
 <MudThemeProvider />
 <MudPopoverProvider />
@@ -19,7 +22,20 @@
     </MudDrawer>
 
     <MudMainContent Class="pa-4">
-        @Body
+        @if (Startup.Status == StartupStatus.Ready)
+        {
+            @Body
+        }
+        else if (Startup.Status == StartupStatus.Error)
+        {
+            <MudAlert Severity="Severity.Error">Database failed to initialize: @Startup.Error</MudAlert>
+        }
+        else
+        {
+            <div class="d-flex justify-center pa-8">
+                <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+            </div>
+        }
     </MudMainContent>
 </MudLayout>
 
@@ -27,4 +43,14 @@
     private bool _drawerOpen;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    protected override void OnInitialized()
+    {
+        Startup.Changed += OnStartupChanged;
+        _ = Startup.EnsureStartedAsync();
+    }
+
+    private void OnStartupChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Startup.Changed -= OnStartupChanged;
 }

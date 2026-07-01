@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IReceiptOcrClient, AppReceiptOcrClient>();
         services.AddSingleton<IFlyerProvider, FlippClient>();
         services.AddSingleton<IFlyerLayoutClient, AppFlyerLayoutClient>();
+        services.AddSingleton<Services.AppStartup>();
 
         return services;
     }
