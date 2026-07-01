@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using MudBlazor.Services;
 
 namespace GrocerySense.App;
 
@@ -15,6 +16,7 @@ public static class MauiProgram
 			});
 
 		builder.Services.AddMauiBlazorWebView();
+		builder.Services.AddMudServices();
 		builder.Services.AddGrocerySenseServices();
 
 #if DEBUG
