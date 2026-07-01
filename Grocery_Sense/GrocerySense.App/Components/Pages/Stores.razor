@@ -1,0 +1,162 @@
+@page "/stores"
+@using GrocerySense.Data
+@using GrocerySense.Data.Repositories
+@using GrocerySense.Domain
+@inject SqliteConnectionFactory Db
+
+<MudText Typo="Typo.h5" GutterBottom="true">Stores</MudText>
+
+<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+    <MudTextField @bind-Value="_newName" Label="Store name" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Immediate="true" FullWidth="true" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
+               Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))">Add</MudButton>
+</MudStack>
+
+@if (_error is not null)
+{
+    <MudAlert Class="mt-2" Severity="Severity.Error">@_error</MudAlert>
+}
+
+@if (_stores is null)
+{
+    <div class="d-flex justify-center pa-8">
+        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+    </div>
+}
+else if (_stores.Count == 0)
+{
+    <MudText Class="mt-4" Typo="Typo.body2">No stores yet — add the places you shop.</MudText>
+}
+else
+{
+    <MudExpansionPanels Class="mt-3" MultiExpansion="false">
+        @foreach (var store in _stores)
+        {
+            <MudExpansionPanel>
+                <TitleContent>
+                    <div class="d-flex align-center gap-2">
+                        <MudIconButton Icon="@(store.IsFavorite ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                                       Color="@(store.IsFavorite ? Color.Warning : Color.Default)" Size="Size.Small"
+                                       OnClick="@(() => ToggleFavoriteAsync(store))"
+                                       aria-label="Toggle favorite" />
+                        <MudText>@store.Name</MudText>
+                        @if (!store.ShopHere)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default">not shopping here</MudChip>
+                        }
+                    </div>
+                </TitleContent>
+                <ChildContent>
+                    <MudStack Spacing="2">
+                        <MudTextField T="string" Label="Address" Value="@store.Address"
+                                      ValueChanged="@(v => Edit(store.Id, address: v))" Margin="Margin.Dense" />
+                        <MudStack Row="true" Spacing="2">
+                            <MudTextField T="string" Label="City" Value="@store.City"
+                                          ValueChanged="@(v => Edit(store.Id, city: v))" Margin="Margin.Dense" />
+                            <MudTextField T="string" Label="Postal code" Value="@store.PostalCode"
+                                          ValueChanged="@(v => Edit(store.Id, postal: v))" Margin="Margin.Dense" />
+                            <MudNumericField T="int" Label="Priority" Value="@store.Priority"
+                                             ValueChanged="@(v => Edit(store.Id, priority: v))" Margin="Margin.Dense" />
+                        </MudStack>
+                        <MudSwitch T="bool" Label="I shop here" Color="Color.Primary" Value="@store.ShopHere"
+                                   ValueChanged="@(v => SetShopHereAsync(store.Id, v))" />
+                        <MudStack Row="true" Spacing="2">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_busy"
+                                       OnClick="@(() => SaveAsync(store))">Save</MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
+                                       OnClick="@(() => ArchiveAsync(store.Id))">Archive</MudButton>
+                        </MudStack>
+                    </MudStack>
+                </ChildContent>
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+}
+
+@code {
+    private IReadOnlyList<Store>? _stores;
+    private string _newName = "";
+    private bool _busy;
+    private string? _error;
+
+    // Pending edits per store id, applied on Save (fields write here, not to the record).
+    private sealed class PendingEdit
+    {
+        public string? Address;
+        public string? City;
+        public string? Postal;
+        public int? Priority;
+    }
+    private readonly Dictionary<int, PendingEdit> _edits = new();
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _error = null;
+            _stores = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return StoresRepo.ListStores(conn);
+            });
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void Edit(int storeId, string? address = null, string? city = null, string? postal = null, int? priority = null)
+    {
+        if (!_edits.TryGetValue(storeId, out var e)) _edits[storeId] = e = new PendingEdit();
+        if (address is not null) e.Address = address;
+        if (city is not null) e.City = city;
+        if (postal is not null) e.Postal = postal;
+        if (priority is not null) e.Priority = priority;
+    }
+
+    private async Task AddAsync()
+    {
+        var name = _newName.Trim();
+        await RunAsync(conn => StoresRepo.CreateStore(conn, name));
+        if (_error is null) _newName = "";
+    }
+
+    private Task ToggleFavoriteAsync(Store store) => RunAsync(conn =>
+        StoresRepo.SetStoreFavorite(conn, store.Id, !store.IsFavorite));
+
+    private Task SetShopHereAsync(int storeId, bool shopHere) => RunAsync(conn =>
+        StoresRepo.SetStoreShopHere(conn, storeId, shopHere));
+
+    // UpdateStore overwrites every column (would clobber favorite/flipp/notes), so Save uses the
+    // narrower UpdateStoreAddress + SetStoreFavorite(priority:) writers instead.
+    private Task SaveAsync(Store store) => RunAsync(conn =>
+    {
+        var e = _edits.TryGetValue(store.Id, out var pending) ? pending : new PendingEdit();
+        StoresRepo.UpdateStoreAddress(conn, store.Id,
+            e.Address ?? store.Address, e.City ?? store.City, e.Postal ?? store.PostalCode);
+        if (e.Priority is int p && p != store.Priority)
+            StoresRepo.SetStoreFavorite(conn, store.Id, store.IsFavorite, p);
+        _edits.Remove(store.Id);
+    });
+
+    private Task ArchiveAsync(int storeId) => RunAsync(conn =>
+        StoresRepo.SetStoreActive(conn, storeId, false));
+
+    private async Task RunAsync(Action<Microsoft.Data.Sqlite.SqliteConnection> work)
+    {
+        _busy = true;
+        try
+        {
+            _error = null;
+            await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                work(conn);
+            });
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}
