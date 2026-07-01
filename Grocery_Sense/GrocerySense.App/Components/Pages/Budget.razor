@@ -1,0 +1,109 @@
+﻿@page "/budget"
+@using GrocerySense.Core
+@using GrocerySense.Domain
+@inject BudgetService BudgetSvc
+
+<MudText Typo="Typo.h5" GutterBottom="true">Budget</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Class="mb-2" Severity="Severity.Error">@_error</MudAlert>
+}
+
+<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-3">
+    <MudNumericField T="double?" @bind-Value="_budgetInput" Label="Monthly budget ($)" Min="0"
+                     Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@_busy">Save</MudButton>
+</MudStack>
+
+@if (_status is null)
+{
+    <div class="d-flex justify-center pa-8">
+        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+    </div>
+}
+else
+{
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudText Typo="Typo.subtitle1" GutterBottom="true">@_status.Month</MudText>
+        <MudText Typo="Typo.body2">
+            Spent $@_status.Spent.ToString("0.00") across @_status.ReceiptCount receipt(s)@(
+                _status.Budget is decimal b ? $" of ${b:0.00}" : " — no budget set").
+        </MudText>
+        @if (_status.Budget is not null)
+        {
+            <MudProgressLinear Class="mt-2" Color="@StatusColor(_status.Status)" Rounded="true" Size="Size.Large"
+                               Value="@Math.Min(_status.PctUsed ?? 0, 100.0)" aria-label="Budget used" />
+            <MudText Typo="Typo.caption">
+                @($"{_status.PctUsed ?? 0:0.#}% used")
+                @(_status.Remaining is decimal r ? $" — ${r:0.00} remaining" : "")
+            </MudText>
+        }
+    </MudPaper>
+
+    <MudText Typo="Typo.subtitle1" GutterBottom="true">Spend trend</MudText>
+    @if (_trend is { Count: > 0 })
+    {
+        <MudSimpleTable Dense="true">
+            <thead>
+                <tr><th style="text-align:left">Month</th><th style="text-align:right">Spent</th><th style="text-align:right">Receipts</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var point in _trend)
+                {
+                    <tr>
+                        <td>@point.Month</td>
+                        <td style="text-align:right">$@point.Total.ToString("0.00")</td>
+                        <td style="text-align:right">@point.ReceiptCount</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2">No spend history yet — import receipts to build the trend.</MudText>
+    }
+}
+
+@code {
+    private BudgetStatus? _status;
+    private IReadOnlyList<SpendTrendPoint>? _trend;
+    private double? _budgetInput;
+    private bool _busy;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "over" => Color.Error,
+        "warning" => Color.Warning,
+        _ => Color.Success,
+    };
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _error = null;
+            (_status, _trend) = await Task.Run(() => (BudgetSvc.GetBudgetStatus(), BudgetSvc.GetTrend()));
+            _budgetInput = _status.Budget is decimal b ? (double)b : null;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            _error = null;
+            var amount = _budgetInput;
+            await Task.Run(() => BudgetSvc.SaveMonthlyBudget(amount));
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}
