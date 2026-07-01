@@ -1,0 +1,256 @@
+@page "/receipts"
+@using GrocerySense.Core
+@using GrocerySense.Data
+@using GrocerySense.Data.Repositories
+@using GrocerySense.Domain
+@implements IDisposable
+@inject ReceiptIngestionService Ingest
+@inject SqliteConnectionFactory Db
+
+<MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
+
+<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-1">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="PickAndIngestAsync" Disabled="@_busy">
+        Import receipt photo
+    </MudButton>
+    @if (_busy)
+    {
+        <MudButton Variant="Variant.Text" OnClick="CancelIngest">Cancel</MudButton>
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Working" />
+        <MudText Typo="Typo.caption">@_stage</MudText>
+    }
+</MudStack>
+<MudSwitch T="bool" @bind-Value="_replaceDuplicates" Label="Replace duplicates" Color="Color.Primary" Class="mb-2" />
+
+@if (_message is not null)
+{
+    <MudAlert Class="mb-2" Severity="@_messageSeverity" Dense="true">@_message</MudAlert>
+}
+
+@if (_receipts is null)
+{
+    <div class="d-flex justify-center pa-8">
+        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+    </div>
+}
+else if (_receipts.Count == 0)
+{
+    <MudText Typo="Typo.body2">No receipts yet — import a photo above.</MudText>
+}
+else
+{
+    <MudExpansionPanels MultiExpansion="false">
+        @foreach (var receipt in _receipts)
+        {
+            <MudExpansionPanel ExpandedChanged="@(expanded => OnExpandedAsync(receipt.Id, expanded))">
+                <TitleContent>
+                    <MudText>
+                        @receipt.PurchaseDate — @receipt.StoreName
+                        @(receipt.TotalAmount is decimal t ? $" — ${t:0.00}" : "")
+                        <MudText Typo="Typo.caption" Inline="true"> (@receipt.ItemCount items)</MudText>
+                    </MudText>
+                </TitleContent>
+                <ChildContent>
+                    @if (!_lines.TryGetValue(receipt.Id, out var lines))
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Loading lines" />
+                    }
+                    else
+                    {
+                        <MudSimpleTable Dense="true">
+                            <thead>
+                                <tr><th style="text-align:left">Item</th><th>Qty</th><th>Unit $</th><th>Total</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in lines)
+                                {
+                                    <tr>
+                                        <td>@(line.CanonicalName is { Length: > 0 } cn ? cn : line.Description)</td>
+                                        <td style="text-align:center">@(line.Quantity is double q ? q.ToString("0.##") : "")</td>
+                                        <td style="text-align:center">@(line.UnitPrice is decimal up ? $"{up:0.00}" : "")</td>
+                                        <td style="text-align:center">@(line.LineTotal is decimal lt ? $"{lt:0.00}" : "")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                        <MudStack Row="true" Spacing="2" Class="mt-2">
+                            <MudButton Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
+                                       OnClick="@(() => DeleteReceiptAsync(receipt))">Delete (backup kept)</MudButton>
+                            @if (receipt.FilePath is { Length: > 0 } fp && File.Exists(fp))
+                            {
+                                <MudButton Variant="Variant.Text" Disabled="@_busy"
+                                           OnClick="@(() => DeleteImageAsync(receipt))">Delete image, keep data</MudButton>
+                            }
+                        </MudStack>
+                    }
+                </ChildContent>
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+}
+
+@code {
+    private IReadOnlyList<ReceiptSummary>? _receipts;
+    private readonly Dictionary<int, IReadOnlyList<ReceiptLineItemRow>> _lines = new();
+    private bool _busy;
+    private bool _replaceDuplicates;
+    private string _stage = "";
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+    private CancellationTokenSource? _cts;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _receipts = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return ReceiptsRepo.ListRecentReceipts(conn);
+            });
+            _lines.Clear();
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    private async Task OnExpandedAsync(int receiptId, bool expanded)
+    {
+        if (!expanded || _lines.ContainsKey(receiptId)) return;
+        try
+        {
+            _lines[receiptId] = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return ReceiptsRepo.ListReceiptLineItems(conn, receiptId);
+            });
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    // Mobile-safe input path: the picker stream is copied into app-data BEFORE any processing —
+    // picker paths are not persistent on Android, and the stored FilePath must stay readable.
+    private async Task PickAndIngestAsync()
+    {
+        _busy = true;
+        _message = null;
+        _cts = new CancellationTokenSource();
+        string? copyPath = null;
+        try
+        {
+            _stage = "Picking file…";
+            var pick = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Pick a receipt photo",
+                FileTypes = FilePickerFileType.Images,
+            });
+            if (pick is null) return; // user backed out of the picker
+
+            _stage = "Copying…";
+            StateHasChanged();
+            var dir = Path.Combine(FileSystem.AppDataDirectory, "receipts");
+            Directory.CreateDirectory(dir);
+            copyPath = Path.Combine(dir, $"{Guid.NewGuid():N}{Path.GetExtension(pick.FileName)}");
+            await using (var src = await pick.OpenReadAsync())
+            await using (var dst = File.Create(copyPath))
+                await src.CopyToAsync(dst, _cts.Token);
+
+            _stage = "Reading receipt (OCR + parsing)…";
+            StateHasChanged();
+            var outcome = await Ingest.IngestReceiptFileAsync(copyPath, _replaceDuplicates, _cts.Token);
+
+            if (outcome.Error is { } error)
+            {
+                TryDelete(copyPath);
+                Fail($"Ingest failed: {error}");
+            }
+            else if (outcome.WasDuplicate)
+            {
+                TryDelete(copyPath); // original receipt keeps its own image
+                _messageSeverity = Severity.Info;
+                _message = $"Duplicate of receipt #{outcome.ReceiptId} ({outcome.DuplicateReason}) — not re-imported. " +
+                           "Turn on Replace duplicates to re-ingest.";
+            }
+            else
+            {
+                _messageSeverity = Severity.Success;
+                _message = outcome.ReplacedExisting
+                    ? $"Receipt #{outcome.ReceiptId} imported (replaced an earlier duplicate)."
+                    : $"Receipt #{outcome.ReceiptId} imported.";
+            }
+            await ReloadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            TryDelete(copyPath);
+            _messageSeverity = Severity.Info;
+            _message = "Import cancelled.";
+        }
+        catch (Exception ex)
+        {
+            TryDelete(copyPath);
+            Fail($"Import failed: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            _stage = "";
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    // Retention: the image lives beside the DB for as long as its receipt row does. Deleting the
+    // receipt (backed up) or tapping delete-image removes the file — nothing is hoarded past that.
+    private async Task DeleteReceiptAsync(ReceiptSummary receipt)
+    {
+        _busy = true;
+        try
+        {
+            _message = null;
+            await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                ReceiptsRepo.DeleteReceiptWithBackup(conn, receipt.Id);
+            });
+            if (receipt.FilePath is { Length: > 0 } fp) TryDelete(fp);
+            _messageSeverity = Severity.Success;
+            _message = $"Receipt #{receipt.Id} deleted. Rows are backed up; the image file is gone for good.";
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private Task DeleteImageAsync(ReceiptSummary receipt)
+    {
+        if (receipt.FilePath is { Length: > 0 } fp)
+        {
+            if (TryDelete(fp))
+            {
+                _messageSeverity = Severity.Success;
+                _message = $"Image for receipt #{receipt.Id} deleted; parsed data kept.";
+            }
+            else Fail("Could not delete the image file.");
+        }
+        return Task.CompletedTask;
+    }
+
+    private static bool TryDelete(string? path)
+    {
+        if (path is null) return false;
+        try { File.Delete(path); return true; }
+        catch { return false; }
+    }
+
+    private void Fail(string message)
+    {
+        _messageSeverity = Severity.Error;
+        _message = message;
+    }
+
+    private void CancelIngest() => _cts?.Cancel();
+
+    public void Dispose() => _cts?.Cancel();
+}
