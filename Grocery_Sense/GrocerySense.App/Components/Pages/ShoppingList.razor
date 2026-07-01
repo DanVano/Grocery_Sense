@@ -1,0 +1,106 @@
+@page "/list"
+@using GrocerySense.Core
+@using GrocerySense.Domain
+@inject ShoppingListService Shopping
+
+<MudText Typo="Typo.h5" GutterBottom="true">Shopping List</MudText>
+
+<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+    <MudTextField @bind-Value="_newItems" Label="Add items (comma-separated)" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Immediate="true" FullWidth="true" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
+               Disabled="@(_busy || string.IsNullOrWhiteSpace(_newItems))">Add</MudButton>
+</MudStack>
+
+@if (_error is not null)
+{
+    <MudAlert Class="mt-2" Severity="Severity.Error">@_error</MudAlert>
+}
+
+@if (_items is null)
+{
+    <div class="d-flex justify-center pa-8">
+        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+    </div>
+}
+else if (_items.Count == 0)
+{
+    <MudText Class="mt-4" Typo="Typo.body2">List is empty — add something above.</MudText>
+}
+else
+{
+    <MudPaper Class="mt-3" Outlined="true">
+        <MudList T="int" Dense="true">
+            @foreach (var row in _items)
+            {
+                <MudListItem T="int">
+                    <div class="d-flex align-center gap-1">
+                        <MudCheckBox T="bool" Value="@row.IsCheckedOff"
+                                     ValueChanged="@(v => ToggleAsync(row.Id, v))" Dense="true" />
+                        <MudText Style="@(row.IsCheckedOff ? "text-decoration: line-through" : null)">
+                            @row.DisplayName@QtyLabel(row)
+                        </MudText>
+                        <MudSpacer />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                       OnClick="@(() => DeleteAsync(row.Id))" aria-label="Delete item" />
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+    <MudButton Class="mt-2" Variant="Variant.Text" OnClick="ClearCheckedAsync"
+               Disabled="@(_busy || !_items.Any(i => i.IsCheckedOff))">Clear checked</MudButton>
+}
+
+@code {
+    private IReadOnlyList<ShoppingListRow>? _items;
+    private string _newItems = "";
+    private bool _busy;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private static string QtyLabel(ShoppingListRow row)
+    {
+        if (row.Quantity == 1.0 && string.IsNullOrEmpty(row.Unit)) return "";
+        var unit = string.IsNullOrEmpty(row.Unit) ? "" : $" {row.Unit}";
+        return $" — {row.Quantity:0.##}{unit}";
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _error = null;
+            _items = await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private Task AddAsync() => RunAsync(() =>
+    {
+        Shopping.AddItemsFromText(_newItems);
+        _newItems = "";
+    });
+
+    private Task ToggleAsync(int rowId, bool checkedOff) =>
+        RunAsync(() => Shopping.CheckOffItem(rowId, checkedOff));
+
+    private Task DeleteAsync(int rowId) => RunAsync(() => Shopping.SoftDeleteItem(rowId));
+
+    private Task ClearCheckedAsync() => RunAsync(Shopping.ClearAllCheckedOff);
+
+    // All writes funnel through here: off the UI thread, then reload; errors surface in the alert.
+    private async Task RunAsync(Action work)
+    {
+        _busy = true;
+        try
+        {
+            _error = null;
+            await Task.Run(work);
+            _items = await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}
