@@ -152,24 +152,6 @@ public record ItemAlias(
     string? LastSeenAt,
     int TimesSeen);
 
-public record ItemRow(
-    int Id,
-    string CanonicalName,
-    bool IsTracked,
-    string? DefaultUnit,
-    int PricePoints,
-    string? LastPriceDate);
-
-public record MemberRequestRow(
-    int Id,
-    int? MemberId,
-    string MemberName,
-    string Kind,
-    string Label,
-    IReadOnlyList<int> ItemRowIds,
-    string? CreatedAt,
-    bool Reviewed);
-
 public record StoreRow(int Id, string Name);
 
 // Savings watchlist row (watchlist table, joined to items for ItemName). TargetPrice null => watch for any

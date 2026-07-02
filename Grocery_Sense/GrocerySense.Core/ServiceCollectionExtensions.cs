@@ -19,22 +19,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PriceHistoryService>();
         services.AddSingleton<PriceDropAlertService>();
         services.AddSingleton<WatchlistService>();
-        services.AddSingleton<DealsService>();
         services.AddSingleton<ShoppingListService>();
         services.AddSingleton<PlanningService>();
         services.AddSingleton<BasketOptimizerService>();
-        services.AddSingleton<RecipeEngine>();
-        services.AddSingleton<MealSuggestionService>();
-        services.AddSingleton<WeeklyPlannerService>();
         services.AddSingleton<ReceiptIngestionService>();
         services.AddSingleton<FlyerIngestService>();
         services.AddSingleton<FlyerSyncService>();
         services.AddSingleton<FlyerSyncScheduler>();
-        services.AddSingleton<FamilyRequestsService>();
-        services.AddSingleton<ListAuditService>();
         services.AddSingleton<BudgetService>();
-        services.AddSingleton<DbMaintenanceService>();
-        services.AddSingleton<DemoSeedService>();
 
         return services;
     }

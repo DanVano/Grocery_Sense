@@ -27,25 +27,6 @@ public record BudgetStatus(
 
 public record DealAdjusted(double Quantity, double? UnitPrice, double? LineTotal, string DealNote);
 
-public record Deal(string Name, string Store, double? Price, string? Unit, Dictionary<string, object?>? Raw);
-
-public record SuggestedMeal(
-    Dictionary<string, object?> Recipe,
-    double TotalScore,
-    IReadOnlyList<string> Reasons,
-    double? CostTotal,
-    double? CostPerServing);
-
-public record PlannedIngredient(
-    string Name,
-    IReadOnlyList<string> RecipeNames,
-    int ApproximateCount,
-    int? ItemId,
-    string? CanonicalName,
-    double? MatchConfidence);
-
-public record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
-
 public record MappingResult(int? ItemId, string? CanonicalName, double Confidence, string Method, string NormalizedInput);
 
 // One basket line in the plan. ChosenStoreId is null when the item is pulled out (hard-excluded). UnitPrice
