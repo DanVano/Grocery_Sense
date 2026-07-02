@@ -151,10 +151,7 @@ else
         return AcquireAndIngestAsync("Opening camera…", () => MediaPicker.Default.CapturePhotoAsync());
     }
 
-    // Mobile-safe input path: the picker/camera stream is copied into app-data BEFORE any processing —
-    // capture and picker paths are not persistent on Android, and the stored FilePath must stay readable.
-    // Both FilePicker.PickAsync and MediaPicker.CapturePhotoAsync return a FileResult, so the copy+ingest
-    // flow is shared; only how the FileResult is acquired differs.
+    // Picker/camera streams are copied into app-data before ingest; source paths may expire on Android.
     private async Task AcquireAndIngestAsync(string acquireStage, Func<Task<FileResult?>> acquire)
     {
         _busy = true;

@@ -7,6 +7,9 @@ namespace GrocerySense.App;
 
 public static class ServiceCollectionExtensions
 {
+    internal const string AzureDocIntEndpointKey = "azure_docint_endpoint";
+    internal const string AzureDocIntApiKeyKey = "azure_docint_api_key";
+
     public static IServiceCollection AddGrocerySenseServices(this IServiceCollection services)
     {
         var dbPath = Path.Combine(Microsoft.Maui.Storage.FileSystem.AppDataDirectory, "grocery_sense.db");
@@ -43,9 +46,9 @@ public static class ServiceCollectionExtensions
 
     private static async Task<(string? Endpoint, string? ApiKey)> ReadAzureDocIntCredsAsync()
     {
-        var endpoint = await ReadSettingAsync("azure_docint_endpoint",
+        var endpoint = await ReadSettingAsync(AzureDocIntEndpointKey,
             "GROCERY_SENSE_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT");
-        var apiKey = await ReadSettingAsync("azure_docint_api_key",
+        var apiKey = await ReadSettingAsync(AzureDocIntApiKeyKey,
             "GROCERY_SENSE_AZURE_DOCUMENT_INTELLIGENCE_API_KEY", "AZURE_DOCUMENT_INTELLIGENCE_API_KEY",
             "AZURE_DOCUMENT_INTELLIGENCE_KEY");
         return (endpoint, apiKey);

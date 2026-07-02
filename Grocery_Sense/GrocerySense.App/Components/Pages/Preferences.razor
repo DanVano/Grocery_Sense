@@ -1,6 +1,7 @@
 @page "/preferences"
 @using System.Text.Json
 @using GrocerySense.Core
+@using static GrocerySense.App.ServiceCollectionExtensions
 @inject ConfigStore Config
 @inject ISnackbar Snackbar
 
@@ -55,10 +56,6 @@ else
 
     <MudPaper Class="pa-3 mt-4" Outlined="true">
         <MudText Typo="Typo.subtitle1">Cloud OCR (Azure)</MudText>
-        <MudText Typo="Typo.caption">
-            Stored in the device secure store, not in your config file. Interim personal-use path — a shipped
-            build routes OCR through a backend proxy instead of holding a key on-device.
-        </MudText>
         <MudTextField @bind-Value="_azureEndpoint" Label="Endpoint" Variant="Variant.Outlined"
                       Margin="Margin.Dense" Class="mt-2" />
         <MudTextField @bind-Value="_azureKey" Label="API key" Variant="Variant.Outlined" Margin="Margin.Dense"
@@ -85,10 +82,6 @@ else
     private string _azureEndpoint = "";
     private string _azureKey = "";
 
-    // Must match the keys ServiceCollectionExtensions reads when constructing the OCR clients.
-    private const string EndpointKey = "azure_docint_endpoint";
-    private const string ApiKeyKey = "azure_docint_api_key";
-
     protected override async Task OnInitializedAsync()
     {
         try
@@ -107,8 +100,8 @@ else
 
             try
             {
-                _azureEndpoint = await SecureStorage.Default.GetAsync(EndpointKey) ?? "";
-                _azureKey = await SecureStorage.Default.GetAsync(ApiKeyKey) ?? "";
+                _azureEndpoint = await SecureStorage.Default.GetAsync(AzureDocIntEndpointKey) ?? "";
+                _azureKey = await SecureStorage.Default.GetAsync(AzureDocIntApiKeyKey) ?? "";
             }
             catch (Exception ex)
             {
@@ -166,18 +159,21 @@ else
         try
         {
             _error = null;
-            await SetOrRemoveAsync(EndpointKey, _azureEndpoint);
-            await SetOrRemoveAsync(ApiKeyKey, _azureKey);
+            await SetOrRemoveAsync(AzureDocIntEndpointKey, _azureEndpoint);
+            await SetOrRemoveAsync(AzureDocIntApiKeyKey, _azureKey);
             Snackbar.Add("Cloud OCR credentials saved.", Severity.Success);
         }
         catch (Exception ex) { _error = $"Could not save credentials: {ex.Message}"; }
         finally { _busy = false; }
     }
 
-    private static async Task SetOrRemoveAsync(string key, string? value)
+    private static Task SetOrRemoveAsync(string key, string value)
     {
-        if (string.IsNullOrWhiteSpace(value)) SecureStorage.Default.Remove(key);
-        else await SecureStorage.Default.SetAsync(key, value.Trim());
+        value = value.Trim();
+        if (value.Length > 0) return SecureStorage.Default.SetAsync(key, value);
+
+        SecureStorage.Default.Remove(key);
+        return Task.CompletedTask;
     }
 
     private static List<string> ParseList(string csv) =>
