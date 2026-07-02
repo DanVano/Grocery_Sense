@@ -159,12 +159,31 @@ else
         try
         {
             _error = null;
+            if (ValidateEndpoint(_azureEndpoint) is { } endpointError)
+            {
+                _error = endpointError;
+                return;
+            }
             await SetOrRemoveAsync(AzureDocIntEndpointKey, _azureEndpoint);
             await SetOrRemoveAsync(AzureDocIntApiKeyKey, _azureKey);
             Snackbar.Add("Cloud OCR credentials saved.", Severity.Success);
         }
         catch (Exception ex) { _error = $"Could not save credentials: {ex.Message}"; }
         finally { _busy = false; }
+    }
+
+    // The key is sent as a header to whatever host this endpoint names, so pin it to Azure Cognitive Services
+    // before saving — a pasted phishing URL would otherwise exfiltrate the key. Empty = clearing the entry, allowed.
+    private static string? ValidateEndpoint(string endpoint)
+    {
+        endpoint = endpoint.Trim();
+        if (endpoint.Length == 0) return null;
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+            return "Endpoint must be an https:// URL.";
+        var host = uri.Host;
+        var ok = host.EndsWith(".cognitiveservices.azure.com", StringComparison.OrdinalIgnoreCase)
+                 || host.EndsWith(".api.cognitive.microsoft.com", StringComparison.OrdinalIgnoreCase);
+        return ok ? null : "Endpoint host must be an Azure Cognitive Services domain (e.g. myresource.cognitiveservices.azure.com).";
     }
 
     private static Task SetOrRemoveAsync(string key, string value)
