@@ -2,6 +2,7 @@
 @using System.Text.Json
 @using GrocerySense.Core
 @inject ConfigStore Config
+@inject ISnackbar Snackbar
 
 <MudText Typo="Typo.h5" GutterBottom="true">Preferences</MudText>
 
@@ -50,7 +51,21 @@ else
         </MudStack>
     </MudPaper>
 
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@_busy">Save</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@_busy">Save preferences</MudButton>
+
+    <MudPaper Class="pa-3 mt-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1">Cloud OCR (Azure)</MudText>
+        <MudText Typo="Typo.caption">
+            Stored in the device secure store, not in your config file. Interim personal-use path — a shipped
+            build routes OCR through a backend proxy instead of holding a key on-device.
+        </MudText>
+        <MudTextField @bind-Value="_azureEndpoint" Label="Endpoint" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_azureKey" Label="API key" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Class="mt-2" InputType="InputType.Password" />
+        <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Secondary"
+                   OnClick="SaveCredentialsAsync" Disabled="@_busy">Save credentials</MudButton>
+    </MudPaper>
 }
 
 @code {
@@ -67,8 +82,14 @@ else
     private int _maxStores = 3;
     private int _minItemSavingPct = 10;
     private double _minStoreSaving = 5.0;
+    private string _azureEndpoint = "";
+    private string _azureKey = "";
 
-    protected override void OnInitialized()
+    // Must match the keys ServiceCollectionExtensions reads when constructing the OCR clients.
+    private const string EndpointKey = "azure_docint_endpoint";
+    private const string ApiKeyKey = "azure_docint_api_key";
+
+    protected override async Task OnInitializedAsync()
     {
         try
         {
@@ -83,6 +104,18 @@ else
             _allergies = AsCommaList(profile.GetValueOrDefault("allergies"));
             _hardExcludes = AsCommaList(profile.GetValueOrDefault("hard_excludes"));
             _softExcludes = AsCommaList(profile.GetValueOrDefault("soft_excludes"));
+
+            try
+            {
+                _azureEndpoint = await SecureStorage.Default.GetAsync(EndpointKey) ?? "";
+                _azureKey = await SecureStorage.Default.GetAsync(ApiKeyKey) ?? "";
+            }
+            catch (Exception ex)
+            {
+                // SecureStorage can be unavailable (e.g. no keystore) — surface it, don't fake creds.
+                _error = $"Secure store unavailable: {ex.Message}";
+            }
+
             _loaded = true;
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -123,6 +156,28 @@ else
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    // Credentials live in SecureStorage, a separate store from user_config.json, so they get their own Save.
+    // A cleared field removes the entry rather than storing an empty string.
+    private async Task SaveCredentialsAsync()
+    {
+        _busy = true;
+        try
+        {
+            _error = null;
+            await SetOrRemoveAsync(EndpointKey, _azureEndpoint);
+            await SetOrRemoveAsync(ApiKeyKey, _azureKey);
+            Snackbar.Add("Cloud OCR credentials saved.", Severity.Success);
+        }
+        catch (Exception ex) { _error = $"Could not save credentials: {ex.Message}"; }
+        finally { _busy = false; }
+    }
+
+    private static async Task SetOrRemoveAsync(string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) SecureStorage.Default.Remove(key);
+        else await SecureStorage.Default.SetAsync(key, value.Trim());
     }
 
     private static List<string> ParseList(string csv) =>
