@@ -373,12 +373,18 @@ lifecycle hook (Phase 6's deferred piece) landed here in `App.CreateWindow`.
 
 ---
 
-## Phase 9 — Platform glue & release readiness  ☐
-- [ ] `MediaPicker` / `FilePicker` (stream-based) for receipt capture.
-- [ ] `SecureStorage` for any per-user token.
-- [ ] **Before public release** (deferred for now): route OCR through a backend proxy you control
+## Phase 9 — Platform glue & release readiness  ◑ (local scope done; proxy + Apple heads deferred)
+- [x] `MediaPicker` / `FilePicker` (stream-based) for receipt capture. (Receipts route: Take photo via
+      `MediaPicker.CapturePhotoAsync` + Import from library via `FilePicker`, shared copy-to-app-data path.)
+- [x] `SecureStorage` for any per-user token. (Preferences "Cloud OCR (Azure)" section reads/writes the
+      `azure_docint_endpoint`/`azure_docint_api_key` keys the OCR clients consume; cleared field removes.)
+- [x] Camera + photo-library permissions declared (Android `CAMERA`; iOS/MacCatalyst `NSCameraUsageDescription`
+      + `NSPhotoLibraryUsageDescription`).
+- [ ] **Before public release** (still deferred): route OCR through a backend proxy you control
       (app → your endpoint → Azure) + per-user rate limiting — a shipped app can't safely hold a shared key.
-- [ ] Apple heads (`net10.0-ios`, `net10.0-maccatalyst`) need a Mac/CI host. Android + Windows build locally.
+      The SecureStorage entry above is the interim personal-use path, not the shipping story.
+- [ ] Apple heads (`net10.0-ios`, `net10.0-maccatalyst`) need a Mac/CI host to build/verify. Permissions +
+      DI are in place; Android + Windows build locally (App head verified on **net10.0-windows**).
 
 ---
 

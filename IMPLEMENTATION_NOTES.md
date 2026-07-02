@@ -182,3 +182,29 @@ Seven routes (Home + Receipts, Shopping List, Deals, Plan, Budget, Preferences, 
   optimizer knobs (percent in the UI, stored as a fraction). Save read-modify-Saves the whole UserConfig.
 - **All DB/service calls run off the UI thread** (`Task.Run`) with errors funneled into a MudAlert per page
   — never block the WebView thread, never swallow.
+
+---
+
+## Phase 9 — Platform glue & release readiness (partial)
+
+Local-buildable scope done; the two items that need infra beyond this machine stay deferred.
+
+- **Camera capture via MediaPicker.** The Receipts route now offers Take photo
+  (`MediaPicker.CapturePhotoAsync`, guarded on `IsCaptureSupported`) alongside Import from library
+  (`FilePicker`). Both return a `FileResult`, so the copy-to-app-data + cancel + retention flow from Phase 8
+  is shared in one `AcquireAndIngestAsync(stage, acquirer)`; camera results with no extension fall back to
+  `.jpg`.
+- **SecureStorage credential entry.** Preferences gained a Cloud OCR (Azure) section that reads/writes
+  `azure_docint_endpoint` + `azure_docint_api_key` — the exact keys `ServiceCollectionExtensions` already
+  reads when building `AzureReceiptOcrClient`/`FlyerDocIntClient`. Separate Save button (SecureStorage is a
+  different store from `user_config.json`); a cleared field calls `Remove` rather than storing empty; secure
+  store unavailability surfaces as an error (no faked creds). This is the interim personal-use path.
+- **Permissions declared:** Android `CAMERA` + optional camera feature; iOS/MacCatalyst
+  `NSCameraUsageDescription` + `NSPhotoLibraryUsageDescription` (required or MediaPicker/FilePicker crash).
+- **Deferred (unchanged from the plan):**
+  - **OCR backend proxy + per-user rate limiting** — the real shipping story (a public build can't hold a
+    shared Azure key). The SecureStorage entry is explicitly *not* that; it's dev/personal use.
+  - **Apple heads (`net10.0-ios`, `net10.0-maccatalyst`)** — need a Mac/CI host to build and verify. DI +
+    permissions are in place; only Windows + Android build on this machine. Verified on **net10.0-windows**.
+- **No test delta** — Phase 9 is platform glue (pickers, secure store, manifests), none of it unit-testable
+  in the offline xUnit host. Still 276 tests, 0 skipped; App head builds on net10.0-windows.
