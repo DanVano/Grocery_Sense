@@ -27,6 +27,7 @@ public sealed class FlyerDocIntClient : IFlyerLayoutClient
         if (string.IsNullOrWhiteSpace(_endpoint) || string.IsNullOrWhiteSpace(_apiKey))
             throw new InvalidOperationException(
                 "Azure DocumentIntelligence endpoint/apiKey are not configured. Supply them from the App composition root.");
+        AzureDocIntEndpointGuard.Validate(_endpoint);
 
         var client = new DocumentIntelligenceClient(new Uri(_endpoint), new AzureKeyCredential(_apiKey));
 
