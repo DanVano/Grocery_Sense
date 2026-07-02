@@ -1,0 +1,200 @@
+@page "/savings"
+@using GrocerySense.Core
+@using GrocerySense.Domain
+@inject WatchlistService Watchlist
+@inject PriceDropAlertService Alerts
+
+<MudText Typo="Typo.h5" GutterBottom="true">Savings</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Class="mb-2" Severity="Severity.Error">@_error</MudAlert>
+}
+
+<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true">
+    <MudTabPanel Text="Watchlist">
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudAutocomplete T="string" @bind-Value="_pickName" Label="Item" SearchFunc="SearchItems"
+                             Dense="true" Margin="Margin.Dense" CoerceText="true" MaxItems="20" />
+            <MudNumericField T="double?" @bind-Value="_target" Label="Target $ (optional)" Min="0"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="max-width:160px" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
+                       Disabled="@(_busy || string.IsNullOrWhiteSpace(_pickName))">Watch</MudButton>
+        </MudStack>
+
+        <MudText Typo="Typo.subtitle1" GutterBottom="true">Deals now</MudText>
+        @if (_hits is { Count: > 0 })
+        {
+            <MudPaper Class="mb-3" Outlined="true">
+                <MudList T="int" Dense="true">
+                    @foreach (var h in _hits)
+                    {
+                        <MudListItem T="int">
+                            <MudText Typo="Typo.body2">
+                                <b>@h.ItemName</b> — $@F2(h.BestPrice) at @h.StoreName
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(h.HitReason == "target" ? Color.Primary : Color.Success)">
+                                    @(h.HitReason == "target" ? "hit target" : "below usual")
+                                </MudChip>
+                                @if (h.PctBelowUsual is double p and > 0)
+                                {
+                                    <span> (@p.ToString("0")% below usual)</span>
+                                }
+                            </MudText>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+        else
+        {
+            <MudText Class="mb-3" Typo="Typo.body2">No watched item is a deal right now.</MudText>
+        }
+
+        <MudText Typo="Typo.subtitle1" GutterBottom="true">Watching</MudText>
+        @if (_watches is { Count: > 0 })
+        {
+            <MudPaper Outlined="true">
+                <MudList T="int" Dense="true">
+                    @foreach (var w in _watches)
+                    {
+                        <MudListItem T="int">
+                            <div class="d-flex align-center">
+                                <MudText Typo="Typo.body2">
+                                    @w.ItemName
+                                    @(w.TargetPrice is double t ? $" — target ${t:0.00}" : " — any good deal")
+                                </MudText>
+                                <MudSpacer />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                               OnClick="@(() => RemoveAsync(w.Id))" aria-label="Stop watching" />
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2">Nothing on the watchlist yet — add an item above.</MudText>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="Deals & Stock-up">
+        @if (_alerts is null)
+        {
+            <div class="d-flex justify-center pa-8">
+                <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+            </div>
+        }
+        else if (_alerts.Count == 0)
+        {
+            <MudText Typo="Typo.body2">
+                No price drops or stock-up moments right now. This grows as you import receipts and flyers.
+            </MudText>
+        }
+        else
+        {
+            <MudPaper Outlined="true">
+                <MudList T="int" Dense="true">
+                    @foreach (var a in _alerts)
+                    {
+                        <MudListItem T="int">
+                            <MudText Typo="Typo.body2">
+                                <b>@a.ItemName</b>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(a.AlertKind == "below_usual" ? Color.Success : Color.Info)">
+                                    @KindLabel(a.AlertKind)
+                                </MudChip>
+                            </MudText>
+                            <MudText Typo="Typo.caption">@a.Notes</MudText>
+                            @if (a.SuggestedQtyNote is { Length: > 0 } note)
+                            {
+                                <MudText Typo="Typo.caption"><b>@note</b></MudText>
+                            }
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private IReadOnlyList<SavingsWatchItem>? _watches;
+    private IReadOnlyList<WatchlistHit>? _hits;
+    private IReadOnlyList<PriceDropAlert>? _alerts;
+    private IReadOnlyList<(int Id, string Name)> _items = Array.Empty<(int, string)>();
+    private string? _pickName;
+    private double? _target;
+    private bool _busy;
+    private string? _error;
+
+    private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "below_usual" => "price drop",
+        "stock_up" => "stock up",
+        "both" => "drop + stock up",
+        _ => kind,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadWatchlistAsync();
+        // Display-only compute (not persisted); staples only, so the list stays signal, not noise.
+        _alerts = await Guard(() => Alerts.ComputeEngineAlerts(staplesOnly: true)) ?? Array.Empty<PriceDropAlert>();
+    }
+
+    private Task<IEnumerable<string>> SearchItems(string value, CancellationToken ct)
+    {
+        var q = (value ?? "").Trim();
+        var matches = _items
+            .Where(i => q.Length == 0 || i.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Select(i => i.Name);
+        return Task.FromResult(matches);
+    }
+
+    private async Task AddAsync()
+    {
+        var itemId = _items.FirstOrDefault(i =>
+            string.Equals(i.Name, _pickName, StringComparison.OrdinalIgnoreCase)).Id;
+        if (itemId <= 0) { _error = "Pick an item from the list."; return; }
+
+        var target = _target;
+        await Guard(() => { Watchlist.AddWatch(itemId, target); return 0; });
+        _pickName = null;
+        _target = null;
+        await ReloadWatchlistAsync();
+    }
+
+    private async Task RemoveAsync(int watchId)
+    {
+        await Guard(() => { Watchlist.RemoveWatch(watchId); return 0; });
+        await ReloadWatchlistAsync();
+    }
+
+    private async Task ReloadWatchlistAsync()
+    {
+        _items = await Guard(() => Watchlist.ListWatchableItems()) ?? Array.Empty<(int, string)>();
+        _watches = await Guard(() => Watchlist.ListWatches()) ?? Array.Empty<SavingsWatchItem>();
+        _hits = await Guard(() => Watchlist.ComputeHits()) ?? Array.Empty<WatchlistHit>();
+    }
+
+    // Run sync service work off the UI thread; errors land in the alert, result is default on failure.
+    private async Task<T?> Guard<T>(Func<T> work)
+    {
+        _busy = true;
+        try
+        {
+            _error = null;
+            return await Task.Run(work);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            return default;
+        }
+        finally { _busy = false; }
+    }
+}

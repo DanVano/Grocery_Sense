@@ -41,6 +41,24 @@ else
         }
     </MudPaper>
 
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudText Typo="Typo.subtitle1" GutterBottom="true">Month-end forecast</MudText>
+        <MudText Typo="Typo.body2">
+            At the current pace you'll spend about
+            <b>$@_status.ProjectedSpend.ToString("0.00")</b> by month-end@(
+                _status.Budget is decimal pb ? $" against a ${pb:0.00} budget" : "").
+        </MudText>
+        @if (_status.ProjectedStatus is "warning" or "over")
+        {
+            <MudAlert Class="mt-2" Dense="true"
+                      Severity="@(_status.ProjectedStatus == "over" ? Severity.Error : Severity.Warning)">
+                @(_status.ProjectedStatus == "over"
+                    ? "Projected to go over budget this month."
+                    : "Projected to get close to the budget this month.")
+            </MudAlert>
+        }
+    </MudPaper>
+
     <MudText Typo="Typo.subtitle1" GutterBottom="true">Spend trend</MudText>
     @if (_trend is { Count: > 0 })
     {
