@@ -18,6 +18,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IngredientMappingService>();
         services.AddSingleton<PriceHistoryService>();
         services.AddSingleton<PriceDropAlertService>();
+        services.AddSingleton<WatchlistService>();
         services.AddSingleton<DealsService>();
         services.AddSingleton<ShoppingListService>();
         services.AddSingleton<PlanningService>();

@@ -67,6 +67,42 @@ public sealed class BudgetServiceTests : IDisposable
         Assert.True(over.OverBudget);
     }
 
+    // Projected month-end spend = current pace held to the end of the month.
+    private static decimal ExpectedProjection(decimal spent)
+    {
+        var now = DateTime.UtcNow;
+        return decimal.Round(spent / now.Day * DateTime.DaysInMonth(now.Year, now.Month), 2);
+    }
+
+    [Fact]
+    public void Projection_is_reported_even_without_a_budget()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        AddReceipt(db.Conn, store, 80m);
+
+        var status = new BudgetService(new ConfigStore(_cfgDir), db.Factory).GetBudgetStatus();
+
+        Assert.Equal("unset", status.ProjectedStatus);
+        Assert.Equal(ExpectedProjection(80m), status.ProjectedSpend);
+    }
+
+    [Fact]
+    public void Projection_grades_over_or_ok_against_the_budget()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        AddReceipt(db.Conn, store, 80m);
+        var svc = new BudgetService(new ConfigStore(_cfgDir), db.Factory);
+        var projected = ExpectedProjection(80m);
+
+        svc.SaveMonthlyBudget((double)(projected - 10m)); // pace overshoots the budget
+        Assert.Equal("over", svc.GetBudgetStatus().ProjectedStatus);
+
+        svc.SaveMonthlyBudget((double)(projected * 2m)); // pace well under the budget
+        Assert.Equal("ok", svc.GetBudgetStatus().ProjectedStatus);
+    }
+
     [Fact]
     public void SaveMonthlyBudget_null_or_nonpositive_clears()
     {

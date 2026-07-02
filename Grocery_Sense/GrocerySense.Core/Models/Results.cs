@@ -18,9 +18,12 @@ public record DealClassification(
     double? AvgUnitPrice, double? MinUnitPrice, double? MaxUnitPrice, int SampleCount, string Message);
 
 // BudgetService — this month's spend vs the configured budget. Status: unset | ok | warning | over.
+// ProjectedSpend linearly extrapolates the current pace to month-end; ProjectedStatus is that projection
+// graded against the budget (unset when no budget is configured).
 public record BudgetStatus(
     string Month, decimal Spent, int ReceiptCount, decimal? Budget, decimal? Remaining,
-    double? PctUsed, bool? OverBudget, string Status);
+    double? PctUsed, bool? OverBudget, string Status,
+    decimal ProjectedSpend, string ProjectedStatus);
 
 public record DealAdjusted(double Quantity, double? UnitPrice, double? LineTotal, string DealNote);
 
@@ -102,6 +105,12 @@ public record PriceDropAlert(
     string? LastSeenAtOrBelow, string Notes,
     double? SuggestedQty = null, string? SuggestedQtyNote = null,
     int? Id = null, string? CreatedAt = null, string? Status = null);
+
+// A watchlist item whose current best price cleared its trigger. HitReason: "target" (met the user's target
+// price) | "below_usual" (no target set, but currently >= MinItemSavingPct below its usual price).
+public record WatchlistHit(
+    int WatchId, int ItemId, string ItemName, double? TargetPrice, double BestPrice, int StoreId,
+    string StoreName, string Source, double? UsualPrice, double? PctBelowUsual, string HitReason);
 
 // Outcome of a receipt ingest. DuplicateReason is "file_hash" | "signature" when WasDuplicate.
 public record IngestOutcome(

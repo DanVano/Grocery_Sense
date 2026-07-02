@@ -187,6 +187,47 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         Assert.Equal("fewest_stops", r.Mode);
     }
 
+    // wait_for_sale item stays unplanned when its current price isn't clearly below usual.
+    [Fact]
+    public void Wait_for_sale_item_is_left_unplanned_when_not_on_sale()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var a = Store(db, "A");
+        var milk = Listed(db, "milk");        // normal item so the basket is non-empty
+        Price(db, milk, a, 4);
+
+        var steak = ItemsRepo.CreateItem(db.Conn, "steak").Id;
+        ShoppingListRepo.AddItem(db.Conn, "steak", itemId: steak, priority: "wait_for_sale");
+        Price(db, steak, a, 10); Price(db, steak, a, 10); Price(db, steak, a, 10); // usual ~10, current ~10
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.DoesNotContain(r.Stores.SelectMany(s => s.Items), i => i.ItemId == steak);
+        Assert.Contains(r.Warnings, w => w.Contains("wait for sale"));
+    }
+
+    // wait_for_sale item is planned once its current price beats usual by the saving margin.
+    [Fact]
+    public void Wait_for_sale_item_is_planned_when_on_sale()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var a = Store(db, "A");
+        var milk = Listed(db, "milk");
+        Price(db, milk, a, 4);
+
+        var steak = ItemsRepo.CreateItem(db.Conn, "steak").Id;
+        ShoppingListRepo.AddItem(db.Conn, "steak", itemId: steak, priority: "wait_for_sale");
+        Price(db, steak, a, 10); Price(db, steak, a, 10); Price(db, steak, a, 10);
+        Price(db, steak, a, 8); // most-recent = 8, ~20% below the ~10 usual
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Equal(a, StoreOf(r, steak));
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("wait for sale"));
+    }
+
     [Fact]
     public void Totals_are_quantity_weighted()
     {

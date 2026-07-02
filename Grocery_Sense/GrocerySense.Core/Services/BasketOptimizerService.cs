@@ -56,6 +56,10 @@ public sealed class BasketOptimizerService
         var rows = ShoppingListRepo.ListActiveItems(conn).Where(r => r.ItemId is not null).ToList();
         var qtyByItem = rows.GroupBy(r => r.ItemId!.Value)
             .ToDictionary(g => g.Key, g => g.Sum(r => r.Quantity <= 0 ? 1.0 : r.Quantity));
+        // Per-item priority: must_have wins, then normal; wait_for_sale only when every row for the item is
+        // wait_for_sale (a normal need for the same item overrides "wait").
+        var priorityByItem = rows.GroupBy(r => r.ItemId!.Value)
+            .ToDictionary(g => g.Key, g => AggregatePriority(g.Select(r => r.Priority)));
         var itemIds = qtyByItem.Keys.ToList();
         var itemsMap = ItemsRepo.GetItemsByIds(conn, itemIds);
 
@@ -99,6 +103,15 @@ public sealed class BasketOptimizerService
                 anyBest[id] = null;
         }
 
+        // "Wait for sale" items are left unplanned unless their cheapest current price beats usual by the
+        // same margin the optimizer uses to justify a store hop. Unknown price or unknown usual => not a
+        // confirmed sale => keep waiting (drop from the plan). must_have/normal are unaffected.
+        var waitIds = basketIds.Where(id =>
+            priorityByItem.GetValueOrDefault(id, "normal") == "wait_for_sale"
+            && !IsOnSale(anyBest, usualAvg, id, pct)).ToHashSet();
+        if (waitIds.Count > 0)
+            basketIds = basketIds.Where(id => !waitIds.Contains(id)).ToList();
+
         var priceable = basketIds.Where(id => anyBest[id] is not null).ToList();
         var primary = PickPrimary(stores, priceable, priceByStore, anyBest);
 
@@ -130,7 +143,32 @@ public sealed class BasketOptimizerService
             TrimPlannedStores(plan, plannedStores, primary.Id, maxStores);
         if (hybrid) GreedyAddStores(stores, priceable, priceByStore, plan, plannedStores, maxStores, pct, minSave);
 
-        return BuildResult(effMode, stores, primary.Id, plan, hardIds, itemsMap, qtyByItem, usualAvg, sixLow, plannedStores);
+        var result = BuildResult(effMode, stores, primary.Id, plan, hardIds, itemsMap, qtyByItem, usualAvg, sixLow, plannedStores);
+        if (waitIds.Count > 0)
+        {
+            var warnings = result.Warnings.ToList();
+            warnings.Add($"{waitIds.Count} item(s) marked 'wait for sale' aren't on sale now and were left unplanned.");
+            result = result with { Warnings = warnings };
+        }
+        return result;
+    }
+
+    // A "wait for sale" item counts as on sale only if its cheapest current price is at least `pct` below the
+    // recent global average. No current price or no usual average => cannot confirm => not on sale.
+    private static bool IsOnSale(Dictionary<int, (double Price, int StoreId, string Unit, string Source)?> anyBest,
+        IReadOnlyDictionary<int, double> usualAvg, int itemId, double pct)
+    {
+        if (anyBest.GetValueOrDefault(itemId) is not { } best) return false;
+        if (!usualAvg.TryGetValue(itemId, out var usual) || usual <= 0) return false;
+        return best.Price <= usual * (1 - pct);
+    }
+
+    private static string AggregatePriority(IEnumerable<string> priorities)
+    {
+        var list = priorities.Select(p => string.IsNullOrEmpty(p) ? "normal" : p).ToList();
+        if (list.Contains("must_have")) return "must_have";
+        if (list.Contains("normal")) return "normal";
+        return "wait_for_sale";
     }
 
     private static Store PickPrimary(IReadOnlyList<Store> stores, List<int> priceable,

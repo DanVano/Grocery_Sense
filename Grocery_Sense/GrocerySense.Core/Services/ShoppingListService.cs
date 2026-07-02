@@ -57,6 +57,14 @@ public sealed class ShoppingListService
         ShoppingListRepo.SetCheckedOff(conn, itemId, checkedOff);
     }
 
+    // priority: must_have | normal | wait_for_sale. The optimizer leaves wait_for_sale items unplanned
+    // unless they're currently on sale (see BasketOptimizerService).
+    public void SetItemPriority(int rowId, string priority)
+    {
+        using var conn = _factory.Open();
+        ShoppingListRepo.SetPriority(conn, rowId, priority);
+    }
+
     public void ClearAllCheckedOff()
     {
         using var conn = _factory.Open();
