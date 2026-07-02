@@ -10,8 +10,13 @@
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
 <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-1">
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="PickAndIngestAsync" Disabled="@_busy">
-        Import receipt photo
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PhotoCamera"
+               OnClick="CaptureAndIngestAsync" Disabled="@_busy">
+        Take photo
+    </MudButton>
+    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PhotoLibrary"
+               OnClick="PickAndIngestAsync" Disabled="@_busy">
+        Import from library
     </MudButton>
     @if (_busy)
     {
@@ -129,9 +134,28 @@ else
         catch (Exception ex) { Fail(ex.Message); }
     }
 
-    // Mobile-safe input path: the picker stream is copied into app-data BEFORE any processing —
-    // picker paths are not persistent on Android, and the stored FilePath must stay readable.
-    private async Task PickAndIngestAsync()
+    private Task PickAndIngestAsync() => AcquireAndIngestAsync("Opening library…",
+        () => FilePicker.Default.PickAsync(new PickOptions
+        {
+            PickerTitle = "Pick a receipt photo",
+            FileTypes = FilePickerFileType.Images,
+        }));
+
+    private Task CaptureAndIngestAsync()
+    {
+        if (!MediaPicker.Default.IsCaptureSupported)
+        {
+            Fail("This device can't capture photos. Use Import from library instead.");
+            return Task.CompletedTask;
+        }
+        return AcquireAndIngestAsync("Opening camera…", () => MediaPicker.Default.CapturePhotoAsync());
+    }
+
+    // Mobile-safe input path: the picker/camera stream is copied into app-data BEFORE any processing —
+    // capture and picker paths are not persistent on Android, and the stored FilePath must stay readable.
+    // Both FilePicker.PickAsync and MediaPicker.CapturePhotoAsync return a FileResult, so the copy+ingest
+    // flow is shared; only how the FileResult is acquired differs.
+    private async Task AcquireAndIngestAsync(string acquireStage, Func<Task<FileResult?>> acquire)
     {
         _busy = true;
         _message = null;
@@ -139,19 +163,16 @@ else
         string? copyPath = null;
         try
         {
-            _stage = "Picking file…";
-            var pick = await FilePicker.Default.PickAsync(new PickOptions
-            {
-                PickerTitle = "Pick a receipt photo",
-                FileTypes = FilePickerFileType.Images,
-            });
-            if (pick is null) return; // user backed out of the picker
+            _stage = acquireStage;
+            var pick = await acquire();
+            if (pick is null) return; // user backed out of the picker/camera
 
             _stage = "Copying…";
             StateHasChanged();
             var dir = Path.Combine(FileSystem.AppDataDirectory, "receipts");
             Directory.CreateDirectory(dir);
-            copyPath = Path.Combine(dir, $"{Guid.NewGuid():N}{Path.GetExtension(pick.FileName)}");
+            var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
+            copyPath = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
             await using (var src = await pick.OpenReadAsync())
             await using (var dst = File.Create(copyPath))
                 await src.CopyToAsync(dst, _cts.Token);
