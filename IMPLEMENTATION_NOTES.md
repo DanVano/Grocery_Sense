@@ -141,3 +141,44 @@ App head builds on net10.0-windows.
 - **`FlyerIngestResult` reshaped** from the speculative `(BatchesCreated, DealsCreated, SkippedUrls, Errors)`
   to `(FlyerId, AssetsCount, DealsCount, RawJsonCount)` to match what a per-call ingest produces.
   `FlyerSyncResult` was already correct.
+
+---
+
+## Phase 8 — UI: Blazor routes
+
+Seven routes (Home + Receipts, Shopping List, Deals, Plan, Budget, Preferences, Stores) on MudBlazor
+9.6.0. 276 tests, 0 skipped; App head builds on net10.0-windows.
+
+- **PlanningService implemented as a prerequisite** (Phase 4 left it a stub; the Plan route needs it).
+  Straight port of `planning_service.py` — greedy cheapest-store-per-item, store scoring (+0.5 favorite,
+  +0.1 x priority), favorite fallback when there's no history, and cost/coverage/baseline from the same
+  batched avg-price maps the optimizer uses. **Return type is typed, not the Python dict**
+  (`StorePlanResult`/`PlanStoreGroup`/`PlanCosts`/`PlanCoverage`) — the UI binds a model. Ported
+  `test_planning_service.py` (14 cases).
+- **DealsService stayed a stub — v1 doesn't need it.** The Deals route reads `FlyersRepo.ListActiveDeals`
+  directly; `DealsService` is provider-search + min-trip selection (v2, Flipp stub). Confirmed the two
+  Phase-8 routes that the handoff flagged (Deals, Plan) do NOT require it.
+- **MudBlazor over the template's Bootstrap.** Dropped Counter/Weather/NavMenu + the bootstrap payload;
+  `MainLayout` is a MudLayout appbar+drawer. `AddMudServices` + the four MudBlazor providers in the layout;
+  css/js swapped in `index.html`.
+- **Startup state machine** (`AppStartup`): `Database.Initialize` runs on a background thread via a
+  single-flight `Lazy<Task>`; `MainLayout` renders spinner/error(MudAlert)/`@Body` off the status — the
+  first frame never blocks on migrations, and a DB error is shown verbatim (no silent retry).
+- **Sync-on-resume hook landed here** (Phase 6 deferred it to the UI). `App.CreateWindow` subscribes
+  `Window.Resumed -> FlyerSyncScheduler.CheckOnResumeAsync`, gated on DB-ready and swallowing background
+  errors (the next manual sync surfaces them). Manual "Sync flyers" button on the Deals route uses
+  `RequestSyncAsync` with a `CancellationToken` + cancel button.
+- **Receipt input is stream-first (mobile rule).** `FilePicker` -> copy the stream into
+  `AppDataDirectory/receipts` BEFORE ingest (Android picker paths aren't persistent), then
+  `IngestReceiptFileAsync` with cancel + staged progress. Failed/duplicate/cancelled imports delete the
+  copied file so nothing orphans.
+- **Retention lever:** a receipt image lives beside the DB for as long as its row. The Receipts route has
+  delete-receipt (rows backed up, image file removed) and delete-image-keep-data. No receipt contents or
+  secrets are logged.
+- **Deal filtering reuses the optimizer's `PhraseSafeHit`** (deal titles are free text): household
+  hard-excludes hide deals (hidden count shown), soft-excludes get an "avoid" chip.
+- **Preferences = single-profile editor** over ConfigStore: postal/city, allergies + hard/soft excludes
+  (comma lists on the master member profile, **other profile keys preserved** on save), and the three
+  optimizer knobs (percent in the UI, stored as a fraction). Save read-modify-Saves the whole UserConfig.
+- **All DB/service calls run off the UI thread** (`Task.Run`) with errors funneled into a MudAlert per page
+  — never block the WebView thread, never swallow.

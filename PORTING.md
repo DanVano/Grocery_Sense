@@ -336,7 +336,7 @@ Plus planning tests (mirror `tests/planning/`) + no-partial-rows test on plan wr
 
 ---
 
-## Phase 8 — UI: 6 Blazor routes (NOT all 16 windows)  ☐
+## Phase 8 — UI: 6 Blazor routes (NOT all 16 windows)  ☑
 
 | Route | Replaces (reference Tk windows) | Drives |
 |---|---|---|
@@ -348,17 +348,28 @@ Plus planning tests (mirror `tests/planning/`) + no-partial-rows test on plan wr
 | Budget | `budget_window.py` | `BudgetService` |
 | _(setup)_ Stores | `stores_management_window.py`, `store_settings_window.py` | `StoresRepo` (postal + shop-here; NO distance/gas) |
 
-- [ ] Replace the template's Home/Counter/Weather pages with these routes; bind via DI.
-- [ ] Async/`await` + `InvokeAsync` for long work — never block the UI thread.
+- [x] Replace the template's Home/Counter/Weather pages with these routes; bind via DI. (MudBlazor 9.6.0;
+      Bootstrap/NavMenu dropped. All 7 routes present.)
+- [x] Async/`await` for long work — never block the UI thread. (Every DB/service call is `Task.Run`; errors
+      funnel into a per-page MudAlert.)
+- [x] **PlanningService implemented** (Phase 4 left it a stub) as a typed-result port + 14 tests; the Plan
+      route drives it alongside `BasketOptimizerService`. `DealsService` confirmed NOT needed by v1 (Deals
+      route reads `FlyersRepo.ListActiveDeals` directly).
 
 ### Mobile requirements (apply across the UI/ingest paths)
-- [ ] Receipt input as **streams**; copy temp files before processing; no reliance on persistent picker paths.
-- [ ] **Startup state machine**: DB initialize → loading / ready / **error** states surfaced in the UI;
-      don't block the first frame on DB init.
-- [ ] **Cancellation + progress** on ingest/sync (`CancellationToken` + `IProgress<T>`).
-- [ ] **Retention policy** for receipt images + raw OCR JSON: define when they're deleted and give the
-      user control; don't hoard PII forever.
-- [ ] **Never log secrets or full receipt data** — redact PII and keys in all logs.
+- [x] Receipt input as **streams**; the picker stream is copied into app-data before processing; no reliance
+      on persistent picker paths.
+- [x] **Startup state machine**: `AppStartup` runs `Database.Initialize` off-thread; MainLayout surfaces
+      loading / ready / **error** — the first frame never blocks on DB init.
+- [x] **Cancellation + progress** on ingest/sync (`CancellationToken` + staged progress text + cancel button
+      on the Receipts import and Deals sync). `IProgress<T>` not needed — the stages are coarse.
+- [x] **Retention policy**: a receipt image lives beside its row; the Receipts route offers delete-receipt
+      (rows backed up, image removed) and delete-image-keep-data. Raw OCR JSON is deleted with the receipt.
+- [x] **Never log secrets or full receipt data** — no receipt contents or keys are logged in any route.
+
+**Verified:** 276 tests, 0 skipped; App head builds on net10.0-windows. Decisions in IMPLEMENTATION_NOTES
+"Phase 8". Deferred: `IProgress<T>` fine-grained progress; the Apple heads (Phase 9). The sync-on-resume
+lifecycle hook (Phase 6's deferred piece) landed here in `App.CreateWindow`.
 
 ---
 

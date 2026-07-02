@@ -17,7 +17,7 @@ phase ends `dotnet test` green — red exists only mid-task, never at a boundary
 | 5 | Receipt ingest | Azure OCR client (`IReceiptOcrClient`) + ReceiptIngestionService; dedupe + single-transaction ingest. |
 | 6 | Flyer pipeline | Flyer DocInt client, FlippClient stub (`IFlyerProvider`), FlyerIngest/Sync (sync-on-resume, no bg timer). |
 | 7 | Recipes & meal planning | **DEFERRED to v2.** Spec kept; do NOT build in v1. |
-| 8 | UI: 6 Blazor routes | Receipts, List, Deals, Plan, Preferences, Budget (+ Stores setup). MudBlazor, touch-first, async. |
+| 8 | UI: 6 Blazor routes ✅ | Receipts, List, Deals, Plan, Preferences, Budget (+ Stores setup). MudBlazor, touch-first, async. |
 | 9 | Platform glue & release readiness | MediaPicker/FilePicker streams, SecureStorage, (pre-release) OCR backend proxy, Apple heads. |
 
 ## v1 scope
