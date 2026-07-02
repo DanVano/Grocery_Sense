@@ -28,6 +28,7 @@ public sealed class DatabaseMigrationTests : IDisposable
             "receipt_line_items", "item_aliases", "shopping_list", "deleted_receipt_backups",
             "receipt_raw_json", "receipt_file_hashes", "receipt_signatures",
             "flyer_batches", "flyer_assets", "flyer_raw_json", "flyer_deals",
+            "watchlist",
         };
         foreach (var t in expected)
             Assert.Contains(t, tables);
@@ -58,6 +59,22 @@ public sealed class DatabaseMigrationTests : IDisposable
         using var check = verify.CreateCommand();
         check.CommandText = "SELECT name FROM stores;";
         Assert.Equal("Test Store", check.ExecuteScalar() as string);
+    }
+
+    [Fact]
+    public void Migration_adds_priority_column_defaulting_normal()
+    {
+        var factory = NewFactory();
+        Database.Initialize(factory);
+
+        using var conn = factory.Open();
+        using var insert = conn.CreateCommand();
+        insert.CommandText = "INSERT INTO shopping_list (display_name) VALUES ('Milk');";
+        insert.ExecuteNonQuery();
+
+        using var read = conn.CreateCommand();
+        read.CommandText = "SELECT priority FROM shopping_list WHERE display_name = 'Milk';";
+        Assert.Equal("normal", read.ExecuteScalar() as string);
     }
 
     private static int ReadVersion(Microsoft.Data.Sqlite.SqliteConnection conn)

@@ -99,7 +99,8 @@ public record ShoppingListRow(
     int? AddedByMemberId,
     bool IsActive,
     int? PlannedStoreId,
-    int? ItemId = null);
+    int? ItemId = null,
+    string Priority = "normal");   // must_have | normal | wait_for_sale (shopping_list.priority)
 
 // Receipt read shapes (ports of the row dicts in receipts_repo.py). Money is decimal (TEXT-backed).
 public record ReceiptSummary(
@@ -170,3 +171,8 @@ public record MemberRequestRow(
     bool Reviewed);
 
 public record StoreRow(int Id, string Name);
+
+// Savings watchlist row (watchlist table, joined to items for ItemName). TargetPrice null => watch for any
+// good deal (percent-below-usual). CreatedAt is null on insert inputs, set when read back.
+public record SavingsWatchItem(
+    int Id, int ItemId, string ItemName, double? TargetPrice, bool IsActive = true, string? CreatedAt = null);

@@ -298,6 +298,27 @@ public static class Database
         CREATE INDEX idx_price_drop_alerts_dismissed
             ON price_drop_alerts(dismissed_at) WHERE dismissed_at IS NOT NULL;
         """,
+
+        // ----- Migration 3: shopping_list priority (must_have | normal | wait_for_sale) -----
+        // Household "buy this now / only on sale" label. NOT NULL DEFAULT backfills existing rows to 'normal'.
+        """
+        ALTER TABLE shopping_list ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+        """,
+
+        // ----- Migration 4: savings watchlist -----
+        // User-curated items to watch for a deal. target_price NULL => alert on any good deal (falls back to
+        // the optimizer's MinItemSavingPct below usual). is_active soft-toggles a removed/paused watch.
+        """
+        CREATE TABLE watchlist (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id      INTEGER NOT NULL,
+            target_price REAL,
+            is_active    INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_watchlist_active ON watchlist(is_active);
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

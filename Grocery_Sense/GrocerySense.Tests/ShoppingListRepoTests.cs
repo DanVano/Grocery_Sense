@@ -41,6 +41,21 @@ public sealed class ShoppingListRepoTests
     }
 
     [Fact]
+    public void Priority_defaults_normal_and_can_be_set()
+    {
+        using var db = new TempDb();
+        var id = ShoppingListRepo.AddItem(db.Conn, "Steak");
+        Assert.Equal("normal", ShoppingListRepo.GetItem(db.Conn, id)!.Priority);
+
+        ShoppingListRepo.SetPriority(db.Conn, id, "wait_for_sale");
+        Assert.Equal("wait_for_sale", ShoppingListRepo.GetItem(db.Conn, id)!.Priority);
+
+        // Unknown values normalize to 'normal' rather than persisting garbage.
+        ShoppingListRepo.SetPriority(db.Conn, id, "bogus");
+        Assert.Equal("normal", ShoppingListRepo.GetItem(db.Conn, id)!.Priority);
+    }
+
+    [Fact]
     public void Planned_store_assignment_by_item_id_and_clear()
     {
         using var db = new TempDb();

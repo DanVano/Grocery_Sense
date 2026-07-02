@@ -10,7 +10,14 @@ public static class ShoppingListRepo
 {
     private const string SelectCols =
         "id, display_name, quantity, unit, category, is_checked_off, notes, " +
-        "added_by, added_by_member_id, is_active, planned_store_id, item_id";
+        "added_by, added_by_member_id, is_active, planned_store_id, item_id, priority";
+
+    // Valid shopping_list.priority values; anything else normalizes to 'normal'.
+    private static readonly HashSet<string> Priorities = new(StringComparer.Ordinal)
+        { "must_have", "normal", "wait_for_sale" };
+
+    private static string NormalizePriority(string? p) =>
+        p is not null && Priorities.Contains(p) ? p : "normal";
 
     private static ShoppingListRow Map(SqliteDataReader r) => new(
         Id: r.GetInt32(0),
@@ -24,7 +31,8 @@ public static class ShoppingListRepo
         AddedByMemberId: r.GetIntOrNull(8),
         IsActive: !r.IsDBNull(9) && r.GetBoolean(9),
         PlannedStoreId: r.GetIntOrNull(10),
-        ItemId: r.GetIntOrNull(11));
+        ItemId: r.GetIntOrNull(11),
+        Priority: r.GetStringOrNull(12) ?? "normal");
 
     public static IReadOnlyList<ShoppingListRow> ListActiveItems(SqliteConnection conn, int? storeId = null,
         bool includeCheckedOff = false, SqliteTransaction? tx = null)
@@ -56,13 +64,14 @@ public static class ShoppingListRepo
 
     public static int AddItem(SqliteConnection conn, string displayName, double quantity = 1.0, string unit = "",
         string category = "", string notes = "", string? addedBy = null, int? addedByMemberId = null,
-        int? plannedStoreId = null, int? itemId = null, SqliteTransaction? tx = null)
+        int? plannedStoreId = null, int? itemId = null, string priority = "normal", SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
             """
             INSERT INTO shopping_list
-                (display_name, quantity, unit, category, notes, added_by, added_by_member_id, planned_store_id, item_id)
-            VALUES ($name, $qty, $unit, $cat, $notes, $by, $member, $store, $item)
+                (display_name, quantity, unit, category, notes, added_by, added_by_member_id, planned_store_id,
+                 item_id, priority)
+            VALUES ($name, $qty, $unit, $cat, $notes, $by, $member, $store, $item, $priority)
             """);
         cmd.Parameters.AddWithValue("$name", (displayName ?? "").Trim());
         cmd.Parameters.AddWithValue("$qty", quantity);
@@ -74,8 +83,17 @@ public static class ShoppingListRepo
         cmd.Parameters.AddWithValue("$member", Db.OrNull(addedByMemberId));
         cmd.Parameters.AddWithValue("$store", Db.OrNull(plannedStoreId));
         cmd.Parameters.AddWithValue("$item", Db.OrNull(itemId));
+        cmd.Parameters.AddWithValue("$priority", NormalizePriority(priority));
         cmd.ExecuteNonQuery();
         return (int)Db.LastRowId(conn, tx);
+    }
+
+    public static void SetPriority(SqliteConnection conn, int rowId, string priority, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx, "UPDATE shopping_list SET priority = $p WHERE id = $id");
+        cmd.Parameters.AddWithValue("$p", NormalizePriority(priority));
+        cmd.Parameters.AddWithValue("$id", rowId);
+        cmd.ExecuteNonQuery();
     }
 
     // Insert many rows in one statement-per-row pass (caller owns the transaction for atomicity).
@@ -88,7 +106,7 @@ public static class ShoppingListRepo
         foreach (var row in rows)
         {
             AddItem(conn, row.DisplayName, row.Quantity, row.Unit, row.Category, row.Notes,
-                row.AddedBy, row.AddedByMemberId, row.PlannedStoreId, row.ItemId, tx);
+                row.AddedBy, row.AddedByMemberId, row.PlannedStoreId, row.ItemId, tx: tx);
             count++;
         }
         return count;
