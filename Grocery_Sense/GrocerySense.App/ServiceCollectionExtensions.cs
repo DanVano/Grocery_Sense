@@ -60,7 +60,15 @@ public static class ServiceCollectionExtensions
             if (Environment.GetEnvironmentVariable(key) is { Length: > 0 } value)
                 return value;
 
+        // GetAsync returns null when the key is simply absent; it throws only when the store itself is broken
+        // (e.g. Keystore-wrapped value undecryptable after a cross-device restore). Fail loud on the latter —
+        // masking it as null makes the OCR client report a misleading "not configured".
         try { return await Microsoft.Maui.Storage.SecureStorage.Default.GetAsync(secureKey); }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Secure credential store could not be read for '{secureKey}'. If you restored this app onto a new " +
+                $"device, re-enter your Azure OCR credentials in Preferences. Underlying error: {ex.Message}", ex);
+        }
     }
 }
