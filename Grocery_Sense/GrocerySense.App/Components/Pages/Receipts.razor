@@ -81,7 +81,7 @@ else
                         <MudStack Row="true" Spacing="2" Class="mt-2">
                             <MudButton Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
                                        OnClick="@(() => DeleteReceiptAsync(receipt))">Delete (backup kept)</MudButton>
-                            @if (receipt.FilePath is { Length: > 0 } fp && File.Exists(fp))
+                            @if (receipt.FilePath is { Length: > 0 } fp && CanDeleteReceiptFile(fp))
                             {
                                 <MudButton Variant="Variant.Text" Disabled="@_busy"
                                            OnClick="@(() => DeleteImageAsync(receipt))">Delete image, keep data</MudButton>
@@ -166,7 +166,7 @@ else
 
             _stage = "Copying…";
             StateHasChanged();
-            var dir = Path.Combine(FileSystem.AppDataDirectory, "receipts");
+            var dir = ReceiptsDir();
             Directory.CreateDirectory(dir);
             var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
             copyPath = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
@@ -180,12 +180,12 @@ else
 
             if (outcome.Error is { } error)
             {
-                TryDelete(copyPath);
+                TryDeleteReceiptFile(copyPath);
                 Fail($"Ingest failed: {error}");
             }
             else if (outcome.WasDuplicate)
             {
-                TryDelete(copyPath); // original receipt keeps its own image
+                TryDeleteReceiptFile(copyPath); // original receipt keeps its own image
                 _messageSeverity = Severity.Info;
                 _message = $"Duplicate of receipt #{outcome.ReceiptId} ({outcome.DuplicateReason}) — not re-imported. " +
                            "Turn on Replace duplicates to re-ingest.";
@@ -201,13 +201,13 @@ else
         }
         catch (OperationCanceledException)
         {
-            TryDelete(copyPath);
+            TryDeleteReceiptFile(copyPath);
             _messageSeverity = Severity.Info;
             _message = "Import cancelled.";
         }
         catch (Exception ex)
         {
-            TryDelete(copyPath);
+            TryDeleteReceiptFile(copyPath);
             Fail($"Import failed: {ex.Message}");
         }
         finally
@@ -232,7 +232,7 @@ else
                 using var conn = Db.Open();
                 ReceiptsRepo.DeleteReceiptWithBackup(conn, receipt.Id);
             });
-            if (receipt.FilePath is { Length: > 0 } fp) TryDelete(fp);
+            if (receipt.FilePath is { Length: > 0 } fp) TryDeleteReceiptFile(fp);
             _messageSeverity = Severity.Success;
             _message = $"Receipt #{receipt.Id} deleted. Rows are backed up; the image file is gone for good.";
             await ReloadAsync();
@@ -245,7 +245,7 @@ else
     {
         if (receipt.FilePath is { Length: > 0 } fp)
         {
-            if (TryDelete(fp))
+            if (TryDeleteReceiptFile(fp))
             {
                 _messageSeverity = Severity.Success;
                 _message = $"Image for receipt #{receipt.Id} deleted; parsed data kept.";
@@ -255,9 +255,15 @@ else
         return Task.CompletedTask;
     }
 
-    private static bool TryDelete(string? path)
+    private static string ReceiptsDir() => Path.Combine(FileSystem.AppDataDirectory, "receipts");
+
+    private static bool CanDeleteReceiptFile(string path) =>
+        PathSafety.IsUnderDirectory(ReceiptsDir(), path) && File.Exists(path);
+
+    private static bool TryDeleteReceiptFile(string? path)
     {
         if (path is null) return false;
+        if (!PathSafety.IsUnderDirectory(ReceiptsDir(), path)) return false;
         try { File.Delete(path); return true; }
         catch { return false; }
     }
