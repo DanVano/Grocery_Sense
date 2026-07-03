@@ -29,5 +29,11 @@ deferred features (v2), implementation flags to handle at the relevant port phas
 - **OCR backend proxy** + per-user rate limiting (Azure key can't ship in a public app); rotate/secure key.
 - Accounts/auth; multi-device sync; real flyer provider + ToS/legal review; iOS + Apple Developer acct; auto-update channel (Firebase App Distribution or Play).
 
+## v2 status (2026-07-03)
+v2 feature code (Phases 1/2/4/5/6) is **done**; Phase 3 (tuning) + the v2 release are blocked on the
+6-month backfill and the Android toolchain/keystore. **`V2_FOLLOWUPS.md` is the current source of truth for
+what's left + bug-fixing landmines** — read it first. Plan/status: `V2_PLAN.md`; decisions:
+`IMPLEMENTATION_NOTES.md`; scope grill: `brainstorms/2026-07-02-…md`.
+
 ## Source docs
 `PORTING.md` (phases + locked v1 decisions) · `CONTRACT_AUDIT.md` (Port/Replace/Defer) · `brainstorms/2026-06-24-…md` (scope grill) · `~/.claude/plans/please-do-a-full-greedy-graham.md` (business-logic/optimizer spec).
