@@ -1,0 +1,263 @@
+# Grocery Sense — v2 Implementation Plan (Family Release)
+
+Scope grilled + locked 2026-07-02: `brainstorms/2026-07-02-grocery-sense-v2-plan.md` (Q&A + rationale).
+Companion docs: `PORTING.md` (v1 playbook + conventions — **all v1 conventions still apply**),
+`CONTRACT_AUDIT.md` (API ledger for the deferred surface), `BACKLOG.md` (superseded for v2 scope by this doc).
+
+**v2 = family/household feature release to the existing friends-&-family Android ring.**
+Same trust model as v1: sideload APK, local-only, no backend, no accounts.
+
+## v2 Product Decisions (locked 2026-07-02)
+
+- **In v2:** bulk receipt backfill on-ramp (multi-image import + date confirm + alert suppression);
+  item-manager (merge/rename) + manual alias-correction UX; real-data tuning pass (fuzzy/optimizer/alert
+  thresholds); meal planning (straight Phase-7 port, 62-recipe catalog); family members (**names only**)
+  + meal-picks → parent review; DB backup/export via share sheet; sideload release.
+- **Members = names only.** Household preferences stay a single profile (v1 finding still true: no
+  differing allergies/needs). Members are lightweight identities (id, name, master/secondary role) so
+  meal-picks attribute correctly on the one shared phone.
+- **Explicitly OUT (v3 parking lot):** accounts/auth · multi-device sync · OCR backend proxy + rate
+  limiting · real flyer provider (ToS/legal) · proactive push (FCM/APNs) · iOS/Apple heads · auto-update
+  channel · starter dataset / central price DB · custom-recipe entry · per-member preference profiles
+  (merge/consensus/star machinery) · list-audit · demo-seed · `deals_service` search path ·
+  `planning_service` cost-view.
+- **Baseline:** verify + commit `feat/family-savings`, merge → `main`, tag `v1`. v2 phase branches cut
+  from `main`. The uncommitted stub deletions are intentional — commit them; v2 features are built fresh
+  from `reference-python/`, not by filling stubs. Stale `v3-expanding-core-features-*` branches: delete.
+- **Sequencing rationale:** data before intelligence. The 6-month backfill is what makes alerts,
+  optimizer, savings, and budget history real; correction tooling must exist *while* scanning, not after.
+  The physical scan-in session happens after Phase 2, before Phase 3.
+
+Confidence shown per phase = implementation confidence after the grill (target ≥95%). The residual risk
+is named so it can be watched, not discovered.
+
+---
+
+## Phase 0 — Baseline hygiene & release plumbing  ◑   (confidence: 97%)
+
+No new features. Make `main` real, make Android build, make signing durable.
+**Status 2026-07-02:** git baseline + savings/Windows verification DONE; three items handed off (need
+elevated install / secrets / external portal).
+
+- [x] **Verify the savings feature** (grill Q9). Service math verified: **292 tests green, 0 skipped** —
+      watchlist (4 tests: dedupe, target hit, below-usual, no-hit), budget forecast (5: status grades +
+      projection with/without budget + grading + clear), wait-for-sale (2: unplanned-when-not-on-sale,
+      planned-when-on-sale) + priority selection. **Windows head builds clean (0 warn / 0 err)** — Savings
+      UI compiles, DI resolves. _Remaining:_ on-device click-through (needs a running device; deferred to
+      after the Android build works).
+- [x] Stub deletions committed (already on the branch: `d745969` Tizen head, `458e3ab` services/repos).
+- [x] Git baseline (local, **not pushed** — origin push is the user's call): `main` created at the tip
+      `458e3ab`; annotated tag **`v1` at `84e1e21`** (last pre-savings commit — v1 = as shipped to F&F,
+      savings + cleanup start the v2 line). `v3-expanding-core-features-phase1/2` deleted.
+      **origin/main was an empty disjoint orphan** (2-line README, no shared history) — adopting the
+      branch as main; pushing to origin will be a force/unrelated push.
+- [ ] **Android SDK — BLOCKED, needs elevated install (handed off).** Root cause is deeper than the
+      recorded `XA5207`: this machine has **only JDK 8**; .NET 10 Android + sdkmanager 12 need **JDK 17**,
+      and `platforms;android-36` is missing (SDK lives in Program Files → elevation to write). Fix:
+      `winget install Microsoft.OpenJDK.17`, then elevated
+      `sdkmanager --sdk_root="C:\Program Files (x86)\Android\android-sdk" "platforms;android-36" "build-tools;36.0.0"`,
+      then `dotnet build GrocerySense.App -f net10.0-android`.
+- [ ] **Signing keystore — handed off (secret, user-owned).** keytool present in the bundled JDK 8; NOT
+      generated here (release-key password must be the user's, backed up off-machine).
+      `keytool -genkeypair -v -keystore grocerysense-release.keystore -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000`.
+      Losing it → testers reinstall, local data wiped (BACKLOG flag).
+- [ ] **Azure budget cap — handed off (external portal).** Sanity-check per-page OCR cost before the
+      ~50–150-receipt backfill session.
+
+**Done when:** `main` holds v1+savings, tagged ✅; Windows head builds ✅; Android head builds ⛔ (blocked
+on JDK 17 + android-36); keystore safeguarded ⛔; `dotnet test` green ✅.
+
+*Residual:* the three handed-off items are environment/secret/portal actions, not code risk. On-device
+savings smoke still pending a working Android build.
+
+---
+
+## Phase 1 — Backfill on-ramp: bulk receipt import  ✅ DONE (2026-07-02)   (confidence: 95%)
+
+The v2 data on-ramp. New capability, but it composes the existing, tested ingest pipeline.
+Branch `V2_Features_Implementation_Phase1`; commits `6c369f1` (Core) + `e66832f` (UI). 299 tests green;
+Windows head builds 0/0.
+
+| Builds on (exists, tested) | New |
+|---|---|
+| `ReceiptIngestionService` (SHA-256 + signature dedupe, single-tx write, `TransactionDate` parsing) | Two-stage ingest: `Prepare` (OCR + parse → preview) / `Commit` (date override + tx write) |
+| Receipts route stream-import + cancel + staged progress | Batch session UI over `FilePicker.PickMultipleAsync` |
+| `PriceDropAlertService.ScanRecentReceipts` (date-windowed, on-demand) | Backfill: not scanned during import; correct dates keep old rows out of the window |
+
+- [x] **Prepare/Commit split** (`6c369f1`): `PrepareReceiptFileAsync` = hash-dedupe → OCR → signature
+      dedupe → parse to `ReceiptPrepared` (merchant, total, line count, `OcrDate` + `OcrFoundDate`).
+      `CommitPreparedReceipt(prepared, confirmedDate)` = date override on receipt **and** every price row
+      (both read `r.PurchaseDate`) → single-tx write. The one-shot `IngestReceiptFileAsync` recomposes them
+      (`Commit` with no override = `OcrDate ?? FallbackDate`) — behavior unchanged, existing 7 tests green.
+- [x] **Batch session** (`ImportBatchAsync` + `ReceiptDateDialog` + Backfill button): multi-pick →
+      per-receipt date-confirm-only stop → commit. **Never defaults to today:** a null resolver result
+      SKIPS the receipt (no write); the dialog disables Confirm until a date is entered when OCR found
+      none. Enforced in Core (`ImportBatchAsync` only commits with an explicit date) — a test asserts it.
+- [x] **Alert suppression** — *scope finding:* there is **no ingest-time alert hook** in the v1 code;
+      alerts are computed **on-demand** in Savings.razor, and `ScanRecentReceipts` is windowed to the last
+      21 days. So the load-bearing suppression mechanism is **correct purchase dates** (the batch never
+      scans alerts, and correctly-dated old receipts fall outside the 21-day window and aren't "current").
+      A test demonstrates: a batch of 40–55-day-old receipts fires 0 on `ScanRecentReceipts`, a fresh cheap
+      receipt fires ≥1. Wiring scan-on-ingest + local notifications stays a later phase (v1 Q8, never built).
+- [x] **Batch summary:** per-file `BatchImportStatus` (Imported / DuplicateFile / DuplicateSignature /
+      Skipped / Failed / Cancelled); `BatchImportSummary` counts. Retention keeps the copied image only for
+      Imported receipts; the rest are deleted. Per-receipt tx means cancel-mid-batch leaves nothing partial.
+- [x] **Tests (7 new, 299 total):** date override reaches receipt + price rows; commit-without-override
+      uses the OCR date; prepare flags missing OCR date; batch mixed outcomes; in-run signature duplicate;
+      never-default-to-today; old-backfill-vs-fresh scan suppression.
+
+**Done:** 3-file canned batch runs date-confirm→commit in tests; single-receipt path regression-green;
+`dotnet test` green (299/0); Windows head builds 0/0.
+
+*Residual 5% (unchanged):* MAUI multi-pick + the date dialog only prove out on a real device (picker
+limits, huge images, dialog UX) — not drivable headless, same ceiling as Phase 8/9.
+
+---
+
+## Phase 2 — Item-manager + alias correction  ☐   (confidence: 95%)
+
+The fuzzy-matching reliability lever (BACKLOG). Must exist before the physical backfill session.
+
+| Port FROM | Port INTO |
+|---|---|
+| `data/repositories/items_admin_repo.py` | `GrocerySense.Data/Repositories/ItemsAdminRepo.cs` |
+| (no Python UI reference — new UX) | `/items` route + correction dialog on the receipt browser |
+
+- [ ] **`ItemsAdminRepo` port:** merge item A→B re-points **every FK-bearing table in one transaction**
+      — prices, receipt line items, shopping-list rows, aliases, **and the new `watchlist` table**
+      (post-dates the Python reference — enumerate v2-era tables, don't trust the Python FK list).
+      Rename keeps identity, writes the old name as an alias. No-partial-rows test for merge.
+- [ ] **Alias-correction UX** (grill Q14 — **fix line + learn**): from a receipt-browser line →
+      "Wrong item?" → search/pick the correct item (or create new) → one transaction: re-point the line
+      item + its price row AND `UpsertAlias(rawText → item)`. No retro-sweep — historical damage is
+      cleaned by merge, deliberately.
+- [ ] `/items` route: list/search items, per-item alias list, merge + rename actions with confirm.
+- [ ] Tests: merge FK sweep (build rows in every referencing table → merge → zero orphans, counts
+      preserved), rename+alias, correction transaction (line + price + alias move together or not at all).
+
+**Done when:** a seeded mis-map is fixable end-to-end (correct line → alias learned → next canned scan
+maps right); merge leaves zero orphans; `dotnet test` green.
+
+**→ After Phase 2 lands: run the real 6-month backfill session** (the human task — scan, confirm dates,
+correct mis-maps as they appear). Phase 3 consumes its output.
+
+*Residual 5%:* the correction dialog is net-new UX with no Python reference; merge FK enumeration must
+be verified against the live schema, not the docs.
+
+---
+
+## Phase 3 — Real-data tuning pass  ☐   (confidence: 95% — process confidence; outcomes are data-dependent by design)
+
+Evaluate-and-adjust against the backfilled corpus. "No change needed" is a valid, recorded outcome.
+
+- [ ] **Fuzzy thresholds** (FuzzySharp 0.78 accept / 0.90 learn): measure mis-map + unmapped rates from
+      the backfill (aliases written, corrections made, lines left unmapped). Adjust only if the data
+      says so; document at the call site (v1 convention).
+- [ ] **Optimizer defaults** (`maxStores`=3, `minItemSavingPct`=10%, `minStoreSaving`=$5): run real
+      shopping lists against real history; adjust shipped defaults if plans look wrong. They remain
+      user-settings either way.
+- [ ] **Alert thresholds** (15% below-usual, 5% near-low, staple = ≥3 receipts/≥4 lines/90d, 30-day
+      cooldown): check alert volume/quality on the first post-backfill scans — noisy vs silent.
+- [ ] Record every decision (changed or confirmed) in `IMPLEMENTATION_NOTES.md`.
+
+**Done when:** all three threshold families have a recorded verdict backed by corpus numbers.
+
+*Residual 5%:* can't pre-commit to outcomes — the corpus decides; the process itself has no unknowns.
+
+---
+
+## Phase 4 — Meal planning (straight Phase-7 port)  ☐   (confidence: 96%)
+
+The PORTING.md Phase-7 spec, unchanged. Reference implementation + 4 Python test files exist.
+
+| Port FROM | Port INTO |
+|---|---|
+| `recipes/recipe_engine.py` | `Core/Services/RecipeEngine.cs` |
+| `recipes/recipes.json` (62 recipes) | **EmbeddedResource in `GrocerySense.Core`** (assembly manifest stream — keeps RecipeEngine MAUI-free/testable) |
+| `services/meal_suggestion_service.py` | `Core/Services/MealSuggestionService.cs` |
+| `services/weekly_planner_service.py` | `Core/Services/WeeklyPlannerService.cs` |
+
+- [ ] RecipeEngine: load/filter-by-ingredients-and-profile/get-by-name. recipes.json parsed via a
+      source-gen `JsonSerializerContext` (AOT rule).
+- [ ] MealSuggestion scoring + WeeklyPlanner aggregation → shopping list via the existing
+      `IngredientMappingService`/`ShoppingListService` (same seams Phase-5 ingest uses).
+- [ ] **Meal-profile inputs return to the Preferences UI** (protein weights, cuisines — deferred out of
+      v1 because only meal planning consumed them). Data plumbing already exists
+      (`EffectivePreferences` carries proteins/oils/weights); this is UI fields + save, not a migration.
+- [ ] `/meals` route: suggestions + weekly plan → add-to-list.
+- [ ] Port all four test files: `test_recipe_engine`, `test_recipes_catalog`, `test_meal_suggestion`,
+      `test_weekly_planner`.
+
+**Done when:** all four ported test suites green; a weekly plan lands on the shopping list through the
+real mapping path.
+
+*Residual 4%:* typed-record reshaping of Python dict returns (known, mechanical); scoring parity worth a
+fixture spot-check.
+
+---
+
+## Phase 5 — Family members + meal-picks  ☐   (confidence: 95%)
+
+Names-only members (grill Q5) + the Python family-picks flow verbatim. **Depends on Phase 4**
+(`pick_meal` → RecipeEngine).
+
+| Port FROM | Port INTO |
+|---|---|
+| `config_store` member subset: list/add/rename/delete, active member, master role | `Core/Services/ConfigStore.cs` (extend) |
+| `data/repositories/member_requests_repo.py` (all 7 fns) | `Data/Repositories/MemberRequestsRepo.cs` + migration-ledger entry |
+| `services/family_requests_service.py` | `Core/Services/FamilyRequestsService.cs` |
+
+- [ ] **ConfigStore members = id + name + role only.** No per-member profiles — the single household
+      profile is untouched (its forward-compatible shape was built for exactly this). Active-member
+      picker state lives here too.
+- [ ] **Flow semantics are locked by the Python source (verified in the grill): no approval gate.**
+      Picks add to the shared list immediately (`added_by`/`added_by_member_id` — columns already exist
+      in the C# schema, no migration); request rows are created **only for secondary members** (master
+      never self-notifies); parent badge = unreviewed count; remove = soft-delete the created rows +
+      mark reviewed; `PickableRecipes()` hides household hard-excludes/allergens.
+- [ ] UI: member picker (appbar chip or Preferences), "Family pick" on the Meals route (pickable recipes
+      + quick-add item), parent review inbox (unreviewed list, keep/remove) + badge.
+- [ ] Tests: port the repo/service behavior — secondary-creates-request vs master-doesn't, remove
+      soft-deletes exactly the created rows, allergen recipe never pickable.
+
+**Done when:** kid-picks-meal → ingredients on list attributed → parent badge → review keep/remove,
+end-to-end on a temp DB; `dotnet test` green.
+
+*Residual 5%:* member-switching UX ergonomics on one shared phone (design taste, not correctness);
+everything behavioral has a reference implementation.
+
+---
+
+## Phase 6 — DB maintenance + v2 release  ☐   (confidence: 96%)
+
+| Port FROM | Port INTO |
+|---|---|
+| `services/db_maintenance_service.py` (`backup_database`, `export_to_csv`, `export_to_json`) | `Core/Services/DbMaintenanceService.cs` |
+
+- [ ] **Backup:** `VACUUM INTO` a temp file → **Android share sheet** (grill Q15 — no new permissions,
+      no folder picker). Scope = the DB file only; receipt images are explicitly not included (document
+      in the UI copy).
+- [ ] **Export:** CSV + JSON per the Python reference → cache file → share sheet. Money stays TEXT-exact
+      in exports (no double round-trip).
+- [ ] Maintenance section on Preferences (or `/stores`-style setup page): backup, export, last-backup
+      timestamp.
+- [ ] **Release:** version bump; `dotnet publish -f net10.0-android -c Release` signed APK (Phase-0
+      keystore); regression gate = full `dotnet test` + on-device smoke of all routes (v1 six + Savings,
+      Items, Meals, review inbox); distribute to the ring (manual reinstall, as v1).
+
+**Done when:** backup restores to a working DB on a second device/emulator; exports open clean;
+signed v2 APK on the family phone.
+
+*Residual 4%:* share-sheet file-provider wiring on Android (known MAUI pattern, occasionally fiddly);
+restore-path verification needs a second device/emulator.
+
+---
+
+## Verification — every phase ends GREEN (unchanged from v1)
+
+- `dotnet test Grocery_Sense/GrocerySense.Tests/GrocerySense.Tests.csproj` green at every phase boundary.
+- No-partial-rows test for every new transactional write (batch commit, merge, correction, request rows).
+- `dotnet build GrocerySense.Integrations` separately when integration files change (Tests doesn't build it).
+- App head builds on Windows **and Android** (Phase 0 unblocks Android).
+- No `NotImplementedException` in files claimed done; per-task discipline stays add-test → implement →
+  green → commit.

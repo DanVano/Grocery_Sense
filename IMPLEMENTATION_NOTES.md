@@ -208,3 +208,43 @@ Local-buildable scope done; the two items that need infra beyond this machine st
     permissions are in place; only Windows + Android build on this machine. Verified on **net10.0-windows**.
 - **No test delta** — Phase 9 is platform glue (pickers, secure store, manifests), none of it unit-testable
   in the offline xUnit host. Still 276 tests, 0 skipped; App head builds on net10.0-windows.
+
+---
+
+# v2 — Family release (planned in `V2_PLAN.md`, grilled 2026-07-02)
+
+## v2 Phase 1 — Backfill on-ramp (bulk receipt import)
+
+Split `ReceiptIngestionService` into `PrepareReceiptFileAsync` / `CommitPreparedReceipt`, added
+`ImportBatchAsync`, and a `ReceiptDateDialog` + Backfill button on the Receipts route. 299 tests, 0 skipped;
+Windows head builds 0/0.
+
+- **The split is behavior-preserving by construction.** `Prepare` does steps 1–4 (file-hash dedupe → OCR →
+  signature dedupe → `BuildIngest`); `Commit` does step 5 (the transaction). The one-shot
+  `IngestReceiptFileAsync` = `Prepare` then `Commit` with no override, and `Commit`'s date resolves
+  `confirmedDate ?? OcrDate ?? FallbackDate` — identical to the old inline `IsIsoDate(ocr) ? ocr :
+  InferDate(file)`. The 7 pre-existing ingest tests are the regression net and stayed green untouched.
+- **Date override is one field.** `ReceiptsRepo.IngestReceipt` stamps `r.PurchaseDate` on both the receipt
+  row and every price row, so `prepared.Ingest with { PurchaseDate = date }` reaches both. No per-line date.
+- **"Never default to today" is enforced in Core, not just the UI.** `ImportBatchAsync` only calls `Commit`
+  when the resolver returns a non-null date; a null result is a `Skipped` item (no write). There is no
+  today-fallback path in the batch. The dialog's Confirm-disabled-until-dated is the UI belt on top. The
+  legacy single-scan path keeps its `FallbackDate` (mtime→today) — a fresh scan's mtime is fine; only the
+  backfill of old paper is poisoned by a today default.
+- **Alert suppression — scope finding.** The v1 code has **no ingest-time alert hook**: `PriceDropAlertService`
+  is invoked only on-demand from Savings.razor, and `ScanRecentReceipts` is windowed to the last 21 days.
+  So "suppress alerts during backfill" is delivered by (a) the batch never scanning alerts and (b) correct
+  purchase dates keeping old rows outside the 21-day window and out of "current price". A test
+  (`Backfilled_old_receipts_do_not_fire_the_recent_scan_but_a_fresh_one_does`) pins this: 4 receipts dated
+  40–55 days ago fire 0, a fresh 20%-under receipt fires ≥1. Wiring scan-on-ingest + local notifications
+  (v1 Q8, `Plugin.LocalNotification`, never built) stays a later phase.
+- **Batch runs sequentially on the UI thread** (not `Task.Run`): the date resolver must show a MudDialog,
+  which needs the UI sync context. OCR is async I/O (doesn't block); `Commit` is a sync SQLite write but
+  runs between multi-second human date confirms, so UI-thread time is negligible. `IProgress<int>` reports
+  files-done for the "N / total" caption.
+- **Retention:** the batch copies all picks up front, then keeps the copied image only for `Imported`
+  outcomes — duplicates/skips/failures/cancellations get their copy deleted (mirrors the single-import
+  orphan cleanup). Cancel-mid-batch: the per-receipt transaction means committed receipts stay, nothing
+  partial; remaining files are marked `Cancelled` and their copies dropped.
+- **`ReceiptPrepared.Duplicate`** carries the short-circuit outcome when file/signature dedupe decides
+  before the user is asked anything (`Ingest == null`), so the batch records Duplicate without a date prompt.
