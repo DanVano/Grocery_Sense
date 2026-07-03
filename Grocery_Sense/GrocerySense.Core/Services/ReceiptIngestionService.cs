@@ -37,12 +37,25 @@ public sealed class ReceiptIngestionService
         _multibuy = multibuy;
     }
 
+    // One-shot ingest (single-scan path): prepare then auto-commit with the OCR/mtime date. Behavior is
+    // identical to the pre-split method — Commit with no override resolves OcrDate ?? FallbackDate.
     public async Task<IngestOutcome> IngestReceiptFileAsync(string filePath, bool replaceExisting = false,
+        CancellationToken ct = default)
+    {
+        var prepared = await PrepareReceiptFileAsync(filePath, replaceExisting, ct);
+        return prepared.Duplicate ?? CommitPreparedReceipt(prepared);
+    }
+
+    // Phase 1 (backfill on-ramp): the OCR + parse half, split from the DB write so the caller can confirm the
+    // purchase date before committing. Runs file-hash dedupe (pre-OCR), OCR, signature dedupe, then parse. If a
+    // dedupe decides the outcome, returns it in Duplicate with Ingest == null (no date prompt needed).
+    public async Task<ReceiptPrepared> PrepareReceiptFileAsync(string filePath, bool replaceExisting = false,
         CancellationToken ct = default)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException("Receipt file not found", filePath);
 
         var fileHash = ComputeSha256(filePath);
+        var fallbackDate = InferDate(filePath);
 
         // 1) file-hash dedupe (BEFORE any OCR call).
         var replaced = false;
@@ -52,7 +65,7 @@ public sealed class ReceiptIngestionService
             if (existing is not null)
             {
                 if (!replaceExisting)
-                    return new IngestOutcome(existing, true, null, null, "file_hash");
+                    return Decided(new IngestOutcome(existing, true, null, null, "file_hash"), fallbackDate);
                 ReceiptsRepo.DeleteReceiptWithBackup(conn, existing.Value);
                 replaced = true;
             }
@@ -71,7 +84,8 @@ public sealed class ReceiptIngestionService
             if (existingSig is not null)
             {
                 if (!replaceExisting)
-                    return new IngestOutcome(existingSig, true, operationId, null, "signature");
+                    return Decided(new IngestOutcome(existingSig, true, operationId, null, "signature"),
+                        fallbackDate, operationId, replaced);
                 ReceiptsRepo.DeleteReceiptWithBackup(conn, existingSig.Value);
                 replaced = true;
             }
@@ -81,27 +95,105 @@ public sealed class ReceiptIngestionService
         var ingest = BuildIngest(rawJson, filePath, operationId, fileHash, signature, ct);
         _mapper.FlushLearnedAliases();
 
-        // 5) atomic receipt/raw/line/price/dedupe write.
-        using (var conn = _factory.Open())
+        var ocrDate = sigDate.Length > 0 ? sigDate : null; // ExtractHeaderForSignature keeps only ISO dates
+        return new ReceiptPrepared(ingest, operationId, ocrDate, fallbackDate,
+            string.IsNullOrEmpty(merchant) ? "Unknown Store" : merchant, total, ingest.Lines.Count, replaced, null);
+    }
+
+    // The DB-write half. confirmedDate overrides the purchase date on the receipt AND every price row (both
+    // read r.PurchaseDate in ReceiptsRepo.IngestReceipt). With no override, resolves OcrDate ?? FallbackDate —
+    // the single-scan default. Backfill callers pass an explicit confirmedDate so an undated old receipt is
+    // never stamped "today".
+    public IngestOutcome CommitPreparedReceipt(ReceiptPrepared prepared, string? confirmedDate = null)
+    {
+        if (prepared.Duplicate is not null) return prepared.Duplicate;
+        if (prepared.Ingest is null) throw new InvalidOperationException("Nothing prepared to commit.");
+
+        var date = confirmedDate ?? prepared.OcrDate ?? prepared.FallbackDate;
+        var ingest = prepared.Ingest with { PurchaseDate = date };
+        var operationId = prepared.OperationId;
+
+        using var conn = _factory.Open();
+        using var tx = conn.BeginTransaction();
+        try
         {
-            using var tx = conn.BeginTransaction();
-            try
-            {
-                var receiptId = ReceiptsRepo.IngestReceipt(conn, ingest, tx);
-                tx.Commit();
-                return new IngestOutcome(receiptId, false, operationId, null, null, replaced);
-            }
-            catch (SqliteException e) when (e.SqliteErrorCode == 19)
-            {
-                tx.Rollback();
-                if (ReceiptsRepo.FindReceiptIdByFileHash(conn, fileHash) is { } byHash)
-                    return new IngestOutcome(byHash, true, operationId, null, "file_hash");
-                if (signature is not null && ReceiptsRepo.FindReceiptIdBySignature(conn, signature) is { } bySig)
-                    return new IngestOutcome(bySig, true, operationId, null, "signature");
-                throw;
-            }
+            var receiptId = ReceiptsRepo.IngestReceipt(conn, ingest, tx);
+            tx.Commit();
+            return new IngestOutcome(receiptId, false, operationId, null, null, prepared.ReplacedExisting);
+        }
+        catch (SqliteException e) when (e.SqliteErrorCode == 19)
+        {
+            tx.Rollback();
+            if (ingest.FileHash is { } fh && ReceiptsRepo.FindReceiptIdByFileHash(conn, fh) is { } byHash)
+                return new IngestOutcome(byHash, true, operationId, null, "file_hash");
+            if (ingest.Signature is { } sig && ReceiptsRepo.FindReceiptIdBySignature(conn, sig) is { } bySig)
+                return new IngestOutcome(bySig, true, operationId, null, "signature");
+            throw;
         }
     }
+
+    // Backfill batch import: prepare each file, ask dateResolver for the confirmed purchase date, then commit.
+    // dateResolver returns the ISO date to use, or null to SKIP the receipt (no write) — there is no "default
+    // to today" path, so an undated receipt the user declines to date is simply skipped, never mis-stamped.
+    // Alerts are deliberately NOT scanned here (backfill suppression); run ScanRecentReceipts once afterwards.
+    // ponytail: sequential — 50-150 receipts, each gated on a human date confirm; concurrency buys nothing.
+    public async Task<BatchImportSummary> ImportBatchAsync(IReadOnlyList<string> filePaths,
+        Func<ReceiptPrepared, CancellationToken, Task<string?>> dateResolver, bool replaceExisting = false,
+        IProgress<int>? progress = null, CancellationToken ct = default)
+    {
+        var items = new List<BatchImportItem>(filePaths.Count);
+        for (var i = 0; i < filePaths.Count; i++)
+        {
+            var path = filePaths[i];
+            if (ct.IsCancellationRequested)
+            {
+                items.Add(new BatchImportItem(path, BatchImportStatus.Cancelled, null, null));
+                continue;
+            }
+            try
+            {
+                var prepared = await PrepareReceiptFileAsync(path, replaceExisting, ct);
+                if (prepared.Duplicate is { } dup)
+                {
+                    var status = dup.DuplicateReason == "signature"
+                        ? BatchImportStatus.DuplicateSignature : BatchImportStatus.DuplicateFile;
+                    items.Add(new BatchImportItem(path, status, dup.ReceiptId, dup.DuplicateReason));
+                    continue;
+                }
+
+                var confirmedDate = await dateResolver(prepared, ct);
+                if (confirmedDate is null)
+                {
+                    items.Add(new BatchImportItem(path, BatchImportStatus.Skipped, null,
+                        prepared.OcrFoundDate ? "skipped" : "no date confirmed"));
+                    continue;
+                }
+
+                var outcome = CommitPreparedReceipt(prepared, confirmedDate);
+                var committed = outcome.WasDuplicate
+                    ? new BatchImportItem(path,
+                        outcome.DuplicateReason == "signature"
+                            ? BatchImportStatus.DuplicateSignature : BatchImportStatus.DuplicateFile,
+                        outcome.ReceiptId, outcome.DuplicateReason)
+                    : new BatchImportItem(path, BatchImportStatus.Imported, outcome.ReceiptId, null);
+                items.Add(committed);
+            }
+            catch (OperationCanceledException)
+            {
+                items.Add(new BatchImportItem(path, BatchImportStatus.Cancelled, null, null));
+            }
+            catch (Exception e)
+            {
+                items.Add(new BatchImportItem(path, BatchImportStatus.Failed, null, e.Message));
+            }
+            progress?.Report(i + 1);
+        }
+        return new BatchImportSummary(items);
+    }
+
+    private static ReceiptPrepared Decided(IngestOutcome outcome, string fallbackDate,
+        string? operationId = null, bool replaced = false) =>
+        new(null, operationId, null, fallbackDate, "", null, 0, replaced, outcome);
 
     private ReceiptIngest BuildIngest(Dictionary<string, object?> rawJson, string filePath, string operationId,
         string fileHash, string? signature, CancellationToken ct)

@@ -21,9 +21,30 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
             string filePath, CancellationToken ct = default) => Task.FromResult((op, raw));
     }
 
+    // Dequeues one canned AnalyzeResult per call so a multi-file batch gets distinct receipts.
+    private sealed class SeqOcr(Queue<Dictionary<string, object?>> raws) : IReceiptOcrClient
+    {
+        private int _n;
+        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
+            string filePath, CancellationToken ct = default) =>
+            Task.FromResult(($"op-{++_n}", raws.Dequeue()));
+    }
+
     private ReceiptIngestionService Build(TempDb db, Dictionary<string, object?> raw) =>
         new(new FakeOcr(raw), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
+
+    private ReceiptIngestionService BuildSeq(TempDb db, params Dictionary<string, object?>[] raws) =>
+        new(new SeqOcr(new Queue<Dictionary<string, object?>>(raws)), db.Factory,
+            new IngredientMappingService(db.Factory), new UnitNormalizationService(), new MultiBuyDealService());
+
+    private static string? PriceDate(TempDb db, int itemId)
+    {
+        using var cmd = db.Conn.CreateCommand();
+        cmd.CommandText = "SELECT date FROM prices WHERE item_id = $i LIMIT 1";
+        cmd.Parameters.AddWithValue("$i", itemId);
+        return cmd.ExecuteScalar() as string;
+    }
 
     private string WriteFile(string content)
     {
@@ -203,4 +224,132 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
         Assert.Equal(firstId, ReceiptsRepo.FindReceiptIdByFileHash(db.Conn, "same-hash"));
         Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn));
     }
+
+    // ---------- Phase 1: prepare/commit split + backfill batch ----------
+
+    [Fact]
+    public async Task Commit_with_confirmed_date_overrides_receipt_and_price_rows()
+    {
+        using var db = new TempDb();
+        var svc = Build(db, Raw("Loblaws", "2026-06-01", 4.99, ("Milk", 1, 4.99, 4.99)));
+
+        var prepared = await svc.PrepareReceiptFileAsync(WriteFile("a"));
+        Assert.Equal("2026-06-01", prepared.OcrDate); // OCR found a date
+        var outcome = svc.CommitPreparedReceipt(prepared, confirmedDate: "2026-01-15");
+
+        var receipt = Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn));
+        Assert.Equal("2026-01-15", receipt.PurchaseDate);
+        var milk = ReceiptsRepo.ListReceiptLineItems(db.Conn, outcome.ReceiptId!.Value).Single();
+        Assert.Equal("2026-01-15", PriceDate(db, milk.ItemId!.Value)); // override reaches the price row too
+    }
+
+    [Fact]
+    public async Task Commit_without_override_uses_the_ocr_date()
+    {
+        using var db = new TempDb();
+        var svc = Build(db, Raw("Loblaws", "2026-06-01", 4.99, ("Milk", 1, 4.99, 4.99)));
+
+        var prepared = await svc.PrepareReceiptFileAsync(WriteFile("a"));
+        svc.CommitPreparedReceipt(prepared); // single-scan path: no override
+
+        Assert.Equal("2026-06-01", Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn)).PurchaseDate);
+    }
+
+    [Fact]
+    public async Task Prepare_flags_when_ocr_found_no_date()
+    {
+        using var db = new TempDb();
+        var svc = Build(db, Raw("Loblaws", "", 4.99, ("Milk", 1, 4.99, 4.99))); // no transaction date
+
+        var prepared = await svc.PrepareReceiptFileAsync(WriteFile("a"));
+
+        Assert.Null(prepared.OcrDate);
+        Assert.False(prepared.OcrFoundDate);
+        Assert.NotNull(prepared.Ingest); // still committable, but the caller must supply a date
+    }
+
+    [Fact]
+    public async Task ImportBatch_applies_confirmed_dates_and_reports_each_outcome()
+    {
+        using var db = new TempDb();
+        var svc = BuildSeq(db,
+            Raw("Loblaws", "2026-06-01", 4.99, ("Milk", 1, 4.99, 4.99)),
+            Raw("Metro", "2026-06-02", 3.50, ("Bread", 1, 3.50, 3.50)),
+            Raw("Sobeys", "2026-06-03", 2.00, ("Eggs", 1, 2.00, 2.00)));
+        var files = new[] { WriteFile("f1"), WriteFile("f2"), WriteFile("f3") };
+
+        // Confirm the OCR date for the first two; skip the third (resolver returns null).
+        var summary = await svc.ImportBatchAsync(files,
+            (p, _) => Task.FromResult<string?>(p.Merchant == "Sobeys" ? null : p.OcrDate));
+
+        Assert.Equal(2, summary.Imported);
+        Assert.Equal(1, summary.Skipped);
+        Assert.Equal(2, ReceiptsRepo.ListRecentReceipts(db.Conn).Count);
+        Assert.Equal(BatchImportStatus.Skipped, summary.Items[2].Status);
+    }
+
+    [Fact]
+    public async Task ImportBatch_reports_a_signature_duplicate_within_the_run()
+    {
+        using var db = new TempDb();
+        var dup = Raw("Loblaws", "2026-06-01", 4.99, ("Milk", 1, 4.99, 4.99));
+        var svc = BuildSeq(db, dup, Clone(dup)); // identical merchant/date/total => same signature
+        var files = new[] { WriteFile("f1"), WriteFile("f2-different-bytes") };
+
+        var summary = await svc.ImportBatchAsync(files, (p, _) => Task.FromResult<string?>(p.OcrDate));
+
+        Assert.Equal(1, summary.Imported);
+        Assert.Equal(1, summary.Duplicates);
+        Assert.Equal(BatchImportStatus.DuplicateSignature, summary.Items[1].Status);
+        Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn));
+    }
+
+    [Fact]
+    public async Task ImportBatch_never_defaults_an_undated_receipt_to_today()
+    {
+        using var db = new TempDb();
+        var svc = BuildSeq(db,
+            Raw("Loblaws", "", 4.99, ("Milk", 1, 4.99, 4.99)),   // undated -> caller supplies the date
+            Raw("Metro", "", 3.50, ("Bread", 1, 3.50, 3.50)));   // undated -> caller declines (skip)
+        var files = new[] { WriteFile("f1"), WriteFile("f2") };
+        var today = DateTime.Now.ToString("yyyy-MM-dd");
+
+        var summary = await svc.ImportBatchAsync(files,
+            (p, _) => Task.FromResult<string?>(p.Merchant == "Loblaws" ? "2026-01-15" : null));
+
+        Assert.Equal(1, summary.Imported);
+        Assert.Equal(1, summary.Skipped);
+        var receipt = Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn));
+        Assert.Equal("2026-01-15", receipt.PurchaseDate);      // the confirmed backfill date...
+        Assert.NotEqual(today, receipt.PurchaseDate);          // ...never silently "today"
+    }
+
+    // The load-bearing suppression property: correctly-dated old backfill sits outside the recent-receipt
+    // scan window, so a bulk import fires no alerts; a fresh scan afterwards still does.
+    [Fact]
+    public async Task Backfilled_old_receipts_do_not_fire_the_recent_scan_but_a_fresh_one_does()
+    {
+        using var db = new TempDb();
+        // Four "usual price" receipts dated 40-55 days ago: within the 180-day usual window, outside the
+        // 21-day recent-scan window.
+        var old = Enumerable.Range(0, 4)
+            .Select(i => Raw($"Loblaws", DateTime.UtcNow.AddDays(-40 - i * 5).ToString("yyyy-MM-dd"), 10.0,
+                ("Milk", 1, 10.0, 10.0)))
+            .ToArray();
+        var svc = BuildSeq(db, old);
+        var files = old.Select((_, i) => WriteFile($"old-{i}")).ToArray();
+
+        await svc.ImportBatchAsync(files, (p, _) => Task.FromResult<string?>(p.OcrDate));
+
+        var alerts = new PriceDropAlertService(db.Factory);
+        Assert.Equal(0, alerts.ScanRecentReceipts()); // nothing recent -> backfill fires no alerts
+
+        // A fresh receipt today at 20% under the established usual price -> a real alert.
+        var fresh = Build(db, Raw("Loblaws", DateTime.UtcNow.ToString("yyyy-MM-dd"), 8.0, ("Milk", 1, 8.0, 8.0)));
+        await fresh.IngestReceiptFileAsync(WriteFile("fresh"));
+        Assert.True(alerts.ScanRecentReceipts() >= 1);
+    }
+
+    private static Dictionary<string, object?> Clone(Dictionary<string, object?> raw) =>
+        JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(raw))!;
 }

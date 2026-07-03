@@ -98,6 +98,32 @@ public record IngestOutcome(
     int? ReceiptId, bool WasDuplicate, string? OperationId, string? Error,
     string? DuplicateReason = null, bool ReplacedExisting = false);
 
+// The result of PrepareReceiptFileAsync: either a decided duplicate (Duplicate != null, before the user is
+// asked anything) or a ready-to-commit receipt (Ingest != null) awaiting a confirmed purchase date. OcrDate
+// is the ISO date OCR actually found, or null — when null the caller MUST supply a date (backfill rule:
+// never default an undated old receipt to today). FallbackDate is the single-scan path's mtime/today guess.
+public sealed record ReceiptPrepared(
+    ReceiptIngest? Ingest, string? OperationId, string? OcrDate, string FallbackDate,
+    string Merchant, double? Total, int LineCount, bool ReplacedExisting, IngestOutcome? Duplicate)
+{
+    public bool OcrFoundDate => OcrDate is not null;
+}
+
+// Per-file result within a backfill batch import.
+public enum BatchImportStatus { Imported, DuplicateFile, DuplicateSignature, Skipped, Failed, Cancelled }
+
+public sealed record BatchImportItem(string FilePath, BatchImportStatus Status, int? ReceiptId, string? Detail);
+
+public sealed record BatchImportSummary(IReadOnlyList<BatchImportItem> Items)
+{
+    public int Imported => Items.Count(i => i.Status == BatchImportStatus.Imported);
+    public int Duplicates => Items.Count(i =>
+        i.Status is BatchImportStatus.DuplicateFile or BatchImportStatus.DuplicateSignature);
+    public int Skipped => Items.Count(i => i.Status == BatchImportStatus.Skipped);
+    public int Failed => Items.Count(i => i.Status == BatchImportStatus.Failed);
+    public int Cancelled => Items.Count(i => i.Status == BatchImportStatus.Cancelled);
+}
+
 // Recipe wrapper — port of recipes/recipe_engine.py Recipe.
 public sealed record Recipe(Dictionary<string, object?> Raw)
 {
