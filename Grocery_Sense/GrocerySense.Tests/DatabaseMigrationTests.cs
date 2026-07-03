@@ -28,13 +28,12 @@ public sealed class DatabaseMigrationTests : IDisposable
             "receipt_line_items", "item_aliases", "shopping_list", "deleted_receipt_backups",
             "receipt_raw_json", "receipt_file_hashes", "receipt_signatures",
             "flyer_batches", "flyer_assets", "flyer_raw_json", "flyer_deals",
-            "watchlist",
+            "price_drop_alerts", "watchlist", "member_requests",
         };
         foreach (var t in expected)
             Assert.Contains(t, tables);
 
-        // v1 scope: these are deferred and must NOT be created.
-        Assert.DoesNotContain("member_requests", tables);
+        // Still deferred (no such table): the old per-member user_profile table.
         Assert.DoesNotContain("user_profile", tables);
     }
 

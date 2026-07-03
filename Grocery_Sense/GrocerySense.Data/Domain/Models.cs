@@ -131,6 +131,12 @@ public record ReceiptIngest(
     int? ImageConfidence, string OperationId, string? JsonPath, string RawJson, string? FileHash,
     string? Signature, IReadOnlyList<ReceiptIngestLine> Lines);
 
+// A family meal-pick request (port of member_requests_repo.MemberRequestRow). ItemRowIds are the
+// shopping_list ids the pick created, so a parent review can undo exactly those rows.
+public record MemberRequestRow(
+    int Id, int? MemberId, string MemberName, string Kind, string Label,
+    IReadOnlyList<int> ItemRowIds, string CreatedAt, bool Reviewed);
+
 public record MonthSpend(string Month, decimal Total, int ReceiptCount);
 
 public record SpendTrendPoint(string Month, decimal Total, int ReceiptCount);

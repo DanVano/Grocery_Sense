@@ -319,6 +319,24 @@ public static class Database
         );
         CREATE INDEX idx_watchlist_active ON watchlist(is_active);
         """,
+
+        // ----- Migration 5: family meal-picks (member_requests, v2 Phase 5) -----
+        // Port of the table member_requests_repo.py self-creates. member_id is a config-JSON member id (no DB
+        // members table -> no FK, matching Python). item_row_ids is a JSON array of shopping_list ids the pick
+        // created, so a parent review can soft-delete exactly those rows.
+        """
+        CREATE TABLE member_requests (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id    INTEGER,
+            member_name  TEXT NOT NULL DEFAULT '',
+            kind         TEXT NOT NULL,
+            label        TEXT NOT NULL DEFAULT '',
+            item_row_ids TEXT NOT NULL DEFAULT '[]',
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            reviewed     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_member_requests_reviewed ON member_requests(reviewed);
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

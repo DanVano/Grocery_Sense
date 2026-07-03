@@ -96,6 +96,49 @@ public sealed class ConfigStore
             Save(cfg with { Household = cfg.Household with { ActiveMemberId = memberId } });
     }
 
+    public bool IsMaster(int memberId) => GetMember(memberId)?.Role == RoleMaster;
+
+    // A secondary member is any existing non-master (family meal-picks create a review request only for these).
+    public bool IsSecondary(int memberId)
+    {
+        var m = GetMember(memberId);
+        return m is not null && m.Role != RoleMaster;
+    }
+
+    // v2 members are names-only: id + name + role, with the canonical (unused-for-prefs) default profile.
+    // Preferences stay the single household profile on the master member.
+    public HouseholdMember AddMember(string name, string role = RoleSecondary)
+    {
+        var cfg = Load();
+        var nextId = cfg.Household.Members.Count == 0 ? 1 : cfg.Household.Members.Max(m => m.Id) + 1;
+        var member = new HouseholdMember(nextId, (name ?? "").Trim(), SanitizeRole(role), DefaultMemberProfile());
+        Save(cfg with { Household = cfg.Household with { Members = cfg.Household.Members.Append(member).ToList() } });
+        return member;
+    }
+
+    public void RenameMember(int memberId, string newName)
+    {
+        var cfg = Load();
+        var members = cfg.Household.Members
+            .Select(m => m.Id == memberId ? m with { Name = (newName ?? "").Trim() } : m).ToList();
+        Save(cfg with { Household = cfg.Household with { Members = members } });
+    }
+
+    // Removes a secondary member. The master and the last-remaining member can't be deleted (a household
+    // always keeps a master profile). If the removed member was active, active falls back to the primary.
+    public void DeleteMember(int memberId)
+    {
+        var cfg = Load();
+        var target = cfg.Household.Members.FirstOrDefault(m => m.Id == memberId);
+        if (target is null) return;
+        if (target.Role == RoleMaster) throw new InvalidOperationException("The master member can't be deleted.");
+        if (cfg.Household.Members.Count <= 1) throw new InvalidOperationException("The only member can't be deleted.");
+
+        var members = cfg.Household.Members.Where(m => m.Id != memberId).ToList();
+        var active = cfg.Household.ActiveMemberId == memberId ? cfg.Household.PrimaryMemberId : cfg.Household.ActiveMemberId;
+        Save(cfg with { Household = cfg.Household with { Members = members, ActiveMemberId = active } });
+    }
+
     // Union of all members' allergy tokens (canonical lowercase). Single member in v1, but the union
     // shape stays correct if v2 adds members.
     public IReadOnlySet<string> GetHouseholdAllergies()
