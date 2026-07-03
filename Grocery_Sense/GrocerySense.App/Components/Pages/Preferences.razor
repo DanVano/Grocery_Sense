@@ -4,6 +4,7 @@
 @using static GrocerySense.App.ServiceCollectionExtensions
 @inject ConfigStore Config
 @inject ISnackbar Snackbar
+@inject DbMaintenanceService Maintenance
 
 <MudText Typo="Typo.h5" GutterBottom="true">Preferences</MudText>
 
@@ -99,6 +100,23 @@ else
     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@_busy">Save preferences</MudButton>
 
     <MudPaper Class="pa-3 mt-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1">Data &amp; backup</MudText>
+        <MudText Typo="Typo.caption">Backup copies the database only (not receipt images). Files are handed to the share sheet — save them to Drive or email.</MudText>
+        <MudStack Row="true" Spacing="2" Class="mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Backup"
+                       OnClick="BackupAsync" Disabled="@_busy">Back up database</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableView"
+                       OnClick="@(() => ExportAsync("csv"))" Disabled="@_busy">Export CSV</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject"
+                       OnClick="@(() => ExportAsync("json"))" Disabled="@_busy">Export JSON</MudButton>
+        </MudStack>
+        @if (_lastBackup is { Length: > 0 })
+        {
+            <MudText Typo="Typo.caption" Class="mt-2">Last backup: @_lastBackup</MudText>
+        }
+    </MudPaper>
+
+    <MudPaper Class="pa-3 mt-4" Outlined="true">
         <MudText Typo="Typo.subtitle1">Cloud OCR (Azure)</MudText>
         <MudTextField @bind-Value="_azureEndpoint" Label="Endpoint" Variant="Variant.Outlined"
                       Margin="Margin.Dense" Class="mt-2" />
@@ -132,6 +150,9 @@ else
     private int? _renamingMemberId;
     private string _memberRenameText = "";
     private string _newMember = "";
+    private string _lastBackup = "";
+
+    private const string LastBackupKey = "last_backup_utc";
 
     protected override async Task OnInitializedAsync()
     {
@@ -139,6 +160,7 @@ else
         {
             var cfg = Config.Load();
             _members = cfg.Household.Members;
+            _lastBackup = FormatStamp(Microsoft.Maui.Storage.Preferences.Default.Get(LastBackupKey, ""));
             _postal = cfg.PostalCode;
             _city = cfg.City;
             _maxStores = cfg.MaxStores;
@@ -253,6 +275,54 @@ else
         SecureStorage.Default.Remove(key);
         return Task.CompletedTask;
     }
+
+    // Backup/export write to the app cache, then hand the file(s) to the OS share sheet — no new permissions,
+    // no folder picker (grill Q15). Backup is the DB only; receipt images are excluded.
+    private async Task BackupAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var dest = Path.Combine(FileSystem.CacheDirectory, $"grocery_sense_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+            await Task.Run(() => Maintenance.BackupDatabase(dest));
+            await Share.Default.RequestAsync(new ShareFileRequest { Title = "Grocery Sense backup", File = new ShareFile(dest) });
+            var now = DateTimeOffset.Now;
+            Microsoft.Maui.Storage.Preferences.Default.Set(LastBackupKey, now.ToString("o"));
+            _lastBackup = now.ToString("g");
+            Snackbar.Add("Backup ready to share.", Severity.Success);
+        }
+        catch (Exception ex) { _error = $"Backup failed: {ex.Message}"; }
+        finally { _busy = false; }
+    }
+
+    private async Task ExportAsync(string format)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var dir = Path.Combine(FileSystem.CacheDirectory, $"export_{format}_{DateTime.Now:yyyyMMdd_HHmmss}");
+            var files = await Task.Run(() =>
+                format == "json" ? Maintenance.ExportToJson(dir) : Maintenance.ExportToCsv(dir));
+            if (files.Count == 0)
+            {
+                Snackbar.Add("Nothing to export yet.", Severity.Info);
+                return;
+            }
+            await Share.Default.RequestAsync(new ShareMultipleFilesRequest
+            {
+                Title = $"Grocery Sense {format.ToUpperInvariant()} export",
+                Files = files.Select(f => new ShareFile(f)).ToList(),
+            });
+            Snackbar.Add($"{files.Count} file(s) ready to share.", Severity.Success);
+        }
+        catch (Exception ex) { _error = $"Export failed: {ex.Message}"; }
+        finally { _busy = false; }
+    }
+
+    private static string FormatStamp(string iso) =>
+        DateTimeOffset.TryParse(iso, out var dt) ? dt.ToLocalTime().ToString("g") : "";
 
     private void StartMemberRename(HouseholdMember m)
     {
