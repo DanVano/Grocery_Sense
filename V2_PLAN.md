@@ -223,35 +223,39 @@ tested against the same fixtures as Python.
 
 ---
 
-## Phase 5 — Family members + meal-picks  ☐   (confidence: 95%)
+## Phase 5 — Family members + meal-picks  ✅ DONE (2026-07-03)   (confidence: 95%)
 
-Names-only members (grill Q5) + the Python family-picks flow verbatim. **Depends on Phase 4**
-(`pick_meal` → RecipeEngine).
+Names-only members (grill Q5) + the Python family-picks flow verbatim. Commits `1b0c605` (plumbing) ·
+`90a11b4` (service) · `f72df85` (UI). 377 tests green; Windows head builds 0/0.
 
 | Port FROM | Port INTO |
 |---|---|
 | `config_store` member subset: list/add/rename/delete, active member, master role | `Core/Services/ConfigStore.cs` (extend) |
-| `data/repositories/member_requests_repo.py` (all 7 fns) | `Data/Repositories/MemberRequestsRepo.cs` + migration-ledger entry |
+| `data/repositories/member_requests_repo.py` (all 7 fns) | `Data/Repositories/MemberRequestsRepo.cs` + migration 5 |
 | `services/family_requests_service.py` | `Core/Services/FamilyRequestsService.cs` |
 
-- [ ] **ConfigStore members = id + name + role only.** No per-member profiles — the single household
-      profile is untouched (its forward-compatible shape was built for exactly this). Active-member
-      picker state lives here too.
-- [ ] **Flow semantics are locked by the Python source (verified in the grill): no approval gate.**
-      Picks add to the shared list immediately (`added_by`/`added_by_member_id` — columns already exist
-      in the C# schema, no migration); request rows are created **only for secondary members** (master
-      never self-notifies); parent badge = unreviewed count; remove = soft-delete the created rows +
-      mark reviewed; `PickableRecipes()` hides household hard-excludes/allergens.
-- [ ] UI: member picker (appbar chip or Preferences), "Family pick" on the Meals route (pickable recipes
-      + quick-add item), parent review inbox (unreviewed list, keep/remove) + badge.
-- [ ] Tests: port the repo/service behavior — secondary-creates-request vs master-doesn't, remove
-      soft-deletes exactly the created rows, allergen recipe never pickable.
+- [x] **ConfigStore members = id + name + role only.** `AddMember` (next id, secondary role, canonical
+      default profile — unused for prefs), `RenameMember`, `DeleteMember` (refuses the master + last member;
+      resets active to primary), `IsMaster`/`IsSecondary`. The single household profile (master member) is
+      untouched — no per-member preferences.
+- [x] **Flow semantics ported verbatim (no approval gate):** `PickMeal`/`PickItem` add to the shared list
+      immediately via `added_by`/`added_by_member_id` (columns already existed — no shopping-list migration);
+      a `member_requests` row is created **only for a secondary picker** (master never self-notifies);
+      `RemoveRequest` soft-deletes exactly the rows the pick created then marks it reviewed;
+      `PickableRecipes` hides household hard-excludes/allergens. Migration 5 adds the `member_requests` table
+      (member_id is a config-JSON id, no DB FK; item_row_ids a JSON array).
+- [x] UI: `/family` route (acting-as member selector, pickable recipes + quick-item, parent review queue
+      with Keep/Remove); Household-members management in Preferences; a Family nav badge = unreviewed count
+      (refreshed on navigation, best-effort, gated on DB-ready).
+- [x] Tests (13): repo round-trip + junk-tolerant decode (3); member CRUD incl. delete guards (4);
+      service flow — secondary-creates-request vs master-doesn't, item pick, allergen-not-pickable,
+      remove-undoes-exactly-its-rows, unknown-recipe-throws (6).
 
-**Done when:** kid-picks-meal → ingredients on list attributed → parent badge → review keep/remove,
-end-to-end on a temp DB; `dotnet test` green.
+**Done:** kid-picks-meal → 5 ingredients on the list attributed to "Kid" → unreviewed count 1 → Remove
+undoes exactly those 5 rows, all on a real temp DB (tested); `dotnet test` green (377/0); Windows head 0/0.
 
-*Residual 5%:* member-switching UX ergonomics on one shared phone (design taste, not correctness);
-everything behavioral has a reference implementation.
+*Residual 5%:* the `/family` route + nav badge are only provable on a real device; the badge refresh is
+best-effort (on navigation, no live event) — a design choice, not a correctness gap. All behavior tested.
 
 ---
 

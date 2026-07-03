@@ -311,3 +311,31 @@ returned to Preferences. All 4 Python planning suites ported (59 tests). 364 tot
 - **`/meals` "Add to list"** rebuilds the plan with `persistToShoppingList: true` rather than persisting a
   cached plan — the scoring is deterministic, so the rebuilt plan equals the displayed one, and the persist
   stays inside `WeeklyPlannerService` (one transaction) instead of leaking a persist path into the UI.
+
+## v2 Phase 5 — Family members + meal-picks
+
+`member_requests` (migration 5) + `MemberRequestsRepo` + ConfigStore member CRUD + `FamilyRequestsService`
++ `/family` route + member management in Preferences + a nav badge. 13 tests; 377 total, 0 skipped.
+
+- **Names-only members, single shared profile.** `ConfigStore.AddMember` creates a secondary with the
+  canonical default profile, but preferences are always read from the master member
+  (`ComputeEffectivePreferences` → `GetMasterMember`), so secondary profiles are inert. `DeleteMember`
+  refuses the master and the last-remaining member and resets `active` to primary if the active member was
+  removed. No shopping-list migration was needed — `added_by`/`added_by_member_id` shipped in v1.
+- **`member_requests` has no member FK** (members live in config JSON, not a DB table — matches Python).
+  `item_row_ids` is a JSON array of the shopping_list ids the pick created; decoded with `JsonDocument`
+  (AOT-safe) tolerating NULL/junk → `[]` rather than crashing the review screen.
+- **Flow ported verbatim (the crown-jewel is the safety net):** `PickableRecipes` runs every recipe through
+  the hard-profile filter (household allergens/hard-excludes) so a secondary can never pick an allergen
+  recipe; a review request is created **only for a secondary** picker; `RemoveRequest` soft-deletes exactly
+  the created rows then marks reviewed. Picks are not wrapped in one transaction (items added per-call, then
+  the request row) — matches Python; a partial failure leaves attributed items on the list without a review
+  row, which is recoverable, not corrupting.
+- **Family nav badge is best-effort**, refreshed on `NavigationManager.LocationChanged` and gated on
+  `Startup.Status == Ready`, errors swallowed (a stale/absent badge must never break the shell). No live
+  event from the service — the `/family` page itself always shows the accurate count.
+- **`Family.razor` injects the service as `Picks`, not `Family`** — a Razor component can't have a member
+  named after its own generated type (`CS0542`).
+- **Process note:** one commit briefly went red because `dotnet test | tail` in an `&&` chain masks the test
+  exit code (the pipe returns `tail`'s status). It was amended clean immediately. Run `dotnet test` as its
+  own command before committing, or check `$?` explicitly — never gate a commit on a piped test run.
