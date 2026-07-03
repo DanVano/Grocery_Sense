@@ -38,6 +38,9 @@ public static class ServiceCollectionExtensions
             () => sp.GetRequiredService<PreferencesService>().GetMealProfile()));
         services.AddSingleton<WeeklyPlannerService>();
 
+        // Family meal-picks (Phase 5): names-only members + parent review queue.
+        services.AddSingleton<FamilyRequestsService>();
+
         return services;
     }
 }
