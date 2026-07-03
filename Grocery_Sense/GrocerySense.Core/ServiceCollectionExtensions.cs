@@ -41,6 +41,9 @@ public static class ServiceCollectionExtensions
         // Family meal-picks (Phase 5): names-only members + parent review queue.
         services.AddSingleton<FamilyRequestsService>();
 
+        // DB maintenance (Phase 6): backup + CSV/JSON export.
+        services.AddSingleton<DbMaintenanceService>();
+
         return services;
     }
 }
