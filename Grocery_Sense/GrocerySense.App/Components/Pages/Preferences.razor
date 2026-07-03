@@ -49,6 +49,42 @@ else
     </MudPaper>
 
     <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudText Typo="Typo.subtitle1">Household members</MudText>
+        <MudText Typo="Typo.caption">Names only — everyone shares one preference set. Members let family meal-picks be attributed and reviewed.</MudText>
+        @foreach (var m in _members)
+        {
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mt-2">
+                @if (_renamingMemberId == m.Id)
+                {
+                    <MudTextField @bind-Value="_memberRenameText" Label="Name" Immediate="true" Margin="Margin.Dense" />
+                    <MudButton Size="Size.Small" Color="Color.Primary" Disabled="@_busy" OnClick="@(() => SaveMemberRenameAsync(m.Id))">Save</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => _renamingMemberId = null)">Cancel</MudButton>
+                }
+                else
+                {
+                    <MudText>@m.Name</MudText>
+                    @if (m.Role == "master")
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">parent</MudChip>
+                    }
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@_busy" OnClick="@(() => StartMemberRename(m))">Rename</MudButton>
+                    @if (m.Role != "master")
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
+                                   OnClick="@(() => DeleteMemberAsync(m.Id))">Remove</MudButton>
+                    }
+                }
+            </MudStack>
+        }
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mt-2">
+            <MudTextField @bind-Value="_newMember" Label="Add member" Immediate="true" Margin="Margin.Dense" />
+            <MudButton Size="Size.Small" Color="Color.Primary" Disabled="@(_busy || string.IsNullOrWhiteSpace(_newMember))"
+                       OnClick="AddMemberAsync">Add</MudButton>
+        </MudStack>
+    </MudPaper>
+
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
         <MudText Typo="Typo.subtitle1">Store optimizer</MudText>
         <MudStack Row="true" Spacing="2" Class="mt-2">
             <MudNumericField @bind-Value="_maxStores" Label="Max stores" Min="1" Max="10"
@@ -92,12 +128,17 @@ else
     private double _minStoreSaving = 5.0;
     private string _azureEndpoint = "";
     private string _azureKey = "";
+    private IReadOnlyList<HouseholdMember> _members = Array.Empty<HouseholdMember>();
+    private int? _renamingMemberId;
+    private string _memberRenameText = "";
+    private string _newMember = "";
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
             var cfg = Config.Load();
+            _members = cfg.Household.Members;
             _postal = cfg.PostalCode;
             _city = cfg.City;
             _maxStores = cfg.MaxStores;
@@ -211,6 +252,35 @@ else
 
         SecureStorage.Default.Remove(key);
         return Task.CompletedTask;
+    }
+
+    private void StartMemberRename(HouseholdMember m)
+    {
+        _error = null;
+        _renamingMemberId = m.Id;
+        _memberRenameText = m.Name;
+    }
+
+    private Task SaveMemberRenameAsync(int memberId) =>
+        MemberOp(() => Config.RenameMember(memberId, _memberRenameText), afterSuccess: () => _renamingMemberId = null);
+
+    private Task AddMemberAsync() =>
+        MemberOp(() => Config.AddMember(_newMember), afterSuccess: () => _newMember = "");
+
+    private Task DeleteMemberAsync(int memberId) => MemberOp(() => Config.DeleteMember(memberId));
+
+    private async Task MemberOp(Action op, Action? afterSuccess = null)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Task.Run(op);
+            afterSuccess?.Invoke();
+            _members = Config.Load().Household.Members;
+        }
+        catch (Exception ex) { _error = ex.Message; }   // e.g. can't delete the master/last member
+        finally { _busy = false; }
     }
 
     // preferred_protein_weights is a {protein: weight} map; surface proteins weighted above 1.0 as a comma list.

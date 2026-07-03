@@ -1,7 +1,10 @@
 @using GrocerySense.App.Services
+@using GrocerySense.Core
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject AppStartup Startup
+@inject FamilyRequestsService Family
+@inject NavigationManager Nav
 
 <MudThemeProvider />
 <MudPopoverProvider />
@@ -24,6 +27,15 @@
             <MudNavLink Href="/stores" Icon="@Icons.Material.Filled.Storefront">Stores</MudNavLink>
             <MudNavLink Href="/plan" Icon="@Icons.Material.Filled.Route">Plan</MudNavLink>
             <MudNavLink Href="/meals" Icon="@Icons.Material.Filled.Restaurant">Meals</MudNavLink>
+            <MudNavLink Href="/family" Icon="@Icons.Material.Filled.Groups">
+                <div class="d-flex align-center">
+                    Family
+                    @if (_familyCount > 0)
+                    {
+                        <MudBadge Content="_familyCount" Color="Color.Error" Overlap="false" Class="ml-3" />
+                    }
+                </div>
+            </MudNavLink>
             <MudNavLink Href="/deals" Icon="@Icons.Material.Filled.LocalOffer">Deals</MudNavLink>
             <MudNavLink Href="/budget" Icon="@Icons.Material.Filled.Savings">Budget</MudNavLink>
             <MudNavLink Href="/savings" Icon="@Icons.Material.Filled.TrendingDown">Savings</MudNavLink>
@@ -51,16 +63,44 @@
 
 @code {
     private bool _drawerOpen;
+    private int _familyCount;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
     protected override void OnInitialized()
     {
         Startup.Changed += OnStartupChanged;
+        Nav.LocationChanged += OnLocationChanged;
         _ = Startup.EnsureStartedAsync();
     }
 
-    private void OnStartupChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnStartupChanged()
+    {
+        RefreshFamilyBadge();
+        _ = InvokeAsync(StateHasChanged);
+    }
 
-    public void Dispose() => Startup.Changed -= OnStartupChanged;
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        RefreshFamilyBadge();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    // Best-effort unreviewed-pick badge, refreshed on navigation. Only once the DB is ready; swallow errors
+    // (a stale/absent badge must never break the shell).
+    private void RefreshFamilyBadge()
+    {
+        if (Startup.Status != StartupStatus.Ready) return;
+        _ = Task.Run(() =>
+        {
+            try { var n = Family.UnreviewedCount(); _familyCount = n; _ = InvokeAsync(StateHasChanged); }
+            catch { /* badge is non-critical */ }
+        });
+    }
+
+    public void Dispose()
+    {
+        Startup.Changed -= OnStartupChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
 }

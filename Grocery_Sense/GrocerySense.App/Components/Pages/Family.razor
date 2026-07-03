@@ -1,0 +1,162 @@
+@page "/family"
+@inject FamilyRequestsService Picks
+@inject ConfigStore Config
+@inject ISnackbar Snackbar
+
+<MudText Typo="Typo.h5" GutterBottom="true">Family picks</MudText>
+<MudText Typo="Typo.body2" Class="mb-3">
+    A household member picks a meal or item; it goes on the shared shopping list right away. Picks by anyone
+    other than the parent show up below for review.
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Class="mb-2" Severity="Severity.Error" Dense="true">@_error</MudAlert>
+}
+
+<MudPaper Class="pa-3 mb-3" Outlined="true">
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+        <MudSelect T="int" Label="Acting as" Value="_activeId" ValueChanged="OnActiveChanged" Dense="true" Style="max-width:220px">
+            @foreach (var m in _members)
+            {
+                <MudSelectItem T="int" Value="m.Id">@m.Name@(IsMaster(m) ? " (parent)" : "")</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_quickItem" Label="Quick item" Immediate="true" Style="max-width:220px" />
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@(_busy || string.IsNullOrWhiteSpace(_quickItem))"
+                   OnClick="AddQuickItemAsync">Add pick</MudButton>
+    </MudStack>
+</MudPaper>
+
+<MudText Typo="Typo.subtitle1">Pick a meal</MudText>
+<MudText Typo="Typo.caption">Recipes containing a household allergen are hidden.</MudText>
+<div class="mb-3 mt-1">
+    @if (_pickable is null)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Loading" />
+    }
+    else
+    {
+        @foreach (var name in _pickable)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Text" Class="ma-1" Disabled="@_busy"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => PickMealAsync(name))">@name</MudButton>
+        }
+    }
+</div>
+
+<MudDivider Class="my-3" />
+
+<MudText Typo="Typo.subtitle1">
+    To review
+    @if (_unreviewed is { Count: > 0 })
+    {
+        <MudBadge Content="_unreviewed.Count" Color="Color.Error" Overlap="false" Class="ml-2" />
+    }
+</MudText>
+@if (_unreviewed is null)
+{
+    <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Loading" />
+}
+else if (_unreviewed.Count == 0)
+{
+    <MudText Typo="Typo.body2">Nothing to review.</MudText>
+}
+else
+{
+    <MudList T="string" Dense="true">
+        @foreach (var req in _unreviewed)
+        {
+            <MudListItem T="string">
+                <div class="d-flex align-center">
+                    <MudText><b>@req.MemberName</b> added @req.Label <MudText Typo="Typo.caption" Inline="true">(@req.Kind)</MudText></MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@_busy" OnClick="@(() => KeepAsync(req.Id))">Keep</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
+                               OnClick="@(() => RemoveAsync(req.Id))">Remove</MudButton>
+                </div>
+            </MudListItem>
+        }
+    </MudList>
+}
+
+@code {
+    private IReadOnlyList<HouseholdMember> _members = Array.Empty<HouseholdMember>();
+    private int _activeId;
+    private IReadOnlyList<string>? _pickable;
+    private IReadOnlyList<MemberRequestRow>? _unreviewed;
+    private string _quickItem = "";
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _members = Config.ListMembers();
+            _activeId = Config.GetActiveMember().Id;
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private bool IsMaster(HouseholdMember m) => Config.IsMaster(m.Id);
+
+    private async Task ReloadAsync()
+    {
+        (_pickable, _unreviewed) = await Task.Run(() =>
+            ((IReadOnlyList<string>)Picks.PickableRecipes(), (IReadOnlyList<MemberRequestRow>)Picks.ListUnreviewed()));
+    }
+
+    private void OnActiveChanged(int id)
+    {
+        _activeId = id;
+        Config.SetActiveMemberId(id);
+    }
+
+    private async Task PickMealAsync(string recipeName)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Task.Run(() => Picks.PickMeal(_activeId, recipeName));
+            Snackbar.Add($"Added ingredients for “{recipeName}”.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task AddQuickItemAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var text = _quickItem;
+            await Task.Run(() => Picks.PickItem(_activeId, text));
+            Snackbar.Add($"Added “{text.Trim()}”.", Severity.Success);
+            _quickItem = "";
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task KeepAsync(int requestId) => ReviewAsync(() => Picks.MarkReviewed(requestId));
+    private Task RemoveAsync(int requestId) => ReviewAsync(() => Picks.RemoveRequest(requestId));
+
+    private async Task ReviewAsync(Action review)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Task.Run(review);
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}
