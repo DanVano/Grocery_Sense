@@ -6,6 +6,7 @@
 @implements IDisposable
 @inject ReceiptIngestionService Ingest
 @inject SqliteConnectionFactory Db
+@inject IDialogService DialogService
 
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
@@ -18,11 +19,15 @@
                OnClick="PickAndIngestAsync" Disabled="@_busy">
         Import from library
     </MudButton>
+    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PhotoLibrary"
+               OnClick="BackfillImportAsync" Disabled="@_busy">
+        Backfill (multiple)
+    </MudButton>
     @if (_busy)
     {
         <MudButton Variant="Variant.Text" OnClick="CancelIngest">Cancel</MudButton>
         <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Working" />
-        <MudText Typo="Typo.caption">@_stage</MudText>
+        <MudText Typo="Typo.caption">@(_batchProgress ?? _stage)</MudText>
     }
 </MudStack>
 <MudSwitch T="bool" @bind-Value="_replaceDuplicates" Label="Replace duplicates" Color="Color.Primary" Class="mb-2" />
@@ -100,6 +105,7 @@ else
     private bool _busy;
     private bool _replaceDuplicates;
     private string _stage = "";
+    private string? _batchProgress;
     private string? _message;
     private Severity _messageSeverity = Severity.Info;
     private CancellationTokenSource? _cts;
@@ -166,13 +172,7 @@ else
 
             _stage = "Copying…";
             StateHasChanged();
-            var dir = ReceiptsDir();
-            Directory.CreateDirectory(dir);
-            var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
-            copyPath = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
-            await using (var src = await pick.OpenReadAsync())
-            await using (var dst = File.Create(copyPath))
-                await src.CopyToAsync(dst, _cts.Token);
+            copyPath = await CopyPickToAppDataAsync(pick, _cts.Token);
 
             _stage = "Reading receipt (OCR + parsing)…";
             StateHasChanged();
@@ -217,6 +217,110 @@ else
             _cts?.Dispose();
             _cts = null;
         }
+    }
+
+    // Picker/camera streams are copied into app-data (source paths can expire on Android). Returns the copy.
+    private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
+    {
+        var dir = ReceiptsDir();
+        Directory.CreateDirectory(dir);
+        var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
+        var path = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
+        await using var src = await pick.OpenReadAsync();
+        await using var dst = File.Create(path);
+        await src.CopyToAsync(dst, ct);
+        return path;
+    }
+
+    // Backfill on-ramp: multi-pick from the gallery, copy all, then import with a per-receipt date confirm.
+    // Alerts are not scanned here — correctly-dated old receipts fall outside the recent-scan window.
+    private async Task BackfillImportAsync()
+    {
+        _busy = true;
+        _message = null;
+        _batchProgress = null;
+        _cts = new CancellationTokenSource();
+        var copied = new List<string>();
+        try
+        {
+            _stage = "Opening library…";
+            StateHasChanged();
+            var picks = await FilePicker.Default.PickMultipleAsync(new PickOptions
+            {
+                PickerTitle = "Pick receipt photos to backfill",
+                FileTypes = FilePickerFileType.Images,
+            });
+            var picked = picks?.Where(p => p is not null).Select(p => p!).ToList() ?? new List<FileResult>();
+            if (picked.Count == 0) return; // user backed out
+
+            _stage = "Copying…";
+            StateHasChanged();
+            foreach (var pick in picked)
+            {
+                _cts.Token.ThrowIfCancellationRequested();
+                copied.Add(await CopyPickToAppDataAsync(pick, _cts.Token));
+            }
+
+            var total = copied.Count;
+            var progress = new Progress<int>(done =>
+            {
+                _batchProgress = $"Importing {done} / {total}…";
+                InvokeAsync(StateHasChanged);
+            });
+
+            var summary = await Ingest.ImportBatchAsync(copied, ResolveDateAsync, _replaceDuplicates, progress, _cts.Token);
+
+            // Retention: keep the copied image only for receipts that actually imported; drop the rest
+            // (duplicates, skips, failures, cancellations).
+            foreach (var item in summary.Items)
+                if (item.Status != BatchImportStatus.Imported)
+                    TryDeleteReceiptFile(item.FilePath);
+
+            _messageSeverity = summary.Failed > 0 ? Severity.Warning : Severity.Success;
+            _message = $"Backfill done — {summary.Imported} imported, {summary.Duplicates} duplicate(s), " +
+                       $"{summary.Skipped} skipped, {summary.Failed} failed" +
+                       (summary.Cancelled > 0 ? $", {summary.Cancelled} cancelled" : "") + ".";
+            await ReloadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation here means we stopped during the pick/copy phase (the batch itself records
+            // per-file Cancelled rather than throwing) — nothing was imported yet, so drop every copy.
+            foreach (var p in copied) TryDeleteReceiptFile(p);
+            _messageSeverity = Severity.Info;
+            _message = "Backfill cancelled.";
+        }
+        catch (Exception ex)
+        {
+            foreach (var p in copied) TryDeleteReceiptFile(p);
+            Fail($"Backfill failed: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            _stage = "";
+            _batchProgress = null;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    // Per-receipt date prompt for the batch. Skip / dismiss returns null so the receipt is left unimported —
+    // an undated receipt is never silently stamped "today".
+    private async Task<string?> ResolveDateAsync(ReceiptPrepared prepared, CancellationToken ct)
+    {
+        var parameters = new DialogParameters<ReceiptDateDialog>
+        {
+            { x => x.Merchant, prepared.Merchant },
+            { x => x.Total, prepared.Total },
+            { x => x.LineCount, prepared.LineCount },
+            { x => x.ProposedDate, prepared.OcrDate },
+            { x => x.OcrFoundDate, prepared.OcrFoundDate },
+        };
+        var options = new DialogOptions { BackdropClick = false, CloseOnEscapeKey = false };
+        var dialog = await DialogService.ShowAsync<ReceiptDateDialog>("Confirm purchase date", parameters, options);
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: string date } ? date : null;
     }
 
     // Retention: the image lives beside the DB for as long as its receipt row does. Deleting the

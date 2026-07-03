@@ -1,0 +1,46 @@
+@* Backfill on-ramp: per-receipt purchase-date confirmation. Pre-fills the OCR date when found; when it
+   wasn't, the field starts empty and Confirm stays disabled until a date is entered (never default to
+   today). Skip returns null so the batch leaves the receipt unimported. *@
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.subtitle1">@Merchant</MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            @(Total is double t ? $"${t:0.00} — " : "")@LineCount item@(LineCount == 1 ? "" : "s")
+        </MudText>
+        @if (!OcrFoundDate)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                No date read from this receipt — enter its purchase date.
+            </MudAlert>
+        }
+        <MudDatePicker Label="Purchase date" @bind-Date="_date" MaxDate="DateTime.Today"
+                       Editable="true" DateFormat="yyyy-MM-dd" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Skip">Skip</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_date is null)"
+                   OnClick="Confirm">Confirm</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string Merchant { get; set; } = "";
+    [Parameter] public double? Total { get; set; }
+    [Parameter] public int LineCount { get; set; }
+    [Parameter] public string? ProposedDate { get; set; }
+    [Parameter] public bool OcrFoundDate { get; set; }
+
+    private DateTime? _date;
+
+    protected override void OnInitialized()
+    {
+        if (DateTime.TryParse(ProposedDate, out var d)) _date = d;
+    }
+
+    // Confirm is disabled while _date is null, so the override is always an explicit calendar day.
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(_date!.Value.ToString("yyyy-MM-dd")));
+
+    private void Skip() => MudDialog.Close(DialogResult.Ok<string?>(null));
+}
