@@ -144,6 +144,13 @@ public sealed record SuggestedMeal(
     double VarietyScore, IReadOnlyList<string> Reasons,
     double? CostTotal = null, double? CostPerServing = null, double CostKnownRatio = 0.0);
 
+// An aggregated shopping-list ingredient across a week's suggested meals, with best-effort item mapping.
+public sealed record PlannedIngredient(
+    string Name, IReadOnlyList<string> RecipeNames, int ApproximateCount,
+    int? ItemId = null, string? CanonicalName = null, double? MatchConfidence = null, string? MatchMethod = null);
+
+public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
+
 // Household config — ports of config_store.py dataclasses.
 public record HouseholdMember(int Id, string Name, string Role, Dictionary<string, object?> Profile);
 public record Household(int PrimaryMemberId, int ActiveMemberId, IReadOnlyList<HouseholdMember> Members);
