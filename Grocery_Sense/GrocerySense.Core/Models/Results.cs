@@ -137,6 +137,13 @@ public sealed record MealProfile
     public IReadOnlyList<string> FavoriteTags { get; init; } = [];
 }
 
+// A scored meal suggestion (port of meal_suggestion_service.SuggestedMeal). Scores are the components that
+// feed total = 0.5*price + 0.3*preference + 0.2*variety; cost fields are a disclosed partial estimate.
+public sealed record SuggestedMeal(
+    Recipe Recipe, double TotalScore, double PreferenceScore, double DealScore, double PriceScore,
+    double VarietyScore, IReadOnlyList<string> Reasons,
+    double? CostTotal = null, double? CostPerServing = null, double CostKnownRatio = 0.0);
+
 // Household config — ports of config_store.py dataclasses.
 public record HouseholdMember(int Id, string Name, string Role, Dictionary<string, object?> Profile);
 public record Household(int PrimaryMemberId, int ActiveMemberId, IReadOnlyList<HouseholdMember> Members);
