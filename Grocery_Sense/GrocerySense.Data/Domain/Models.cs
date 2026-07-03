@@ -27,6 +27,10 @@ public record Item(
     bool IsTracked = true,
     string? Notes = null);
 
+// Item-manager list row: an item plus light price stats (port of items_admin_repo.ItemRow).
+public record ItemAdminRow(
+    int Id, string CanonicalName, bool IsTracked, string? DefaultUnit, int PricePoints, string? LastPriceDate);
+
 public record Receipt(
     int Id,
     int StoreId,
