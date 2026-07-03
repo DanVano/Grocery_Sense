@@ -41,6 +41,14 @@ else
     </MudPaper>
 
     <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudText Typo="Typo.subtitle1">Meal preferences</MudText>
+        <MudText Typo="Typo.caption">Comma-separated. Preferred proteins/cuisines rank matching recipes higher; avoided proteins hide recipes containing them.</MudText>
+        <MudTextField @bind-Value="_preferProteins" Label="Preferred proteins" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_avoidProteins" Label="Avoid proteins" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_cuisines" Label="Favorite cuisines / tags" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+    </MudPaper>
+
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
         <MudText Typo="Typo.subtitle1">Store optimizer</MudText>
         <MudStack Row="true" Spacing="2" Class="mt-2">
             <MudNumericField @bind-Value="_maxStores" Label="Max stores" Min="1" Max="10"
@@ -76,6 +84,9 @@ else
     private string _allergies = "";
     private string _hardExcludes = "";
     private string _softExcludes = "";
+    private string _preferProteins = "";
+    private string _avoidProteins = "";
+    private string _cuisines = "";
     private int _maxStores = 3;
     private int _minItemSavingPct = 10;
     private double _minStoreSaving = 5.0;
@@ -97,6 +108,9 @@ else
             _allergies = AsCommaList(profile.GetValueOrDefault("allergies"));
             _hardExcludes = AsCommaList(profile.GetValueOrDefault("hard_excludes"));
             _softExcludes = AsCommaList(profile.GetValueOrDefault("soft_excludes"));
+            _preferProteins = AsWeightKeys(profile.GetValueOrDefault("preferred_protein_weights"));
+            _avoidProteins = AsCommaList(profile.GetValueOrDefault("excluded_proteins"));
+            _cuisines = AsCommaList(profile.GetValueOrDefault("favorite_cuisines"));
 
             try
             {
@@ -131,6 +145,10 @@ else
                     ["allergies"] = ParseList(_allergies),
                     ["hard_excludes"] = ParseList(_hardExcludes),
                     ["soft_excludes"] = ParseList(_softExcludes),
+                    // Preferred proteins become weights > 1.0 (GetMealProfile reads any weight above 1 as preferred).
+                    ["preferred_protein_weights"] = ParseList(_preferProteins).ToDictionary(p => p, _ => 2.0),
+                    ["excluded_proteins"] = ParseList(_avoidProteins),
+                    ["favorite_cuisines"] = ParseList(_cuisines),
                 };
                 var members = cfg.Household.Members
                     .Select(m => m.Id == master.Id ? m with { Profile = profile } : m).ToList();
@@ -193,6 +211,23 @@ else
 
         SecureStorage.Default.Remove(key);
         return Task.CompletedTask;
+    }
+
+    // preferred_protein_weights is a {protein: weight} map; surface proteins weighted above 1.0 as a comma list.
+    private static string AsWeightKeys(object? value)
+    {
+        var keys = new List<string>();
+        if (value is JsonElement { ValueKind: JsonValueKind.Object } je)
+        {
+            foreach (var p in je.EnumerateObject())
+                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.GetDouble() > 1.0) keys.Add(p.Name);
+        }
+        else if (value is IDictionary<string, object?> map)
+        {
+            foreach (var kv in map)
+                if (kv.Value is double d && d > 1.0) keys.Add(kv.Key);
+        }
+        return string.Join(", ", keys);
     }
 
     private static List<string> ParseList(string csv) =>

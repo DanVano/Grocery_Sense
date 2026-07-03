@@ -32,6 +32,23 @@ public sealed class PreferencesService
         }
     }
 
+    // Flat meal profile the RecipeEngine + MealSuggestionService consume (port of Python get_meal_profile,
+    // single-profile): allergies = hard excludes; no_<protein> restrictions + avoid_meats from hard-excluded
+    // proteins; prefer_meats from protein weights > 1.0; favorite_tags from the profile's favorite cuisines.
+    public MealProfile GetMealProfile()
+    {
+        var eff = ComputeEffectivePreferences();
+        var proteins = eff.ExcludedProteinsHard.OrderBy(x => x, StringComparer.Ordinal).ToList();
+        return new MealProfile
+        {
+            Allergies = eff.HardExcludes.OrderBy(x => x, StringComparer.Ordinal).ToList(),
+            Restrictions = proteins.Select(p => $"no_{p}").ToList(),
+            PreferMeats = eff.ProteinWeights.Where(kv => kv.Value > 1.0).Select(kv => kv.Key).ToList(),
+            AvoidMeats = proteins,
+            FavoriteTags = eff.CuisinesPreferred.ToList(),
+        };
+    }
+
     private void InvalidateCache()
     {
         lock (_sync) { _cache = null; }

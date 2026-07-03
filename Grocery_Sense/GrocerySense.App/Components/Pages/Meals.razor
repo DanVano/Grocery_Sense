@@ -1,0 +1,132 @@
+@page "/meals"
+@inject WeeklyPlannerService Planner
+
+<MudText Typo="Typo.h5" GutterBottom="true">Meal planning</MudText>
+<MudText Typo="Typo.body2" Class="mb-2">
+    Suggests value-focused recipes from your preferences, current flyer deals, and receipt-price history,
+    then aggregates their ingredients into a shopping list.
+</MudText>
+
+<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-2">
+    <MudNumericField T="int" @bind-Value="_numRecipes" Label="Recipes" Min="1" Max="12" Style="max-width:110px" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restaurant"
+               OnClick="SuggestAsync" Disabled="@_busy">Suggest meals</MudButton>
+    @if (_plan is not null)
+    {
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddShoppingCart"
+                   OnClick="AddToListAsync" Disabled="@_busy">Add ingredients to list</MudButton>
+    }
+    @if (_busy)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Working" />
+    }
+</MudStack>
+
+@if (_message is not null)
+{
+    <MudAlert Class="mb-2" Severity="@_messageSeverity" Dense="true">@_message</MudAlert>
+}
+
+@if (_plan is not null)
+{
+    @if (_plan.Suggestions.Count == 0)
+    {
+        <MudText Typo="Typo.body2">No recipes matched your preferences. Loosen an allergy/exclude in Preferences.</MudText>
+    }
+    else
+    {
+        <MudExpansionPanels MultiExpansion="false" Class="mb-3">
+            @foreach (var meal in _plan.Suggestions)
+            {
+                <MudExpansionPanel>
+                    <TitleContent>
+                        <div class="d-flex align-center">
+                            <MudText>@meal.Recipe.Name</MudText>
+                            <MudSpacer />
+                            <MudText Typo="Typo.caption">
+                                score @meal.TotalScore.ToString("0.00")@(CostLabel(meal))
+                            </MudText>
+                        </div>
+                    </TitleContent>
+                    <ChildContent>
+                        @if (meal.Reasons.Count > 0)
+                        {
+                            <ul class="mb-2">@foreach (var r in meal.Reasons) { <li>@r</li> }</ul>
+                        }
+                        <MudText Typo="Typo.caption">Ingredients</MudText>
+                        <div>@foreach (var ing in meal.Recipe.Ingredients) { <MudChip T="string" Size="Size.Small">@ing</MudChip> }</div>
+                    </ChildContent>
+                </MudExpansionPanel>
+            }
+        </MudExpansionPanels>
+
+        <MudText Typo="Typo.subtitle2">Shopping list (@_plan.PlannedIngredients.Count items)</MudText>
+        <MudSimpleTable Dense="true">
+            <thead><tr><th style="text-align:left">Ingredient</th><th>Qty</th><th style="text-align:left">Used in</th></tr></thead>
+            <tbody>
+                @foreach (var ing in _plan.PlannedIngredients)
+                {
+                    <tr>
+                        <td>
+                            @ing.Name
+                            @if (ing.ItemId is null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">new item</MudChip>
+                            }
+                        </td>
+                        <td style="text-align:center">@ing.ApproximateCount</td>
+                        <td>@string.Join(", ", ing.RecipeNames)</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+}
+
+@code {
+    private WeeklyPlan? _plan;
+    private int _numRecipes = 6;
+    private bool _busy;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+
+    private async Task SuggestAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            var n = _numRecipes;
+            _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true));
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task AddToListAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            var n = _numRecipes;
+            // Deterministic scoring: rebuilding with the same count yields the same plan, now persisted.
+            _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true,
+                persistToShoppingList: true, addedBy: "Meal plan"));
+            _messageSeverity = Severity.Success;
+            _message = $"Added {_plan.PlannedIngredients.Count} ingredient(s) to your shopping list.";
+        }
+        catch (Exception ex) { Fail($"Add to list failed: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private static string CostLabel(SuggestedMeal meal) => meal.CostPerServing is double c
+        ? $" · ≈ ${c:0.00}/serving{(meal.CostKnownRatio < 1.0 ? " (partial)" : "")}"
+        : "";
+
+    private void Fail(string message)
+    {
+        _messageSeverity = Severity.Error;
+        _message = message;
+    }
+}

@@ -18,20 +18,22 @@ public sealed class MealSuggestionService
     private readonly RecipeEngine _engine;
     private readonly PriceHistoryService? _priceHistory;
     private readonly SqliteConnectionFactory? _factory; // null => no flyer-deal lookups
+    private readonly Func<MealProfile>? _defaultProfile; // resolves the household profile when none is passed
 
     public MealSuggestionService(RecipeEngine engine, PriceHistoryService? priceHistory = null,
-        SqliteConnectionFactory? factory = null)
+        SqliteConnectionFactory? factory = null, Func<MealProfile>? defaultProfile = null)
     {
         _engine = engine;
         _priceHistory = priceHistory;
         _factory = factory;
+        _defaultProfile = defaultProfile;
     }
 
     public IReadOnlyList<SuggestedMeal> SuggestMealsForWeek(MealProfile? profile = null,
         IEnumerable<string>? targetIngredients = null, int maxRecipes = 6,
         IReadOnlySet<int>? recentlyUsedRecipeIds = null)
     {
-        profile ??= new MealProfile();
+        profile ??= _defaultProfile?.Invoke() ?? new MealProfile();
 
         var targets = targetIngredients?.ToList();
         var candidates = targets is { Count: > 0 }
