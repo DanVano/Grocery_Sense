@@ -1,0 +1,204 @@
+@page "/items"
+@inject SqliteConnectionFactory Db
+@inject IDialogService DialogService
+
+<MudText Typo="Typo.h5" GutterBottom="true">Items</MudText>
+<MudText Typo="Typo.body2" Class="mb-2">
+    Merge duplicates and rename mis-scanned items. Merging moves all price history onto the target and keeps
+    the old name as an alias.
+</MudText>
+
+<MudTextField @bind-Value="_query" Immediate="true" DebounceInterval="250" OnDebounceIntervalElapsed="OnSearch"
+              Placeholder="Search items…" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+              Class="mb-2" />
+
+@if (_message is not null)
+{
+    <MudAlert Class="mb-2" Severity="@_messageSeverity" Dense="true">@_message</MudAlert>
+}
+
+@if (_items is null)
+{
+    <div class="d-flex justify-center pa-8"><MudProgressCircular Indeterminate="true" aria-label="Loading" /></div>
+}
+else if (_items.Count == 0)
+{
+    <MudText Typo="Typo.body2">No items@(string.IsNullOrWhiteSpace(_query) ? " yet — scan a receipt first." : " match that search.")</MudText>
+}
+else
+{
+    <MudExpansionPanels MultiExpansion="false">
+        @foreach (var item in _items)
+        {
+            <MudExpansionPanel ExpandedChanged="@(e => OnExpandedAsync(item.Id, e))">
+                <TitleContent>
+                    <div class="d-flex align-center">
+                        <MudText>@item.CanonicalName</MudText>
+                        @if (!item.IsTracked)
+                        {
+                            <MudChip T="string" Size="Size.Small" Class="ml-2" Color="Color.Default">untracked</MudChip>
+                        }
+                        <MudSpacer />
+                        <MudText Typo="Typo.caption">
+                            @item.PricePoints price@(item.PricePoints == 1 ? "" : "s")@(item.LastPriceDate is { } d ? $" · last {d}" : "")
+                        </MudText>
+                    </div>
+                </TitleContent>
+                <ChildContent>
+                    @if (_renamingId == item.Id)
+                    {
+                        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-2">
+                            <MudTextField @bind-Value="_renameText" Label="New name" Immediate="true" />
+                            <MudButton Color="Color.Primary" Disabled="@_busy" OnClick="@(() => SaveRenameAsync(item))">Save</MudButton>
+                            <MudButton Variant="Variant.Text" OnClick="@(() => _renamingId = null)">Cancel</MudButton>
+                        </MudStack>
+                    }
+
+                    @if (!_aliases.TryGetValue(item.Id, out var aliases))
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Loading aliases" />
+                    }
+                    else if (aliases.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption">Also known as</MudText>
+                        <div class="mb-2">
+                            @foreach (var a in aliases)
+                            {
+                                <MudChip T="string" Size="Size.Small">@a.AliasText</MudChip>
+                            }
+                        </div>
+                    }
+
+                    <MudStack Row="true" Spacing="2">
+                        <MudButton StartIcon="@Icons.Material.Filled.Edit" Disabled="@_busy"
+                                   OnClick="@(() => StartRename(item))">Rename</MudButton>
+                        <MudButton StartIcon="@Icons.Material.Filled.Merge" Color="Color.Secondary" Disabled="@_busy"
+                                   OnClick="@(() => MergeIntoAsync(item))">Merge into…</MudButton>
+                    </MudStack>
+                </ChildContent>
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+}
+
+@code {
+    private IReadOnlyList<ItemAdminRow>? _items;
+    private readonly Dictionary<int, IReadOnlyList<ItemAlias>> _aliases = new();
+    private string _query = "";
+    private int? _renamingId;
+    private string _renameText = "";
+    private bool _busy;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+
+    protected override Task OnInitializedAsync() => SearchAsync();
+
+    private Task OnSearch(string value) => SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        try
+        {
+            var q = _query;
+            _items = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return ItemsAdminRepo.SearchItems(conn, q);
+            });
+            _aliases.Clear();
+            _renamingId = null;
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    private async Task OnExpandedAsync(int itemId, bool expanded)
+    {
+        if (!expanded || _aliases.ContainsKey(itemId)) return;
+        try
+        {
+            _aliases[itemId] = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return (IReadOnlyList<ItemAlias>)new ItemAliasesRepo().ListAll(conn)
+                    .Where(a => a.ItemId == itemId).ToList();
+            });
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    private void StartRename(ItemAdminRow item)
+    {
+        _message = null;
+        _renamingId = item.Id;
+        _renameText = item.CanonicalName;
+    }
+
+    private async Task SaveRenameAsync(ItemAdminRow item)
+    {
+        _busy = true;
+        try
+        {
+            var name = _renameText;
+            await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                ItemsAdminRepo.RenameItem(conn, item.Id, name);
+            });
+            _renamingId = null;
+            _messageSeverity = Severity.Success;
+            _message = $"Renamed to \"{name.Trim()}\".";
+            await SearchAsync();
+        }
+        catch (InvalidOperationException ex) { Fail(ex.Message); }   // name collision — clear message
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task MergeIntoAsync(ItemAdminRow source)
+    {
+        _message = null;
+        var parameters = new DialogParameters<ItemPickerDialog>
+        {
+            { x => x.AllowCreate, false },
+            { x => x.ExcludeItemId, source.Id },
+        };
+        var picker = await DialogService.ShowAsync<ItemPickerDialog>($"Merge \"{source.CanonicalName}\" into…", parameters);
+        var picked = await picker.Result;
+        if (picked is null || picked.Canceled || picked.Data is not int targetId) return;
+
+        var targetName = await Task.Run(() =>
+        {
+            using var conn = Db.Open();
+            return ItemsRepo.GetItemById(conn, targetId)?.CanonicalName ?? "the selected item";
+        });
+
+        var ok = await DialogService.ShowMessageBoxAsync("Merge items?",
+            $"\"{source.CanonicalName}\" will be deleted and its price history moved into \"{targetName}\". " +
+            "The old name is kept as an alias. This can't be undone.",
+            yesText: "Merge", cancelText: "Cancel");
+        if (ok != true) return;
+
+        _busy = true;
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                using var tx = conn.BeginTransaction();
+                ItemsAdminRepo.MergeItems(conn, tx, targetId, source.Id);
+                tx.Commit();
+            });
+            _messageSeverity = Severity.Success;
+            _message = $"Merged \"{source.CanonicalName}\" into \"{targetName}\".";
+            await SearchAsync();
+        }
+        catch (Exception ex) { Fail($"Merge failed: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private void Fail(string message)
+    {
+        _messageSeverity = Severity.Error;
+        _message = message;
+    }
+}

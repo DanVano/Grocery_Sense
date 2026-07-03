@@ -69,16 +69,26 @@ else
                     {
                         <MudSimpleTable Dense="true">
                             <thead>
-                                <tr><th style="text-align:left">Item</th><th>Qty</th><th>Unit $</th><th>Total</th></tr>
+                                <tr><th style="text-align:left">Item</th><th>Qty</th><th>Unit $</th><th>Total</th><th></th></tr>
                             </thead>
                             <tbody>
                                 @foreach (var line in lines)
                                 {
                                     <tr>
-                                        <td>@(line.CanonicalName is { Length: > 0 } cn ? cn : line.Description)</td>
+                                        <td>
+                                            @(line.CanonicalName is { Length: > 0 } cn ? cn : line.Description)
+                                            @if (line.ItemId is null)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">unmapped</MudChip>
+                                            }
+                                        </td>
                                         <td style="text-align:center">@(line.Quantity is double q ? q.ToString("0.##") : "")</td>
                                         <td style="text-align:center">@(line.UnitPrice is decimal up ? $"{up:0.00}" : "")</td>
                                         <td style="text-align:center">@(line.LineTotal is decimal lt ? $"{lt:0.00}" : "")</td>
+                                        <td style="text-align:center">
+                                            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@_busy"
+                                                       OnClick="@(() => CorrectMappingAsync(receipt.Id, line))">Fix</MudButton>
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
@@ -321,6 +331,36 @@ else
         var dialog = await DialogService.ShowAsync<ReceiptDateDialog>("Confirm purchase date", parameters, options);
         var result = await dialog.Result;
         return result is { Canceled: false, Data: string date } ? date : null;
+    }
+
+    // Alias-correction: re-point a mis-scanned line (and its price row) to the right item and learn the
+    // description so future scans map right. Pick an existing item or create a new one.
+    private async Task CorrectMappingAsync(int receiptId, ReceiptLineItemRow line)
+    {
+        _message = null;
+        var parameters = new DialogParameters<ItemPickerDialog> { { x => x.AllowCreate, true } };
+        var picker = await DialogService.ShowAsync<ItemPickerDialog>($"Fix mapping for \"{line.Description}\"", parameters);
+        var picked = await picker.Result;
+        if (picked is null || picked.Canceled || picked.Data is not int newItemId) return;
+        if (newItemId == line.ItemId) return; // already correct
+
+        _busy = true;
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                using var tx = conn.BeginTransaction();
+                ItemsAdminRepo.CorrectLineMapping(conn, tx, line.Id, receiptId, line.Description, line.ItemId, newItemId);
+                tx.Commit();
+            });
+            _messageSeverity = Severity.Success;
+            _message = $"\"{line.Description}\" now maps to the chosen item.";
+            _lines.Remove(receiptId);                 // force a reload of this receipt's lines
+            await OnExpandedAsync(receiptId, true);
+        }
+        catch (Exception ex) { Fail($"Correction failed: {ex.Message}"); }
+        finally { _busy = false; }
     }
 
     // Retention: the image lives beside the DB for as long as its receipt row does. Deleting the

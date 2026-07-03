@@ -1,0 +1,89 @@
+@* Pick an existing item (search) or, when AllowCreate, create a new one. Returns the chosen item's id.
+   Used by merge (AllowCreate=false, ExcludeItemId=source) and receipt line correction (AllowCreate=true). *@
+@inject SqliteConnectionFactory Db
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_query" Label="Search items" Immediate="true" DebounceInterval="250"
+                      OnDebounceIntervalElapsed="OnSearch" Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-1" />
+        @if (_busy)
+        {
+            <div class="d-flex justify-center pa-2"><MudProgressCircular Size="Size.Small" Indeterminate="true" /></div>
+        }
+        else
+        {
+            <div style="max-height:320px;overflow:auto">
+                @foreach (var it in _results)
+                {
+                    <MudButton FullWidth="true" Class="justify-start" Variant="Variant.Text"
+                               OnClick="@(() => Pick(it.Id))">
+                        @it.CanonicalName&nbsp;<MudText Typo="Typo.caption" Inline="true">(@it.PricePoints prices)</MudText>
+                    </MudButton>
+                }
+                @if (_results.Count == 0 && !CanCreate)
+                {
+                    <MudText Typo="Typo.body2" Class="pa-2">No matching items.</MudText>
+                }
+            </div>
+            @if (AllowCreate && CanCreate)
+            {
+                <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Class="mt-2"
+                           OnClick="CreateAndPickAsync">Create new item &ldquo;@_query.Trim()&rdquo;</MudButton>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())">Cancel</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public bool AllowCreate { get; set; }
+    [Parameter] public int? ExcludeItemId { get; set; }
+
+    private string _query = "";
+    private bool _busy;
+    private IReadOnlyList<ItemAdminRow> _results = Array.Empty<ItemAdminRow>();
+
+    // No exact (case-insensitive) name match among results => offering "create" won't duplicate an item.
+    private bool CanCreate =>
+        _query.Trim().Length > 0 &&
+        !_results.Any(i => string.Equals(i.CanonicalName, _query.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    protected override Task OnInitializedAsync() => SearchAsync();
+
+    private Task OnSearch(string value) => SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        _busy = true;
+        try
+        {
+            var q = _query;
+            var exclude = ExcludeItemId;
+            _results = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return (IReadOnlyList<ItemAdminRow>)ItemsAdminRepo.SearchItems(conn, q, 50)
+                    .Where(i => i.Id != exclude).ToList();
+            });
+        }
+        finally { _busy = false; }
+    }
+
+    private void Pick(int id) => MudDialog.Close(DialogResult.Ok(id));
+
+    private async Task CreateAndPickAsync()
+    {
+        var name = _query.Trim();
+        var id = await Task.Run(() =>
+        {
+            using var conn = Db.Open();
+            return ItemsRepo.CreateItem(conn, name).Id;
+        });
+        MudDialog.Close(DialogResult.Ok(id));
+    }
+}
