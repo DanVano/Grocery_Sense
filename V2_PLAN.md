@@ -155,7 +155,12 @@ device; the Data ops are fully tested.
 
 ---
 
-## Phase 3 — Real-data tuning pass  ☐   (confidence: 95% — process confidence; outcomes are data-dependent by design)
+## Phase 3 — Real-data tuning pass  ⏸ DEFERRED (blocked on the backfill)   (confidence: 95% — process confidence; outcomes are data-dependent by design)
+
+> **Status 2026-07-03:** cannot start — there is no corpus. Phase 3 tunes against the real backfilled
+> receipts, and the physical ~6-month scan-in (Phase 1/2 tooling is ready) hasn't been done. Fabricating a
+> corpus or verdicts would violate the fail-loud/never-fake rule. Resume after the backfill; proceeding to
+> Phase 4 (meal planning) in the meantime, which has no data dependency.
 
 Evaluate-and-adjust against the backfilled corpus. "No change needed" is a valid, recorded outcome.
 
@@ -175,33 +180,46 @@ Evaluate-and-adjust against the backfilled corpus. "No change needed" is a valid
 
 ---
 
-## Phase 4 — Meal planning (straight Phase-7 port)  ☐   (confidence: 96%)
+## Phase 4 — Meal planning (straight Phase-7 port)  ✅ DONE (2026-07-03)   (confidence: 96%)
 
-The PORTING.md Phase-7 spec, unchanged. Reference implementation + 4 Python test files exist.
+The PORTING.md Phase-7 spec. Commits `2ddec89` (RecipeEngine) · `02221d6` (MealSuggestion) · `836a7d2`
+(WeeklyPlanner) · `ce942f3` (route + wiring). 364 tests green; Windows head builds 0/0.
 
 | Port FROM | Port INTO |
 |---|---|
 | `recipes/recipe_engine.py` | `Core/Services/RecipeEngine.cs` |
-| `recipes/recipes.json` (62 recipes) | **EmbeddedResource in `GrocerySense.Core`** (assembly manifest stream — keeps RecipeEngine MAUI-free/testable) |
+| `recipes/recipes.json` (62 recipes) | **EmbeddedResource in `GrocerySense.Core`** (assembly manifest stream) |
 | `services/meal_suggestion_service.py` | `Core/Services/MealSuggestionService.cs` |
 | `services/weekly_planner_service.py` | `Core/Services/WeeklyPlannerService.cs` |
 
-- [ ] RecipeEngine: load/filter-by-ingredients-and-profile/get-by-name. recipes.json parsed via a
-      source-gen `JsonSerializerContext` (AOT rule).
-- [ ] MealSuggestion scoring + WeeklyPlanner aggregation → shopping list via the existing
-      `IngredientMappingService`/`ShoppingListService` (same seams Phase-5 ingest uses).
-- [ ] **Meal-profile inputs return to the Preferences UI** (protein weights, cuisines — deferred out of
-      v1 because only meal planning consumed them). Data plumbing already exists
-      (`EffectivePreferences` carries proteins/oils/weights); this is UI fields + save, not a migration.
-- [ ] `/meals` route: suggestions + weekly plan → add-to-list.
-- [ ] Port all four test files: `test_recipe_engine`, `test_recipes_catalog`, `test_meal_suggestion`,
-      `test_weekly_planner`.
+- [x] **RecipeEngine** — load (embedded recipes.json, or a file path for tests) / filter-by-ingredients-and-
+      profile / get-by-name; parsed via a source-gen `JsonSerializerContext`. Typed `Recipe`/`MealProfile`
+      records replace the Python dict wrapper. Stable `OrderByDescending` sort (Python's sort is stable;
+      `List.Sort` is not).
+- [x] **MealSuggestionService** — score = 0.5·price + 0.3·preference + 0.2·variety; flyer deals
+      (flyer_deals table) blended against receipt baselines (`PriceHistoryService.GetBaselinePrices`); cost
+      estimate + explanation ported. **WeeklyPlannerService** — aggregate ingredients, best-effort map via
+      `IngredientMappingService`, persist to `ShoppingListService` in one transaction.
+- [x] **Meal-profile inputs returned to Preferences** — `PreferencesService.GetMealProfile` rebuilt (removed
+      in v1) from the single household profile; Preferences gains a Meal-preferences section (preferred /
+      avoided proteins, favorite cuisines → protein weights / excluded_proteins / favorite_cuisines).
+- [x] `/meals` route: suggestions (score, per-serving cost with partial-estimate disclosure, reasons) +
+      aggregated shopping list → add-to-list. DI registers the three services; `MealSuggestionService` takes
+      an optional profile provider so the route personalizes while tests stay config-free.
+- [x] All four Python suites ported: `test_recipe_engine`, `test_recipes_catalog`, `test_meal_suggestion`,
+      `test_weekly_planner` (59 new tests).
 
-**Done when:** all four ported test suites green; a weekly plan lands on the shopping list through the
-real mapping path.
+**Done:** all four ported suites green; a weekly plan lands on the shopping list via the real mapping path
+(tested); `dotnet test` green (364/0); Windows head builds 0/0.
 
-*Residual 4%:* typed-record reshaping of Python dict returns (known, mechanical); scoring parity worth a
-fixture spot-check.
+**Deviations (noted):** the injected `RecipeEngine` is actually used (Python used a module singleton and
+ignored the injected one — the "injected engine ignored" test is inverted to assert it drives results); the
+str()-coercion-of-non-string-ingredients and module-singleton-delegation tests are dropped as Python-only
+quirks; a null profile in the service means an empty profile (the route resolves the real one via
+`GetMealProfile`, not a hidden config read inside the service).
+
+*Residual 4%:* the `/meals` route UI is only provable on a real device; the scoring/aggregation is fully
+tested against the same fixtures as Python.
 
 ---
 

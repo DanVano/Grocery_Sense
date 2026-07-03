@@ -278,3 +278,36 @@ receipt browser, sharing a reusable `ItemPickerDialog`. 305 tests, 0 skipped; Wi
 - **`ItemsAdminRepo` is a static class** (repo convention); no DI registration — pages call it via the
   injected `SqliteConnectionFactory`. The picker/merge confirm uses MudBlazor **9.6's `ShowMessageBoxAsync`**
   (the sync-named `ShowMessageBox` was removed).
+
+## v2 Phase 4 — Meal planning
+
+`RecipeEngine` + `MealSuggestionService` + `WeeklyPlannerService` ported, `/meals` route, meal-profile
+returned to Preferences. All 4 Python planning suites ported (59 tests). 364 total, 0 skipped; Windows 0/0.
+
+- **recipes.json (62) is an EmbeddedResource in Core**, loaded via the assembly manifest stream, so
+  `RecipeEngine` has no MAUI/file dependency and is testable in the plain xUnit host. Tests point the engine
+  at a file fixture (`Fixtures/recipes_sample.json`, 8 recipes) instead. Parse via a source-gen
+  `RecipeJsonContext` (AOT rule). Accepts a bare list or `{"recipes":[…]}`; a bare string throws
+  (`InvalidDataException`) rather than becoming one bogus recipe.
+- **Three deliberate deviations from the Python (each a fix, not a regression):**
+  1. *Injected engine is used.* Python exposed module-level load/filter/get delegating to a hidden singleton,
+     and `MealSuggestionService` accidentally used that singleton instead of its injected `recipe_engine`.
+     C# has no module singleton — the engine is injected and used. The Python "injected engine is ignored"
+     test is inverted to assert the injected engine drives results.
+  2. *Dropped Python-only quirk tests:* `str()`-coercion of non-string ingredients (C# is typed, and the
+     catalog test guarantees valid strings) and the module-singleton-delegation tests.
+  3. *Null profile = empty profile in the service*, not a hidden `get_meal_profile()` read. The service stays
+     free of the config layer (testable); the `/meals` route resolves the real profile via an injected
+     `Func<MealProfile>` provider wired in DI to `PreferencesService.GetMealProfile`.
+- **`PreferencesService.GetMealProfile` was rebuilt** (v1 removed it). Single-profile: `allergies` = hard
+  excludes; `no_<protein>` restrictions + `avoid_meats` from hard-excluded proteins; `prefer_meats` from
+  protein weights > 1.0; `favorite_tags` from favorite cuisines — all read from the one master-member
+  profile via `ComputeEffectivePreferences`. Preferences UI writes `preferred_protein_weights` as
+  `{protein: 2.0}` (any weight > 1 = preferred), plus `excluded_proteins` / `favorite_cuisines`.
+- **Stable sort matters:** Python's `sort` is stable, so equal-score recipes keep catalog order. `List.Sort`
+  is not stable — used `OrderByDescending` (LINQ, stable) in both the engine filter and the suggestion rank.
+- **Deals price column** is read with `CAST(COALESCE(unit_price, norm_unit_price, deal_total) AS REAL)` so
+  the TEXT money columns and the REAL norm column all come back as a double; no per-row string parsing.
+- **`/meals` "Add to list"** rebuilds the plan with `persistToShoppingList: true` rather than persisting a
+  cached plan — the scoring is deterministic, so the rebuilt plan equals the displayed one, and the persist
+  stays inside `WeeklyPlannerService` (one transaction) instead of leaking a persist path into the UI.
