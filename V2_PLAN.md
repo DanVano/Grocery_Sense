@@ -259,28 +259,35 @@ best-effort (on navigation, no live event) — a design choice, not a correctnes
 
 ---
 
-## Phase 6 — DB maintenance + v2 release  ☐   (confidence: 96%)
+## Phase 6 — DB maintenance ✅ + v2 release ⛔ (blocked on Phase-0 hand-offs)   (confidence: 96%)
+
+Code half DONE (2026-07-03); commits `8917339` (service) + `1c97dd0` (UI). 381 tests green; Windows 0/0.
+The release half is blocked on the same Phase-0 items (JDK 17 + android-36 + keystore) — user action.
 
 | Port FROM | Port INTO |
 |---|---|
 | `services/db_maintenance_service.py` (`backup_database`, `export_to_csv`, `export_to_json`) | `Core/Services/DbMaintenanceService.cs` |
 
-- [ ] **Backup:** `VACUUM INTO` a temp file → **Android share sheet** (grill Q15 — no new permissions,
-      no folder picker). Scope = the DB file only; receipt images are explicitly not included (document
-      in the UI copy).
-- [ ] **Export:** CSV + JSON per the Python reference → cache file → share sheet. Money stays TEXT-exact
-      in exports (no double round-trip).
-- [ ] Maintenance section on Preferences (or `/stores`-style setup page): backup, export, last-backup
-      timestamp.
-- [ ] **Release:** version bump; `dotnet publish -f net10.0-android -c Release` signed APK (Phase-0
+- [x] **Backup:** `VACUUM INTO` the app cache → share sheet (grill Q15 — no new permissions, no folder
+      picker). DB file only; the UI copy states receipt images aren't included. Uses `VACUUM INTO` rather
+      than Python's online-backup API (a clean WAL-safe snapshot; the share-sheet flow needs no local
+      backups dir, so the Python pruning is dropped).
+- [x] **Export:** CSV + JSON of receipts/prices/items/shopping_list/stores → timestamped cache dir → multi-
+      file share. Values stay as SQLite returns them, so **TEXT money keeps its exact string** (no
+      decimal/double round-trip); CSV is RFC-4180 quoted; JSON via `Utf8JsonWriter` (AOT-safe). Missing/empty
+      tables skipped.
+- [x] Maintenance section on Preferences: backup, export CSV/JSON, last-backup timestamp (MAUI Preferences).
+- [ ] **Release — BLOCKED (user action), same gate as Phase 0:** version bump;
+      `dotnet publish -f net10.0-android -c Release` signed APK (needs JDK 17 + android-36 + the release
       keystore); regression gate = full `dotnet test` + on-device smoke of all routes (v1 six + Savings,
-      Items, Meals, review inbox); distribute to the ring (manual reinstall, as v1).
+      Items, Meals, Family review); distribute to the ring (manual reinstall).
 
-**Done when:** backup restores to a working DB on a second device/emulator; exports open clean;
-signed v2 APK on the family phone.
+**Done (code):** backup opens as a valid DB, exports keep money exact, all tested; `dotnet test` green
+(381/0); Windows head 0/0. **Remaining:** the signed-APK release + on-device smoke (blocked on the Android
+toolchain + keystore hand-offs).
 
-*Residual 4%:* share-sheet file-provider wiring on Android (known MAUI pattern, occasionally fiddly);
-restore-path verification needs a second device/emulator.
+*Residual:* share-sheet file-provider wiring on Android + restore on a second device are only provable on
+hardware; the backup/export logic itself is fully tested.
 
 ---
 

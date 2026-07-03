@@ -339,3 +339,27 @@ returned to Preferences. All 4 Python planning suites ported (59 tests). 364 tot
 - **Process note:** one commit briefly went red because `dotnet test | tail` in an `&&` chain masks the test
   exit code (the pipe returns `tail`'s status). It was amended clean immediately. Run `dotnet test` as its
   own command before committing, or check `$?` explicitly — never gate a commit on a piped test run.
+
+## v2 Phase 6 — DB maintenance (+ release, blocked)
+
+`DbMaintenanceService` (backup + CSV/JSON export) + a Data & backup section on Preferences. 4 tests; 381
+total, 0 skipped; Windows head 0/0. The signed-APK release is blocked on the Phase-0 Android toolchain +
+keystore hand-offs.
+
+- **Backup uses `VACUUM INTO`, not Python's online-backup API.** It produces a clean, WAL-safe single-file
+  snapshot with no open-transaction constraints. The mobile flow writes one file to the app cache and hands
+  it to the OS share sheet, so there is no local backups directory — Python's keep-7 pruning is dropped as
+  N/A. `VACUUM INTO` takes a SQL string literal (not a parameter); the path is app-controlled (cache dir)
+  and single-quotes are escaped defensively.
+- **Money stays TEXT-exact in exports.** `ReadTable` returns each cell as SQLite hands it back
+  (`GetValue`), so a TEXT money column exports as its exact stored string (`"12.34"`), never a
+  `decimal`/`double` round-trip. JSON is written with `Utf8JsonWriter` (AOT-safe, no reflection) emitting
+  TEXT as a JSON string; CSV is RFC-4180 quoted. Missing tables (`SqliteException`) and empty tables are
+  skipped, matching Python.
+- **Scope is the DB only** — receipt images are not in the backup, and the UI copy says so. Export covers
+  the five human-meaningful tables (receipts/prices/items/shopping_list/stores), not the dedupe/raw-json
+  internal tables.
+- **Share-sheet, no folder picker (grill Q15):** backup → `ShareFileRequest`; export → `ShareMultipleFilesRequest`
+  over a timestamped cache subdir (so a re-export never shares stale files). Last-backup timestamp persists
+  in MAUI `Preferences` (fully-qualified `Microsoft.Maui.Storage.Preferences` to avoid clashing with the
+  `Preferences` Razor component's own type name).
