@@ -248,3 +248,33 @@ Windows head builds 0/0.
   partial; remaining files are marked `Cancelled` and their copies dropped.
 - **`ReceiptPrepared.Duplicate`** carries the short-circuit outcome when file/signature dedupe decides
   before the user is asked anything (`Ingest == null`), so the batch records Duplicate without a date prompt.
+
+## v2 Phase 2 — Item-manager + alias correction
+
+`ItemsAdminRepo` (search / rename / merge / correct) + `/items` route + a per-line Fix action on the
+receipt browser, sharing a reusable `ItemPickerDialog`. 305 tests, 0 skipped; Windows head builds 0/0.
+
+- **FK enumeration was verified against the live schema, and it corrected two source docs.** Seven tables
+  carry `item_id`: prices, receipt_line_items, shopping_list, item_aliases, watchlist, **flyer_deals, and
+  price_drop_alerts**. The Python `_ITEM_ID_TABLES` lists only five (adds flyer_deals but omits
+  price_drop_alerts and watchlist); V2_PLAN listed five (omitted flyer_deals and price_drop_alerts). The
+  test's `ItemIdTables` array is the guard — a new item_id table that isn't added to both the repo and the
+  test will show up as a non-zero orphan count in the FK-sweep test.
+- **No table has a UNIQUE(item_id)**, so the Python merge's SAVEPOINT-per-table + `ON CONFLICT`→delete dance
+  is unnecessary here — reference moves are plain `UPDATE … SET item_id`. The one real duplication risk is
+  `watchlist` (no UNIQUE, so a blind UPDATE leaves two active watches for the target); handled explicitly:
+  `DELETE source watch WHERE target already has one, else UPDATE`. Documented with a ponytail note; any new
+  item_id table with a UNIQUE constraint would need the collision handling reconsidered.
+- **Merge and correction take a required `SqliteTransaction`** (like `ReceiptsRepo.IngestReceipt`) — both
+  touch several tables and must be all-or-nothing. The atomic-rollback test proves it by calling `MergeItems`
+  then `tx.Rollback()` and asserting every table reverted. Read-only `SearchItems` and single-statement
+  `RenameItem` keep the optional-tx convention.
+- **`CorrectLineMapping` keys the price row by `(receipt_id, raw_name, old item_id)`** — `raw_name` is the
+  original line description (`ReceiptsRepo.IngestReceipt` binds `$raw = li.Description`), so it re-points
+  exactly the price row this line produced. An unmapped line (old item_id null) has no price row; the line +
+  alias are still fixed. No retro-sweep across other receipts — that is deliberately merge's job.
+- **No `ensure_schema`** — `items.is_tracked`/`default_unit` are in the migration ledger, so the Python
+  runtime-ALTER is gone (same call the Phase-3 notes make).
+- **`ItemsAdminRepo` is a static class** (repo convention); no DI registration — pages call it via the
+  injected `SqliteConnectionFactory`. The picker/merge confirm uses MudBlazor **9.6's `ShowMessageBoxAsync`**
+  (the sync-named `ShowMessageBox` was removed).

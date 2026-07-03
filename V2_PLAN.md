@@ -114,35 +114,44 @@ limits, huge images, dialog UX) — not drivable headless, same ceiling as Phase
 
 ---
 
-## Phase 2 — Item-manager + alias correction  ☐   (confidence: 95%)
+## Phase 2 — Item-manager + alias correction  ✅ DONE (2026-07-02)   (confidence: 95%)
 
 The fuzzy-matching reliability lever (BACKLOG). Must exist before the physical backfill session.
+Commits `8473425` (Data) + `cf01ae2` (UI). 305 tests green; Windows head builds 0/0.
 
 | Port FROM | Port INTO |
 |---|---|
 | `data/repositories/items_admin_repo.py` | `GrocerySense.Data/Repositories/ItemsAdminRepo.cs` |
-| (no Python UI reference — new UX) | `/items` route + correction dialog on the receipt browser |
+| (no Python UI reference — new UX) | `/items` route + Fix-mapping action on the receipt browser |
 
-- [ ] **`ItemsAdminRepo` port:** merge item A→B re-points **every FK-bearing table in one transaction**
-      — prices, receipt line items, shopping-list rows, aliases, **and the new `watchlist` table**
-      (post-dates the Python reference — enumerate v2-era tables, don't trust the Python FK list).
-      Rename keeps identity, writes the old name as an alias. No-partial-rows test for merge.
-- [ ] **Alias-correction UX** (grill Q14 — **fix line + learn**): from a receipt-browser line →
-      "Wrong item?" → search/pick the correct item (or create new) → one transaction: re-point the line
-      item + its price row AND `UpsertAlias(rawText → item)`. No retro-sweep — historical damage is
-      cleaned by merge, deliberately.
-- [ ] `/items` route: list/search items, per-item alias list, merge + rename actions with confirm.
-- [ ] Tests: merge FK sweep (build rows in every referencing table → merge → zero orphans, counts
-      preserved), rename+alias, correction transaction (line + price + alias move together or not at all).
+- [x] **`ItemsAdminRepo`** (`8473425`): `MergeItems` re-points **seven** item_id tables in the caller's
+      transaction. **FK-enumeration correction:** the schema has 7, not the 5 this plan listed — prices,
+      receipt_line_items, shopping_list, item_aliases, watchlist **plus flyer_deals and price_drop_alerts**
+      (the plan and the Python `_ITEM_ID_TABLES` both omit those two). **No table has a UNIQUE(item_id)**, so
+      the Python SAVEPOINT-per-table collision dance is unnecessary — reference moves are plain UPDATEs;
+      `watchlist` is deduped explicitly (keep target's watch, drop source's) since nothing else stops two
+      active watches. Merge also promotes tracked/default_unit and keeps the source name as an alias.
+      `RenameItem` surfaces the `canonical_name` UNIQUE collision as a clear "merge instead" message.
+- [x] **Alias-correction** (grill Q14 — fix line + learn): `CorrectLineMapping` re-points one receipt line
+      **and the price row it produced** (keyed `receipt_id` + `raw_name` = description + old item_id) and
+      `UpsertAlias(description → item)`, one transaction. No retro-sweep — historical mis-maps cleaned by
+      merge. *Limitation:* an originally-unmapped line has no price row to move; the line + alias are fixed
+      but the missing historical price isn't back-created (re-import covers it).
+- [x] `/items` route: search, per-item alias chips, in-place rename, **Merge into…** (item picker excluding
+      the source + a confirm). Receipt browser: per-line **Fix** (unmapped lines flagged) → shared
+      `ItemPickerDialog` (search existing / create new). MudBlazor 9.6 confirm is `ShowMessageBoxAsync`.
+- [x] Tests (6): full **7-table FK sweep** (zero orphans, source name → target alias), **atomic rollback**
+      (tx revert restores every table), watchlist dedup, tracked/unit promotion, rename collision, and the
+      correction (line + price + alias move together).
 
-**Done when:** a seeded mis-map is fixable end-to-end (correct line → alias learned → next canned scan
-maps right); merge leaves zero orphans; `dotnet test` green.
+**Done:** merge leaves zero orphans (tested); a seeded mis-map is fixable via `CorrectLineMapping`;
+`dotnet test` green (305/0); Windows head builds 0/0.
 
-**→ After Phase 2 lands: run the real 6-month backfill session** (the human task — scan, confirm dates,
-correct mis-maps as they appear). Phase 3 consumes its output.
+**→ Next: run the real 6-month backfill session** (the human task — scan via Phase 1's Backfill button,
+confirm dates, correct mis-maps with Fix as they appear). Phase 3 tunes on its output.
 
-*Residual 5%:* the correction dialog is net-new UX with no Python reference; merge FK enumeration must
-be verified against the live schema, not the docs.
+*Residual 5% (unchanged):* the picker/merge/correction dialogs are net-new UX only provable on a real
+device; the Data ops are fully tested.
 
 ---
 
