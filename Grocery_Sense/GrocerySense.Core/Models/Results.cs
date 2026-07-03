@@ -124,11 +124,17 @@ public sealed record BatchImportSummary(IReadOnlyList<BatchImportItem> Items)
     public int Cancelled => Items.Count(i => i.Status == BatchImportStatus.Cancelled);
 }
 
-// Recipe wrapper — port of recipes/recipe_engine.py Recipe.
-public sealed record Recipe(Dictionary<string, object?> Raw)
+// Flat meal/recipe profile the RecipeEngine + MealSuggestionService consume (port of the dict Python's
+// get_meal_profile returns). Single-profile in v2; every list defaults empty so tests build just the fields
+// they exercise (e.g. new MealProfile { Allergies = ["peanuts"] }).
+public sealed record MealProfile
 {
-    public object? Id => Raw.TryGetValue("id", out var v) ? v : null;
-    public string Name => Raw.TryGetValue("name", out var v) ? v?.ToString() ?? "" : "";
+    public IReadOnlyList<string> Allergies { get; init; } = [];
+    public IReadOnlyList<string> AvoidIngredients { get; init; } = [];
+    public IReadOnlyList<string> Restrictions { get; init; } = [];
+    public IReadOnlyList<string> PreferMeats { get; init; } = [];
+    public IReadOnlyList<string> AvoidMeats { get; init; } = [];
+    public IReadOnlyList<string> FavoriteTags { get; init; } = [];
 }
 
 // Household config — ports of config_store.py dataclasses.

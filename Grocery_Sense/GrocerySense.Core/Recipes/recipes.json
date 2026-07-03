@@ -1,0 +1,498 @@
+[
+  {
+    "id": 1,
+    "name": "Chicken Thighs with Rice",
+    "servings": 4,
+    "ingredients": ["chicken thighs", "rice", "garlic", "onion", "olive oil", "chicken broth"],
+    "steps": ["Season chicken thighs with salt and pepper.", "Sear in olive oil 4 min per side.", "Sauté onion and garlic, add rice and broth.", "Return chicken, cover, simmer 20 min."],
+    "tags": ["chicken", "weeknight", "under_30_min"]
+  },
+  {
+    "id": 2,
+    "name": "Beef Stir Fry",
+    "servings": 4,
+    "ingredients": ["beef sirloin", "broccoli", "soy sauce", "garlic", "ginger", "rice", "sesame oil"],
+    "steps": ["Slice beef thin. Cook rice.", "Stir fry beef in hot oil 2 min, set aside.", "Stir fry broccoli and garlic.", "Return beef, add soy sauce and ginger, toss.", "Serve over rice."],
+    "tags": ["beef", "stir_fry", "weeknight", "asian"]
+  },
+  {
+    "id": 3,
+    "name": "Pork Chops with Apple",
+    "servings": 4,
+    "ingredients": ["pork chops", "apples", "rosemary", "potatoes", "butter", "onion"],
+    "steps": ["Sear pork chops in butter 3 min per side.", "Sauté onion and apple slices.", "Roast potatoes at 400 F 25 min.", "Serve chops over potato with apple pan sauce."],
+    "tags": ["pork", "comfort", "weeknight"]
+  },
+  {
+    "id": 4,
+    "name": "Salmon Teriyaki",
+    "servings": 4,
+    "ingredients": ["salmon", "rice", "soy sauce", "honey", "ginger", "garlic", "sesame oil"],
+    "steps": ["Mix soy sauce, honey, ginger, garlic for teriyaki sauce.", "Marinate salmon 15 min.", "Pan-fry salmon 4 min per side, baste with sauce.", "Serve over rice."],
+    "tags": ["fish", "pescatarian", "asian", "weeknight"]
+  },
+  {
+    "id": 5,
+    "name": "Veggie Pasta Primavera",
+    "servings": 4,
+    "ingredients": ["pasta", "zucchini", "bell pepper", "garlic", "olive oil", "parmesan cheese", "cherry tomatoes"],
+    "steps": ["Cook pasta al dente.", "Sauté garlic, zucchini, bell pepper in olive oil.", "Add tomatoes, toss with pasta and parmesan."],
+    "tags": ["vegetarian", "quick", "pasta", "under_30_min"]
+  },
+  {
+    "id": 6,
+    "name": "Peanut Chicken Noodles",
+    "servings": 4,
+    "ingredients": ["chicken breast", "peanut butter", "soy sauce", "rice noodles", "garlic", "lime", "green onions"],
+    "steps": ["Cook noodles. Whisk peanut butter, soy sauce, lime, garlic.", "Grill or pan-fry chicken, slice.", "Toss noodles with sauce and chicken, garnish with green onions."],
+    "tags": ["chicken", "asian", "contains_nuts"]
+  },
+  {
+    "id": 7,
+    "name": "Quinoa Salad",
+    "servings": 4,
+    "ingredients": ["quinoa", "cucumber", "tomato", "feta cheese", "olive oil", "lemon", "red onion"],
+    "steps": ["Cook quinoa, cool.", "Dice cucumber, tomato, red onion.", "Toss all with olive oil and lemon, top with feta."],
+    "tags": ["vegetarian", "gluten_free", "salad", "quick"]
+  },
+  {
+    "id": 8,
+    "name": "Spaghetti Bolognese",
+    "servings": 6,
+    "ingredients": ["spaghetti", "ground beef", "tomato sauce", "onion", "garlic", "carrot", "olive oil", "parmesan cheese"],
+    "steps": ["Sauté onion, garlic, carrot in olive oil.", "Brown ground beef, add tomato sauce, simmer 20 min.", "Serve over spaghetti with parmesan."],
+    "tags": ["beef", "pasta", "comfort", "classic"]
+  },
+  {
+    "id": 9,
+    "name": "Chicken Caesar Salad",
+    "servings": 4,
+    "ingredients": ["chicken breast", "romaine lettuce", "parmesan cheese", "croutons", "caesar dressing", "lemon"],
+    "steps": ["Grill or pan-fry chicken breast, slice.", "Toss romaine with caesar dressing, lemon, parmesan.", "Top with chicken and croutons."],
+    "tags": ["chicken", "salad", "quick", "contains_gluten"]
+  },
+  {
+    "id": 10,
+    "name": "Vegetable Curry",
+    "servings": 4,
+    "ingredients": ["chickpeas", "tomato", "onion", "garlic", "ginger", "curry powder", "coconut milk", "spinach", "rice"],
+    "steps": ["Sauté onion, garlic, ginger.", "Add curry powder, tomato, chickpeas.", "Pour in coconut milk, simmer 15 min.", "Stir in spinach, serve over rice."],
+    "tags": ["vegetarian", "vegan", "gluten_free", "curry", "weeknight"]
+  },
+  {
+    "id": 11,
+    "name": "Sheet Pan Chicken and Vegetables",
+    "servings": 4,
+    "ingredients": ["chicken thighs", "bell pepper", "zucchini", "broccoli", "olive oil", "garlic", "paprika"],
+    "steps": ["Toss chicken and veg with olive oil, garlic, paprika.", "Spread on sheet pan, roast 400 F 30 min."],
+    "tags": ["chicken", "weeknight", "one_pan", "gluten_free"]
+  },
+  {
+    "id": 12,
+    "name": "Beef Tacos",
+    "servings": 4,
+    "ingredients": ["ground beef", "taco shells", "cheddar cheese", "lettuce", "tomato", "sour cream", "taco seasoning"],
+    "steps": ["Brown ground beef, drain fat.", "Add taco seasoning and water, simmer 5 min.", "Serve in taco shells with cheese, lettuce, tomato, sour cream."],
+    "tags": ["beef", "quick", "family_friendly", "under_30_min"]
+  },
+  {
+    "id": 13,
+    "name": "Lemon Garlic Shrimp Pasta",
+    "servings": 4,
+    "ingredients": ["shrimp", "pasta", "garlic", "lemon", "butter", "olive oil", "parsley", "parmesan cheese"],
+    "steps": ["Cook pasta. Sauté garlic in butter and olive oil.", "Add shrimp, cook 2 min per side.", "Toss with pasta, lemon juice, parsley and parmesan."],
+    "tags": ["seafood", "pescatarian", "pasta", "quick", "under_30_min"]
+  },
+  {
+    "id": 14,
+    "name": "Chicken Fried Rice",
+    "servings": 4,
+    "ingredients": ["chicken breast", "rice", "eggs", "soy sauce", "peas", "carrots", "green onions", "sesame oil"],
+    "steps": ["Use day-old rice. Scramble eggs, set aside.", "Stir fry chicken, add rice, soy sauce, peas, carrots.", "Stir in eggs and green onions, drizzle sesame oil."],
+    "tags": ["chicken", "asian", "weeknight", "budget"]
+  },
+  {
+    "id": 15,
+    "name": "Tomato Basil Soup",
+    "servings": 6,
+    "ingredients": ["tomato", "onion", "garlic", "chicken broth", "heavy cream", "basil", "olive oil", "butter"],
+    "steps": ["Roast tomatoes and garlic at 400 F 20 min.", "Blend with sautéed onion, garlic and broth.", "Stir in cream and basil, season to taste."],
+    "tags": ["vegetarian", "soup", "comfort"]
+  },
+  {
+    "id": 16,
+    "name": "Pork Tenderloin with Vegetables",
+    "servings": 4,
+    "ingredients": ["pork tenderloin", "potatoes", "carrots", "garlic", "rosemary", "olive oil", "dijon mustard"],
+    "steps": ["Rub pork with mustard, garlic, rosemary.", "Roast with vegetables at 425 F 25 min.", "Rest 5 min, slice."],
+    "tags": ["pork", "roast", "gluten_free", "one_pan"]
+  },
+  {
+    "id": 17,
+    "name": "Mushroom Risotto",
+    "servings": 4,
+    "ingredients": ["arborio rice", "mushrooms", "onion", "garlic", "white wine", "chicken broth", "parmesan cheese", "butter"],
+    "steps": ["Sauté onion and garlic. Add rice, toast 2 min.", "Add wine, then broth ladle by ladle stirring constantly.", "Fold in sautéed mushrooms, butter and parmesan."],
+    "tags": ["vegetarian", "comfort", "italian"]
+  },
+  {
+    "id": 18,
+    "name": "Black Bean Soup",
+    "servings": 6,
+    "ingredients": ["black beans", "onion", "garlic", "cumin", "chicken broth", "tomato", "lime", "sour cream"],
+    "steps": ["Sauté onion and garlic with cumin.", "Add beans, tomato, broth, simmer 20 min.", "Blend half the soup, return to pot, serve with lime and sour cream."],
+    "tags": ["vegetarian", "soup", "budget", "gluten_free"]
+  },
+  {
+    "id": 19,
+    "name": "Baked Salmon with Asparagus",
+    "servings": 4,
+    "ingredients": ["salmon", "asparagus", "lemon", "garlic", "olive oil", "butter", "dill"],
+    "steps": ["Place salmon and asparagus on sheet pan.", "Drizzle with olive oil, dot with butter, top with garlic, lemon and dill.", "Bake 400 F 15 min."],
+    "tags": ["fish", "pescatarian", "gluten_free", "one_pan", "healthy"]
+  },
+  {
+    "id": 20,
+    "name": "Chicken Tikka Masala",
+    "servings": 4,
+    "ingredients": ["chicken breast", "yogurt", "tomato sauce", "heavy cream", "onion", "garlic", "ginger", "garam masala", "cumin", "rice"],
+    "steps": ["Marinate chicken in yogurt and spices 30 min.", "Grill chicken, cut into pieces.", "Simmer onion, garlic, ginger, spices, tomato sauce and cream.", "Add chicken, serve over rice."],
+    "tags": ["chicken", "indian", "curry", "gluten_free"]
+  },
+  {
+    "id": 21,
+    "name": "Beef and Broccoli",
+    "servings": 4,
+    "ingredients": ["beef sirloin", "broccoli", "soy sauce", "oyster sauce", "garlic", "ginger", "sesame oil", "rice"],
+    "steps": ["Slice beef thin. Cook rice.", "Blanch broccoli. Stir fry beef 2 min.", "Add broccoli, garlic, ginger, soy sauce, oyster sauce, toss.", "Drizzle sesame oil, serve over rice."],
+    "tags": ["beef", "asian", "stir_fry", "weeknight"]
+  },
+  {
+    "id": 22,
+    "name": "Pasta Carbonara",
+    "servings": 4,
+    "ingredients": ["spaghetti", "bacon", "eggs", "parmesan cheese", "garlic", "black pepper"],
+    "steps": ["Cook spaghetti. Fry bacon and garlic.", "Whisk eggs and parmesan.", "Off heat, toss pasta with bacon and egg mixture, loosen with pasta water."],
+    "tags": ["pasta", "quick", "italian", "contains_gluten"]
+  },
+  {
+    "id": 23,
+    "name": "Chicken Soup",
+    "servings": 6,
+    "ingredients": ["chicken thighs", "carrots", "celery", "onion", "garlic", "chicken broth", "egg noodles", "parsley"],
+    "steps": ["Simmer chicken in broth with onion, carrot, celery 25 min.", "Remove chicken, shred, return to pot.", "Add noodles, cook 8 min, finish with parsley."],
+    "tags": ["chicken", "soup", "comfort", "classic"]
+  },
+  {
+    "id": 24,
+    "name": "Shrimp Tacos",
+    "servings": 4,
+    "ingredients": ["shrimp", "corn tortillas", "cabbage", "lime", "sour cream", "avocado", "taco seasoning", "cilantro"],
+    "steps": ["Season and pan-fry shrimp 2 min per side.", "Warm tortillas. Mix sour cream with lime.", "Build tacos with shrimp, cabbage, avocado, cilantro and lime crema."],
+    "tags": ["seafood", "pescatarian", "quick", "under_30_min"]
+  },
+  {
+    "id": 25,
+    "name": "Ground Turkey Stuffed Peppers",
+    "servings": 4,
+    "ingredients": ["ground turkey", "bell pepper", "rice", "tomato sauce", "onion", "garlic", "mozzarella cheese", "italian seasoning"],
+    "steps": ["Cook rice. Brown turkey with onion, garlic, seasoning.", "Mix turkey with rice and tomato sauce, stuff into halved peppers.", "Top with mozzarella, bake 375 F 30 min."],
+    "tags": ["turkey", "gluten_free", "weeknight", "family_friendly"]
+  },
+  {
+    "id": 26,
+    "name": "Vegetarian Chili",
+    "servings": 6,
+    "ingredients": ["black beans", "kidney beans", "tomato", "corn", "onion", "bell pepper", "garlic", "chili powder", "cumin"],
+    "steps": ["Sauté onion, bell pepper, garlic.", "Add chili powder, cumin, tomato, beans, corn.", "Simmer 20 min, serve with sour cream or avocado."],
+    "tags": ["vegetarian", "vegan", "chili", "budget", "gluten_free"]
+  },
+  {
+    "id": 27,
+    "name": "Baked Mac and Cheese",
+    "servings": 6,
+    "ingredients": ["macaroni", "cheddar cheese", "milk", "butter", "flour", "breadcrumbs", "mustard powder"],
+    "steps": ["Cook macaroni. Make cheese sauce with butter, flour, milk, cheddar.", "Combine, top with breadcrumbs.", "Bake 375 F 20 min until golden."],
+    "tags": ["vegetarian", "comfort", "family_friendly", "pasta", "contains_gluten"]
+  },
+  {
+    "id": 28,
+    "name": "Greek Salad with Grilled Chicken",
+    "servings": 4,
+    "ingredients": ["chicken breast", "cucumber", "tomato", "kalamata olives", "feta cheese", "red onion", "olive oil", "lemon", "oregano"],
+    "steps": ["Grill chicken, slice.", "Combine cucumber, tomato, olives, feta, red onion.", "Dress with olive oil, lemon, oregano, top with chicken."],
+    "tags": ["chicken", "salad", "gluten_free", "healthy", "mediterranean"]
+  },
+  {
+    "id": 29,
+    "name": "Pulled Pork Sandwiches",
+    "servings": 6,
+    "ingredients": ["pork shoulder", "bbq sauce", "onion", "garlic", "brown sugar", "paprika", "hamburger buns", "coleslaw"],
+    "steps": ["Rub pork with sugar, paprika, garlic.", "Slow cook with onion 8 hours or oven 300 F 4 hours.", "Shred, toss with BBQ sauce, serve on buns with coleslaw."],
+    "tags": ["pork", "slow_cook", "comfort", "family_friendly"]
+  },
+  {
+    "id": 30,
+    "name": "Tuna Noodle Casserole",
+    "servings": 6,
+    "ingredients": ["egg noodles", "tuna", "cream of mushroom soup", "frozen peas", "cheddar cheese", "breadcrumbs", "milk"],
+    "steps": ["Cook noodles. Mix tuna, soup, milk, peas.", "Combine with noodles, top with cheese and breadcrumbs.", "Bake 375 F 25 min."],
+    "tags": ["seafood", "pescatarian", "comfort", "budget", "casserole"]
+  },
+  {
+    "id": 31,
+    "name": "Lentil Soup",
+    "servings": 6,
+    "ingredients": ["red lentils", "onion", "garlic", "carrot", "cumin", "turmeric", "tomato", "chicken broth", "lemon"],
+    "steps": ["Sauté onion, garlic, carrot with cumin and turmeric.", "Add lentils, tomato, broth, simmer 25 min until soft.", "Blend partially, finish with lemon juice."],
+    "tags": ["vegetarian", "vegan", "soup", "budget", "gluten_free"]
+  },
+  {
+    "id": 32,
+    "name": "Chicken Quesadillas",
+    "servings": 4,
+    "ingredients": ["chicken breast", "flour tortillas", "cheddar cheese", "bell pepper", "onion", "sour cream", "salsa"],
+    "steps": ["Grill and slice chicken. Sauté bell pepper and onion.", "Layer tortilla with cheese, chicken, veg, fold.", "Cook in pan 3 min per side, serve with sour cream and salsa."],
+    "tags": ["chicken", "quick", "family_friendly", "under_30_min", "contains_gluten"]
+  },
+  {
+    "id": 33,
+    "name": "Beef Chili",
+    "servings": 6,
+    "ingredients": ["ground beef", "kidney beans", "tomato", "onion", "bell pepper", "garlic", "chili powder", "cumin", "beef broth"],
+    "steps": ["Brown beef with onion, garlic.", "Add chili powder, cumin, tomato, beans, broth.", "Simmer 30 min, season to taste."],
+    "tags": ["beef", "chili", "comfort", "budget", "gluten_free"]
+  },
+  {
+    "id": 34,
+    "name": "Shrimp Fried Rice",
+    "servings": 4,
+    "ingredients": ["shrimp", "rice", "eggs", "soy sauce", "peas", "carrots", "green onions", "garlic", "sesame oil"],
+    "steps": ["Use day-old rice. Scramble eggs, set aside.", "Stir fry shrimp and garlic, add rice, soy sauce, peas, carrots.", "Toss in eggs and green onions, finish with sesame oil."],
+    "tags": ["seafood", "pescatarian", "asian", "weeknight", "budget"]
+  },
+  {
+    "id": 35,
+    "name": "Veggie Frittata",
+    "servings": 4,
+    "ingredients": ["eggs", "bell pepper", "onion", "mushrooms", "spinach", "feta cheese", "olive oil"],
+    "steps": ["Sauté veg in oven-safe pan.", "Whisk eggs with feta, pour over veg.", "Cook 3 min on stovetop, finish in 375 F oven 10 min."],
+    "tags": ["vegetarian", "gluten_free", "quick", "breakfast"]
+  },
+  {
+    "id": 36,
+    "name": "Chicken and Vegetable Soup",
+    "servings": 6,
+    "ingredients": ["chicken breast", "carrots", "celery", "onion", "garlic", "potatoes", "chicken broth", "parsley", "thyme"],
+    "steps": ["Bring broth to boil with onion, carrot, celery, garlic.", "Add chicken and potato, simmer 20 min.", "Remove chicken, shred, return. Add herbs."],
+    "tags": ["chicken", "soup", "healthy", "gluten_free", "comfort"]
+  },
+  {
+    "id": 37,
+    "name": "Penne Arrabbiata",
+    "servings": 4,
+    "ingredients": ["penne pasta", "tomato sauce", "garlic", "red chili flakes", "olive oil", "parsley", "parmesan cheese"],
+    "steps": ["Cook penne. Sauté garlic and chili flakes in olive oil.", "Add tomato sauce, simmer 10 min.", "Toss with pasta and parsley, top with parmesan."],
+    "tags": ["vegetarian", "pasta", "italian", "quick", "under_30_min"]
+  },
+  {
+    "id": 38,
+    "name": "Baked Chicken Breast",
+    "servings": 4,
+    "ingredients": ["chicken breast", "garlic", "olive oil", "paprika", "italian seasoning", "lemon"],
+    "steps": ["Pound chicken to even thickness.", "Rub with olive oil, garlic, paprika, Italian seasoning.", "Bake 425 F 18 min, rest 5 min, drizzle with lemon."],
+    "tags": ["chicken", "gluten_free", "healthy", "simple", "weeknight"]
+  },
+  {
+    "id": 39,
+    "name": "Sweet Potato and Black Bean Burritos",
+    "servings": 4,
+    "ingredients": ["sweet potato", "black beans", "flour tortillas", "cheddar cheese", "cumin", "chili powder", "sour cream", "salsa"],
+    "steps": ["Roast cubed sweet potato 400 F 20 min.", "Season beans with cumin and chili.", "Wrap potato, beans, cheese in tortillas, bake or pan-fry seam side down."],
+    "tags": ["vegetarian", "budget", "family_friendly"]
+  },
+  {
+    "id": 40,
+    "name": "Beef Stew",
+    "servings": 6,
+    "ingredients": ["beef stew meat", "potatoes", "carrots", "onion", "garlic", "beef broth", "tomato paste", "thyme", "flour"],
+    "steps": ["Dredge beef in flour, brown in batches.", "Sauté onion and garlic, add beef, broth, tomato paste, thyme.", "Simmer covered 90 min, add potato and carrot, cook 30 more min."],
+    "tags": ["beef", "stew", "comfort", "slow_cook"]
+  },
+  {
+    "id": 41,
+    "name": "Garlic Butter Tilapia",
+    "servings": 4,
+    "ingredients": ["tilapia", "butter", "garlic", "lemon", "parsley", "olive oil"],
+    "steps": ["Season tilapia. Pan-fry in olive oil 3 min per side.", "Add butter and garlic, baste fish.", "Finish with lemon and parsley."],
+    "tags": ["fish", "pescatarian", "quick", "under_30_min", "gluten_free"]
+  },
+  {
+    "id": 42,
+    "name": "Pasta e Fagioli",
+    "servings": 6,
+    "ingredients": ["ditalini pasta", "cannellini beans", "tomato", "onion", "garlic", "celery", "carrot", "chicken broth", "parmesan cheese", "olive oil"],
+    "steps": ["Sauté onion, carrot, celery, garlic in olive oil.", "Add tomato, beans, broth, simmer 15 min.", "Add pasta, cook until tender. Serve with parmesan."],
+    "tags": ["italian", "soup", "budget", "comfort"]
+  },
+  {
+    "id": 43,
+    "name": "Turkey Meatballs in Marinara",
+    "servings": 4,
+    "ingredients": ["ground turkey", "breadcrumbs", "egg", "parmesan cheese", "garlic", "italian seasoning", "tomato sauce", "spaghetti"],
+    "steps": ["Mix turkey, breadcrumbs, egg, parmesan, garlic, seasoning.", "Roll into balls, bake 400 F 18 min.", "Simmer in tomato sauce, serve over spaghetti."],
+    "tags": ["turkey", "pasta", "italian", "family_friendly"]
+  },
+  {
+    "id": 44,
+    "name": "Teriyaki Chicken Bowl",
+    "servings": 4,
+    "ingredients": ["chicken thighs", "soy sauce", "honey", "garlic", "ginger", "rice", "broccoli", "sesame seeds", "green onions"],
+    "steps": ["Cook rice and steam broccoli.", "Pan-fry chicken, glaze with soy sauce, honey, garlic, ginger sauce.", "Serve over rice with broccoli, garnish with sesame and green onions."],
+    "tags": ["chicken", "asian", "weeknight", "bowl"]
+  },
+  {
+    "id": 45,
+    "name": "Minestrone",
+    "servings": 6,
+    "ingredients": ["cannellini beans", "zucchini", "carrots", "celery", "onion", "tomato", "spinach", "small pasta", "garlic", "chicken broth", "olive oil"],
+    "steps": ["Sauté onion, carrot, celery, garlic.", "Add tomato, broth, beans, zucchini, simmer 15 min.", "Add pasta, cook 8 min. Stir in spinach."],
+    "tags": ["vegetarian", "soup", "italian", "budget", "healthy"]
+  },
+  {
+    "id": 46,
+    "name": "BBQ Pork Ribs",
+    "servings": 4,
+    "ingredients": ["pork ribs", "bbq sauce", "brown sugar", "paprika", "garlic powder", "onion powder", "black pepper"],
+    "steps": ["Rub ribs with sugar, paprika, garlic, onion, pepper.", "Bake 300 F 2.5 hours wrapped in foil.", "Brush with BBQ sauce, broil 5 min to caramelise."],
+    "tags": ["pork", "barbecue", "weekend", "family_friendly"]
+  },
+  {
+    "id": 47,
+    "name": "Caprese Pasta",
+    "servings": 4,
+    "ingredients": ["penne pasta", "cherry tomatoes", "mozzarella cheese", "basil", "olive oil", "garlic", "balsamic vinegar"],
+    "steps": ["Cook pasta. Halve tomatoes, cube mozzarella.", "Warm garlic and tomatoes in olive oil.", "Toss with pasta, mozzarella, basil, balsamic drizzle."],
+    "tags": ["vegetarian", "pasta", "italian", "summer", "quick"]
+  },
+  {
+    "id": 48,
+    "name": "Chicken Pot Pie",
+    "servings": 6,
+    "ingredients": ["chicken breast", "potatoes", "carrots", "peas", "onion", "butter", "flour", "chicken broth", "milk", "pie crust"],
+    "steps": ["Cook chicken and vegetables. Make roux with butter and flour.", "Add broth and milk, simmer until thick.", "Mix in chicken and veg, pour into crust, top with crust, bake 375 F 35 min."],
+    "tags": ["chicken", "comfort", "classic", "family_friendly", "contains_gluten"]
+  },
+  {
+    "id": 49,
+    "name": "Egg Fried Rice",
+    "servings": 4,
+    "ingredients": ["rice", "eggs", "soy sauce", "peas", "carrots", "green onions", "sesame oil", "garlic"],
+    "steps": ["Use day-old rice. Scramble eggs.", "Stir fry garlic, add rice, soy sauce, peas, carrots.", "Toss in eggs, green onions, sesame oil."],
+    "tags": ["vegetarian", "asian", "quick", "budget", "under_30_min"]
+  },
+  {
+    "id": 50,
+    "name": "Butter Chicken",
+    "servings": 4,
+    "ingredients": ["chicken thighs", "tomato sauce", "butter", "heavy cream", "onion", "garlic", "ginger", "garam masala", "cumin", "paprika", "rice"],
+    "steps": ["Marinate chicken in yogurt and spices, grill or pan-fry.", "Sauté onion, garlic, ginger with spices, add tomato sauce.", "Add butter and cream, simmer, add chicken. Serve over rice."],
+    "tags": ["chicken", "indian", "curry", "comfort", "gluten_free"]
+  },
+  {
+    "id": 51,
+    "name": "Salmon Patties",
+    "servings": 4,
+    "ingredients": ["canned salmon", "breadcrumbs", "egg", "onion", "parsley", "lemon", "mayonnaise", "olive oil"],
+    "steps": ["Mix salmon, breadcrumbs, egg, onion, parsley, lemon, mayo.", "Form patties, pan-fry in olive oil 3 min per side.", "Serve with lemon wedges."],
+    "tags": ["fish", "pescatarian", "budget", "quick", "under_30_min"]
+  },
+  {
+    "id": 52,
+    "name": "Roast Beef with Potatoes",
+    "servings": 6,
+    "ingredients": ["beef roast", "potatoes", "carrots", "onion", "garlic", "beef broth", "rosemary", "olive oil"],
+    "steps": ["Sear roast in oil on all sides.", "Add veg and broth to roasting pan.", "Roast 325 F until 145 F internal. Rest 15 min, slice."],
+    "tags": ["beef", "roast", "sunday_dinner", "gluten_free", "classic"]
+  },
+  {
+    "id": 53,
+    "name": "Spicy Pork Ramen",
+    "servings": 4,
+    "ingredients": ["pork belly", "ramen noodles", "chicken broth", "soy sauce", "gochujang", "garlic", "ginger", "eggs", "green onions", "sesame oil"],
+    "steps": ["Simmer broth with garlic, ginger, soy sauce, gochujang.", "Slice roasted pork belly.", "Cook ramen noodles, soft-boil eggs.", "Assemble bowls with noodles, broth, pork, egg, green onions."],
+    "tags": ["pork", "asian", "soup", "comfort"]
+  },
+  {
+    "id": 54,
+    "name": "Caprese Chicken",
+    "servings": 4,
+    "ingredients": ["chicken breast", "mozzarella cheese", "tomato", "basil", "olive oil", "balsamic vinegar", "garlic"],
+    "steps": ["Sear chicken breast 4 min per side.", "Top with tomato and mozzarella, cover until cheese melts.", "Drizzle with balsamic, garnish with basil."],
+    "tags": ["chicken", "italian", "gluten_free", "quick"]
+  },
+  {
+    "id": 55,
+    "name": "Bean and Vegetable Stir Fry",
+    "servings": 4,
+    "ingredients": ["edamame", "snap peas", "bell pepper", "broccoli", "garlic", "soy sauce", "sesame oil", "rice"],
+    "steps": ["Cook rice.", "Stir fry garlic and vegetables in hot oil.", "Season with soy sauce, drizzle sesame oil, serve over rice."],
+    "tags": ["vegetarian", "vegan", "asian", "quick", "gluten_free"]
+  },
+  {
+    "id": 56,
+    "name": "Clam Chowder",
+    "servings": 6,
+    "ingredients": ["clams", "potatoes", "onion", "celery", "bacon", "butter", "flour", "heavy cream", "chicken broth"],
+    "steps": ["Fry bacon, sauté onion and celery in butter.", "Add flour, then broth and potatoes, simmer 15 min.", "Add clams and cream, heat through without boiling."],
+    "tags": ["seafood", "pescatarian", "soup", "comfort", "classic"]
+  },
+  {
+    "id": 57,
+    "name": "Chicken Enchiladas",
+    "servings": 6,
+    "ingredients": ["chicken breast", "corn tortillas", "enchilada sauce", "cheddar cheese", "onion", "garlic", "cumin", "sour cream"],
+    "steps": ["Cook and shred chicken with onion, garlic, cumin.", "Fill tortillas with chicken and cheese, roll.", "Pour enchilada sauce over, top with cheese.", "Bake 375 F 25 min. Serve with sour cream."],
+    "tags": ["chicken", "mexican", "family_friendly", "casserole"]
+  },
+  {
+    "id": 58,
+    "name": "Tofu Stir Fry",
+    "servings": 4,
+    "ingredients": ["firm tofu", "broccoli", "bell pepper", "snap peas", "garlic", "ginger", "soy sauce", "sesame oil", "rice"],
+    "steps": ["Press and cube tofu, pan-fry until golden.", "Stir fry garlic, ginger, vegetables.", "Add tofu and soy sauce, toss, drizzle sesame oil, serve over rice."],
+    "tags": ["vegetarian", "vegan", "asian", "gluten_free", "healthy"]
+  },
+  {
+    "id": 59,
+    "name": "Lamb Chops with Mint Sauce",
+    "servings": 4,
+    "ingredients": ["lamb chops", "garlic", "rosemary", "olive oil", "lemon", "mint", "potatoes"],
+    "steps": ["Marinate chops in garlic, rosemary, olive oil, lemon 30 min.", "Grill or pan-sear 3 min per side.", "Make mint sauce: blend mint, lemon, olive oil. Serve with roasted potatoes."],
+    "tags": ["lamb", "gluten_free", "weekend", "special_occasion"]
+  },
+  {
+    "id": 60,
+    "name": "Banana Pancakes",
+    "servings": 4,
+    "ingredients": ["banana", "eggs", "flour", "milk", "baking powder", "butter", "maple syrup"],
+    "steps": ["Mash bananas, whisk in eggs and milk.", "Add flour and baking powder, mix gently.", "Cook in buttered pan 2 min per side. Serve with maple syrup."],
+    "tags": ["vegetarian", "breakfast", "family_friendly", "quick", "contains_gluten"]
+  },
+  {
+    "id": 61,
+    "name": "Honey Garlic Chicken Drumsticks",
+    "servings": 4,
+    "ingredients": ["chicken drumsticks", "honey", "garlic", "soy sauce", "olive oil", "paprika"],
+    "steps": ["Mix honey, garlic, soy sauce, olive oil, paprika.", "Coat drumsticks, marinate 30 min.", "Bake 400 F 40 min, basting twice."],
+    "tags": ["chicken", "family_friendly", "budget", "gluten_free", "weeknight"]
+  },
+  {
+    "id": 62,
+    "name": "Spinach and Ricotta Stuffed Shells",
+    "servings": 6,
+    "ingredients": ["jumbo pasta shells", "ricotta cheese", "spinach", "mozzarella cheese", "egg", "tomato sauce", "garlic", "italian seasoning", "parmesan cheese"],
+    "steps": ["Cook shells. Mix ricotta, spinach, egg, garlic, seasoning.", "Fill shells, place in baking dish over tomato sauce.", "Top with mozzarella and parmesan, bake 375 F 30 min."],
+    "tags": ["vegetarian", "pasta", "italian", "comfort", "family_friendly"]
+  }
+]
