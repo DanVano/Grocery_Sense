@@ -34,6 +34,13 @@ public sealed class FamilyRequestsService
         var recipe = _engine.GetRecipeByName(recipeName)
             ?? throw new ArgumentException($"Unknown recipe: {recipeName}");
 
+        // Defense-in-depth: re-check the household hard filter at pick time. PickableRecipes filters the list,
+        // but a stale list (e.g. an allergy added while a kid had /family open) could still surface a now-unsafe
+        // recipe — refuse rather than add an allergen to the shared list. Mirrors MealSuggestionService's net.
+        if (ProfileFilter.Violates(recipe.Ingredients, _preferences.GetMealProfile()))
+            throw new InvalidOperationException(
+                $"\"{recipe.Name}\" is no longer allowed by the household's allergy/exclude settings.");
+
         var name = MemberName(memberId);
         var rowIds = recipe.Ingredients
             .Select(ing => _shopping.AddSingleItem(ing, 1.0, "each", notes: $"Family pick: {recipeName}",
@@ -58,16 +65,10 @@ public sealed class FamilyRequestsService
 
     // Recipe names a member may pick: household hard excludes / allergies are hidden (whole-household, so no
     // per-member arg). Soft excludes do NOT filter. Sorted case-insensitively.
-    public IReadOnlyList<string> PickableRecipes()
-    {
-        var recipes = _engine.LoadAllRecipes();
-        if (recipes.Count == 0) return Array.Empty<string>();
-
-        var allIngredients = recipes.SelectMany(r => r.Ingredients).Select(i => i.ToLowerInvariant()).Distinct().ToList();
-        var passing = _engine.FilterByIngredientsAndProfile(allIngredients, _preferences.GetMealProfile(), recipes.Count);
-        return passing.Select(r => r.Name).Where(n => n.Length > 0)
+    public IReadOnlyList<string> PickableRecipes() =>
+        _engine.RecipesMatchingProfile(_preferences.GetMealProfile())
+            .Select(r => r.Name).Where(n => n.Length > 0)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-    }
 
     // --- parent review queue ---
 
