@@ -35,10 +35,8 @@ public sealed class ShoppingListService
         return ShoppingListRepo.ListActiveItems(conn, storeId, includeCheckedOff);
     }
 
-    // autoMap is accepted for signature parity but unused (Python add_single_item ignores it too).
     public int AddSingleItem(string name, double? quantity = null, string unit = "", int? plannedStoreId = null,
-        string? notes = null, string? addedBy = null, int? addedByMemberId = null, int? itemId = null,
-        bool autoMap = false)
+        string? notes = null, string? addedBy = null, int? addedByMemberId = null, int? itemId = null)
     {
         using var conn = _factory.Open();
         return ShoppingListRepo.AddItem(conn, name, quantity ?? 1.0, unit ?? "", category: "", notes: notes ?? "",
