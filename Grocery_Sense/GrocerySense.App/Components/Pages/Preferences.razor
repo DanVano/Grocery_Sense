@@ -362,12 +362,15 @@ else
             foreach (var p in je.EnumerateObject())
                 if (p.Value.ValueKind == JsonValueKind.Number && p.Value.GetDouble() > 1.0) keys.Add(p.Name);
         }
-        else if (value is IDictionary<string, object?> map)
+        // In-session (no JSON round-trip) the runtime type is Dictionary<string, double>, which does NOT match
+        // the generic IDictionary<string, object?>. Match the non-generic IDictionary — as NormWeights does —
+        // so preferred proteins survive a navigate-away-and-back without being wiped on the next Save.
+        else if (value is System.Collections.IDictionary map)
         {
-            foreach (var kv in map)
-                if (kv.Value is double d && d > 1.0) keys.Add(kv.Key);
+            foreach (System.Collections.DictionaryEntry kv in map)
+                if (kv.Key is { } k && Convert.ToDouble(kv.Value) > 1.0) keys.Add(k.ToString() ?? "");
         }
-        return string.Join(", ", keys);
+        return string.Join(", ", keys.Where(k => k.Length > 0));
     }
 
     private static List<string> ParseList(string csv) =>
