@@ -1,5 +1,8 @@
 using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
+using GrocerySense.Data;
+using GrocerySense.Data.Repositories;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -42,5 +45,53 @@ public class DiResolutionSmokeTests
 
         foreach (var descriptor in services)
             provider.GetRequiredService(descriptor.ServiceType);
+    }
+
+    [Fact]
+    public async Task SyncCompleted_wiring_refreshes_price_drop_alerts()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"gs_wire_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddGrocerySenseCore(Path.Combine(dir, "test.db"));
+            services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
+            services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
+            services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
+            using var provider = services.BuildServiceProvider(validateScopes: true);
+
+            var factory = provider.GetRequiredService<SqliteConnectionFactory>();
+            Database.Initialize(factory);
+            using (var conn = factory.Open()) SeedStapleWithDrop(conn);
+
+            var result = await provider.GetRequiredService<FlyerSyncScheduler>().RequestSyncAsync();
+
+            Assert.True(result.Ran);
+            Assert.Empty(result.Errors); // the wired handler must not have thrown
+            var alert = Assert.Single(provider.GetRequiredService<PriceDropAlertService>().GetAlerts());
+            Assert.Equal("below_usual", alert.AlertKind);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { /* temp */ } }
+    }
+
+    // Staple with a 30% drop: 4 receipts @ $10 (usual), one today @ $7. Mirrors
+    // PriceDropAlertServiceTests.SeedStapleWithDrop (kept local — different connection shape).
+    private static void SeedStapleWithDrop(SqliteConnection conn)
+    {
+        static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
+        var store = StoresRepo.CreateStore(conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(conn, "Milk").Id;
+        foreach (var d in new[] { 40, 30, 20, 10, 0 })
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
+            cmd.Parameters.AddWithValue("$s", store);
+            cmd.Parameters.AddWithValue("$d", DaysAgo(d));
+            var rid = (int)(long)cmd.ExecuteScalar()!;
+            PricesRepo.AddPricePoint(conn, item, store, d == 0 ? 7.0 : 10.0, "each",
+                source: "receipt", date: DaysAgo(d), receiptId: rid);
+        }
     }
 }

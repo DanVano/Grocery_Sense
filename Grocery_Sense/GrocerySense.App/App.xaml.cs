@@ -21,7 +21,8 @@ public partial class App : Application
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
 		var window = new Window(new MainPage()) { Title = "Grocery Sense" };
-		// Sync-on-resume replaces Python's background timer (Phase 6 redesign; hook deferred to Phase 8).
+		// Sync-on-resume replaces Python's background timer (Phase 6 redesign). A sync that ran also
+		// refreshes price-drop alerts via the SyncCompleted hook wired in AddGrocerySenseCore.
 		// The scheduler is single-flighted and throttled, so a chatty Resumed event is harmless.
 		window.Resumed += (_, _) => _ = SyncOnResumeAsync();
 		return window;

@@ -25,7 +25,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ReceiptIngestionService>();
         services.AddSingleton<FlyerIngestService>();
         services.AddSingleton<FlyerSyncService>();
-        services.AddSingleton<FlyerSyncScheduler>();
+        services.AddSingleton(sp =>
+        {
+            var scheduler = new FlyerSyncScheduler(sp.GetRequiredService<FlyerSyncService>());
+            var alerts = sp.GetRequiredService<PriceDropAlertService>();
+            // Phase 8 hook: a sync that actually ran refreshes engine price-drop alerts (the C# analog of
+            // Python's on_sync_complete). Both call paths — App resume and the Deals sync button — route
+            // through this singleton. A handler failure is disclosed in FlyerSyncResult.Errors, not thrown.
+            // ponytail: synchronous handler — local SQLite on a small DB; Task.Run only if it janks the UI.
+            scheduler.SyncCompleted += _ => alerts.RefreshEngineAlerts();
+            return scheduler;
+        });
         services.AddSingleton<BudgetService>();
 
         // Meal planning (Phase 4). RecipeEngine loads the embedded recipes.json (no path). MealSuggestion
