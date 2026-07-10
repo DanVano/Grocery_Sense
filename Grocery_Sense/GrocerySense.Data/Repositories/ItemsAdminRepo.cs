@@ -12,7 +12,11 @@ namespace GrocerySense.Data.Repositories;
 // caller owns it (matches ReceiptsRepo.IngestReceipt).
 public static class ItemsAdminRepo
 {
-    private static readonly string[] ValidUnits = { "each", "lb", "kg", "g" };
+    // Canonical unit vocabulary (lowercased), mirroring UnitNormalizationService.NormalizeUnit's outputs.
+    // Duplicated here because Data cannot reference Core; a merged item's default_unit is only ever set from
+    // that vocabulary, so a too-narrow whitelist would silently drop a valid unit like "l" during promotion.
+    private static readonly string[] ValidUnits =
+        { "each", "lb", "kg", "g", "oz", "l", "ml", "fl_oz", "cup", "tbsp", "tsp", "gal", "pint", "dozen", "bunch", "case", "pack" };
 
     // Every table with an item_id column referencing items.id, re-pointed on merge. Verified against the
     // live schema (Database.cs), NOT the Python list — flyer_deals/price_drop_alerts/watchlist post-date it.
@@ -29,7 +33,9 @@ public static class ItemsAdminRepo
         int limit = 250, SqliteTransaction? tx = null)
     {
         var q = (query ?? "").Trim();
-        var where = q.Length > 0 ? "WHERE i.canonical_name LIKE $q" : "";
+        // Escape LIKE metacharacters so a query like "2% milk" doesn't become a wildcard that over-matches the
+        // merge picker (picking the wrong item destructively merges price history).
+        var where = q.Length > 0 ? @"WHERE i.canonical_name LIKE $q ESCAPE '\'" : "";
         using var cmd = Db.Command(conn, tx, $"""
             SELECT i.id, COALESCE(i.canonical_name, ''), COALESCE(i.is_tracked, 0), i.default_unit,
                    COALESCE(ps.price_points, 0), ps.last_price_date
@@ -40,7 +46,7 @@ public static class ItemsAdminRepo
             ORDER BY COALESCE(i.is_tracked, 0) DESC, i.canonical_name ASC
             LIMIT $limit
             """);
-        if (q.Length > 0) cmd.Parameters.AddWithValue("$q", $"%{q}%");
+        if (q.Length > 0) cmd.Parameters.AddWithValue("$q", $"%{EscapeLike(q)}%");
         cmd.Parameters.AddWithValue("$limit", limit);
 
         using var r = cmd.ExecuteReader();
@@ -94,9 +100,11 @@ public static class ItemsAdminRepo
             Exec(conn, tx, $"UPDATE {table} SET item_id = $t WHERE item_id = $s",
                 ("$t", targetItemId), ("$s", sourceItemId));
 
-        // watchlist: keep target's watch on conflict (drop source's), else move source's. Prevents two
-        // active watches for the merged item — the table has no UNIQUE(item_id) to enforce it.
-        Exec(conn, tx, "DELETE FROM watchlist WHERE item_id = $s AND EXISTS (SELECT 1 FROM watchlist WHERE item_id = $t)",
+        // watchlist: prevent two ACTIVE watches for the merged item. Only drop the source's watch when the
+        // target already has an active one — scoping on is_active=1 so a paused (soft-deleted) target watch
+        // never causes the source's live watch to be silently deleted.
+        Exec(conn, tx,
+            "DELETE FROM watchlist WHERE item_id = $s AND EXISTS (SELECT 1 FROM watchlist WHERE item_id = $t AND is_active = 1)",
             ("$s", sourceItemId), ("$t", targetItemId));
         Exec(conn, tx, "UPDATE watchlist SET item_id = $t WHERE item_id = $s",
             ("$t", targetItemId), ("$s", sourceItemId));
@@ -119,13 +127,27 @@ public static class ItemsAdminRepo
         Exec(conn, tx, "UPDATE receipt_line_items SET item_id = $new WHERE id = $line",
             ("$new", newItemId), ("$line", lineItemId));
 
-        // The price row from this line is keyed (receipt_id, raw_name = description, item_id = old).
+        // The price row from this line is keyed (receipt_id, raw_name = description, item_id = old). Move ONLY
+        // ONE matching row: two identical-description lines on the same receipt map to identical price rows, so
+        // an unbounded UPDATE would move both when fixing the first line, orphaning the second correction.
+        // ponytail: no line_item_id link on prices; single-row move keeps counts/attribution correct without a
+        // schema migration (identical rows make the exact pairing immaterial). Add line_item_id if that changes.
         if (oldItemId is int old)
-            Exec(conn, tx, "UPDATE prices SET item_id = $new WHERE receipt_id = $rid AND raw_name = $raw AND item_id = $old",
+            Exec(conn, tx,
+                """
+                UPDATE prices SET item_id = $new WHERE id = (
+                    SELECT id FROM prices
+                    WHERE receipt_id = $rid AND raw_name = $raw AND item_id = $old
+                    ORDER BY id LIMIT 1)
+                """,
                 ("$new", newItemId), ("$rid", receiptId), ("$raw", description), ("$old", old));
 
         Aliases.UpsertAlias(conn, description, newItemId, 1.0, "manual_correction", tx);
     }
+
+    // Escape LIKE wildcards for use with ESCAPE '\'. Backslash first so we don't double-escape our own escapes.
+    private static string EscapeLike(string s) =>
+        s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     private static void Exec(SqliteConnection conn, SqliteTransaction? tx, string sql,
         params (string Name, object Value)[] ps)
