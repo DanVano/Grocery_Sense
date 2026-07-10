@@ -49,8 +49,11 @@ public sealed class DbMaintenanceServiceTests : IDisposable
 
         var receiptsCsv = written.Single(p => p.EndsWith("receipts.csv"));
         var lines = File.ReadAllLines(receiptsCsv);
-        Assert.Contains("total_amount", lines[0]);          // header row
-        Assert.Contains("12.34", lines[1]);                 // exact TEXT money, no 12.3400000001
+        var header = lines[0].Split(',');
+        var cells = lines[1].Split(',');
+        var idx = Array.IndexOf(header, "total_amount");
+        Assert.True(idx >= 0, "total_amount column present");
+        Assert.Equal("12.34", cells[idx]);                  // exact TEXT money — a substring match would pass 12.3400000001
     }
 
     [Fact]
@@ -65,6 +68,38 @@ public sealed class DbMaintenanceServiceTests : IDisposable
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(receiptsJson));
         var row = doc.RootElement[0];
         Assert.Equal("12.34", row.GetProperty("total_amount").GetString());
+    }
+
+    [Fact]
+    public void Csv_export_neutralizes_formula_injection_in_text_cells()
+    {
+        using var db = new TempDb();
+        StoresRepo.CreateStore(db.Conn, "=1+1"); // a store name that OCR/receipt text could smuggle in
+
+        var written = new DbMaintenanceService(db.Factory).ExportToCsv(_dir);
+
+        var storesCsv = written.Single(p => p.EndsWith("stores.csv"));
+        var line = File.ReadAllLines(storesCsv)[1];
+        Assert.Contains("'=1+1", line);        // prefixed with ' so a spreadsheet treats it as text
+        Assert.DoesNotContain(",=1+1", line);  // never a bare formula at a cell boundary
+    }
+
+    [Fact]
+    public void Csv_export_leaves_negative_numbers_uncorrupted()
+    {
+        using var db = new TempDb();
+        using (var cmd = db.Conn.CreateCommand()) // typical_package_size is REAL -> a double, leads with '-'
+        {
+            cmd.CommandText = "INSERT INTO items (canonical_name, typical_package_size) VALUES ('Milk', -2.5)";
+            cmd.ExecuteNonQuery();
+        }
+
+        var written = new DbMaintenanceService(db.Factory).ExportToCsv(_dir);
+
+        var itemsCsv = written.Single(p => p.EndsWith("items.csv"));
+        var line = File.ReadAllLines(itemsCsv)[1];
+        Assert.Contains("-2.5", line);      // numeric cells are exempt from neutralization
+        Assert.DoesNotContain("'-2.5", line);
     }
 
     [Fact]

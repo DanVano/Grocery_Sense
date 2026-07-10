@@ -43,9 +43,9 @@ public sealed class DbMaintenanceService
 
             var path = Path.Combine(destDir, $"{table}.csv");
             using var w = new StreamWriter(path, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            w.WriteLine(string.Join(",", data.Columns.Select(CsvEscape)));
+            w.WriteLine(string.Join(",", data.Columns.Select(CsvEscape))); // headers: fixed schema names, no neutralization
             foreach (var row in data.Rows)
-                w.WriteLine(string.Join(",", row.Select(v => CsvEscape(CellString(v)))));
+                w.WriteLine(string.Join(",", row.Select(v => CsvEscape(CsvSanitizeCell(v)))));
             written.Add(path);
         }
         return written;
@@ -108,8 +108,17 @@ public sealed class DbMaintenanceService
             }
             return new TableData(columns, rows);
         }
-        catch (SqliteException) { return null; } // table doesn't exist
+        catch (SqliteException e) when (IsNoSuchTable(e))
+        {
+            return null; // table genuinely doesn't exist -> caller skips it
+        }
+        // Any other SqliteException (SQLITE_BUSY, I/O, corruption, …) propagates: silently dropping a whole
+        // table from an export while reporting success would violate the fail-loud rule.
     }
+
+    private static bool IsNoSuchTable(SqliteException e) =>
+        e.SqliteErrorCode == 1 /* SQLITE_ERROR */ &&
+        e.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase);
 
     private static string CellString(object? v) => v switch
     {
@@ -130,6 +139,16 @@ public sealed class DbMaintenanceService
             case byte[] b: w.WriteStringValue(Convert.ToBase64String(b)); break;
             default: w.WriteStringValue(v.ToString()); break; // TEXT (incl. money) stays an exact string
         }
+    }
+
+    // CSV formula-injection neutralization (CWE-1236 / OWASP): a TEXT cell that leads with =,+,-,@,tab,CR is
+    // evaluated as a formula when the export is opened in Excel/Sheets, so prefix it with a single quote.
+    // Numeric long/double cells are exempt — otherwise every negative number (leading '-') would be corrupted.
+    private static string CsvSanitizeCell(object? v)
+    {
+        var s = CellString(v);
+        if (v is long or double) return s;
+        return s.Length > 0 && s[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + s : s;
     }
 
     // RFC 4180: quote a field containing a comma, quote, CR or LF; escape quotes by doubling.
