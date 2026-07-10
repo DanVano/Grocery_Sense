@@ -46,6 +46,7 @@
 
     private string _query = "";
     private bool _busy;
+    private int _searchSeq; // debounced searches can finish out of order — only the latest applies
     private IReadOnlyList<ItemAdminRow> _results = Array.Empty<ItemAdminRow>();
 
     // No exact (case-insensitive) name match among results => offering "create" won't duplicate an item.
@@ -59,19 +60,22 @@
 
     private async Task SearchAsync()
     {
+        var seq = ++_searchSeq;
         _busy = true;
         try
         {
             var q = _query;
             var exclude = ExcludeItemId;
-            _results = await Task.Run(() =>
+            var results = await Task.Run(() =>
             {
                 using var conn = Db.Open();
                 return (IReadOnlyList<ItemAdminRow>)ItemsAdminRepo.SearchItems(conn, q, 50)
                     .Where(i => i.Id != exclude).ToList();
             });
+            if (seq != _searchSeq) return; // a newer search superseded this one — drop the stale result
+            _results = results;
         }
-        finally { _busy = false; }
+        finally { if (seq == _searchSeq) _busy = false; } // let the latest search own the busy flag
     }
 
     private void Pick(int id) => MudDialog.Close(DialogResult.Ok(id));
