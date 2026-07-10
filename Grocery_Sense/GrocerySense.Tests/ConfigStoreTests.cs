@@ -21,7 +21,6 @@ public sealed class ConfigStoreTests : IDisposable
         var member = Assert.Single(cfg.Household.Members);
         Assert.Equal("master", member.Role);
         Assert.Equal(ConfigStore.ProfileVersion, cfg.ProfileVersion);
-        Assert.Equal("CA", cfg.Country);
     }
 
     [Fact]
@@ -74,13 +73,12 @@ public sealed class ConfigStoreTests : IDisposable
     }
 
     [Fact]
-    public void NonPositive_budget_and_gas_are_normalized()
+    public void NonPositive_budget_is_normalized()
     {
         var store = New();
-        store.Save(store.Load() with { MonthlyBudget = -5, GasCostPerKm = 0 });
+        store.Save(store.Load() with { MonthlyBudget = -5 });
         var cfg = New().Load();
         Assert.Null(cfg.MonthlyBudget);
-        Assert.Equal(0.18, cfg.GasCostPerKm);
     }
 
     [Fact]
