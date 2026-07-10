@@ -58,18 +58,31 @@ public sealed class IngredientMappingService
         lock (_sync)
         {
             var normalized = NormalizePipeline(rawText);
-            if (normalized.Length == 0)
+            var rawKey = (rawText ?? "").Trim().ToLowerInvariant();
+            if (normalized.Length == 0 && rawKey.Length == 0)
                 return new MappingResult(null, null, 0.0, "none", normalized);
 
             using var conn = _factory.Open();
 
-            // 1) Exact alias cache hit.
-            var alias = _aliases.GetByAlias(conn, normalized);
+            // 1) Exact alias cache hit. Try the normalized key first, then the raw lowercased text: manual
+            // corrections (CorrectLineMapping) and receipt auto-learns store the alias as raw punctuated text,
+            // which the normalize pipeline strips (% / stopwords / abbrevs) — so a normalized-only lookup would
+            // never find them. Whichever key hit is the one we mark as seen.
+            var matchedKey = normalized;
+            var alias = normalized.Length > 0 ? _aliases.GetByAlias(conn, normalized) : null;
+            if (alias is null && rawKey.Length > 0 && rawKey != normalized)
+            {
+                alias = _aliases.GetByAlias(conn, rawKey);
+                matchedKey = rawKey;
+            }
             if (alias is not null)
             {
-                _pendingTouches.Add(normalized);
+                _pendingTouches.Add(matchedKey);
                 return new MappingResult(alias.ItemId, null, alias.Confidence, "alias", normalized);
             }
+
+            if (normalized.Length == 0)
+                return new MappingResult(null, null, 0.0, "none", normalized);
 
             // 2) Fuzzy match against canonical item names.
             var (choices, names) = GetChoices(conn);
