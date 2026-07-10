@@ -167,4 +167,17 @@ public sealed class FlyerSyncServiceTests : IDisposable
         Assert.Equal("too_soon", result.SkippedReason);
         Assert.False(fired);
     }
+
+    [Fact]
+    public async Task Scheduler_reports_post_sync_hook_failure_in_Errors_not_as_sync_failure()
+    {
+        using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
+        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()));
+        scheduler.SyncCompleted += _ => throw new InvalidOperationException("boom");
+
+        var result = await scheduler.RequestSyncAsync();
+
+        Assert.True(result.Ran); // the sync itself succeeded
+        Assert.Contains(result.Errors, e => e.Contains("boom"));
+    }
 }

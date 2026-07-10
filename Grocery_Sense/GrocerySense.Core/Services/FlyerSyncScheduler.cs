@@ -31,7 +31,16 @@ public sealed class FlyerSyncScheduler
         try
         {
             var result = await _sync.RunSyncAsync(force, ct);
-            if (result.Ran) SyncCompleted?.Invoke(result);
+            if (result.Ran && SyncCompleted is { } handlers)
+            {
+                try { handlers(result); }
+                catch (Exception ex)
+                {
+                    // Disclosed degrade: the sync succeeded; a failed post-sync hook (alert refresh) must not
+                    // be reported as a sync failure, but must not vanish either. Deals.razor renders Errors.
+                    result = result with { Errors = [.. result.Errors, $"Post-sync alert refresh failed: {ex.Message}"] };
+                }
+            }
             return result;
         }
         finally
