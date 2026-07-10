@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
 using GrocerySense.Data;
 using Microsoft.Data.Sqlite;
 
@@ -58,14 +57,17 @@ public sealed class MealSuggestionService
             var priceScore = PriceScoreForRecipe(r, baselineMap, dealsByIngredient, reasons);
             var preferenceScore = PreferenceScore(r, profile);
             var varietyScore = VarietyScore(r, recentlyUsedRecipeIds);
+            var dealScore = DealScoreForRecipe(r, dealsByIngredient);
             var (costTotal, costPerServing, costRatio) = CostEstimate(r, baselineMap);
 
+            // total intentionally excludes dealScore: flyer value already flows through priceScore. dealScore
+            // is explanatory only (drives the "on sale this week" line in FormatMealExplanation).
             var total = (0.5 * priceScore) + (0.3 * preferenceScore) + (0.2 * varietyScore);
 
             if (preferenceScore > 0.5) reasons.Add("Matches your meat or tag preferences.");
             if (varietyScore < 0) reasons.Add("You cooked this recently, slightly deprioritized.");
 
-            suggestions.Add(new SuggestedMeal(r, total, preferenceScore, 0.0, priceScore, varietyScore,
+            suggestions.Add(new SuggestedMeal(r, total, preferenceScore, dealScore, priceScore, varietyScore,
                 reasons, costTotal, costPerServing, costRatio));
         }
 
@@ -163,24 +165,27 @@ public sealed class MealSuggestionService
         return 0.0;
     }
 
+    // Fraction of the recipe's ingredients that have at least one priced, name-relevant active deal. Explanatory
+    // only (not in the total). Uses the same name-contains relevance test as PriceContributionForIngredient.
+    private static double DealScoreForRecipe(Recipe recipe, IReadOnlyDictionary<string, List<Deal>> dealsByIngredient)
+    {
+        if (recipe.Ingredients.Count == 0) return 0.0;
+        var withDeal = recipe.Ingredients.Count(ing =>
+        {
+            var low = ing.ToLowerInvariant();
+            return dealsByIngredient.TryGetValue(low, out var deals)
+                && deals.Any(d => d.Price is not null && d.Name.Contains(low));
+        });
+        return (double)withDeal / recipe.Ingredients.Count;
+    }
+
     private static double VarietyScore(Recipe recipe, IReadOnlySet<int>? recentlyUsedRecipeIds) =>
         recipe.Id is int id && recentlyUsedRecipeIds is not null && recentlyUsedRecipeIds.Contains(id) ? -0.2 : 0.0;
 
-    // Hard filter (safety net): allergies / avoid_ingredients / no_<x> restrictions, whole-word.
-    internal static bool HasDisallowedIngredients(Recipe recipe, MealProfile profile)
-    {
-        var text = string.Join(" ", recipe.Ingredients).ToLowerInvariant();
-        foreach (var term in Lower(profile.Allergies).Concat(Lower(profile.AvoidIngredients)))
-            if (WholeWord(term, text)) return true;
-
-        foreach (var r in Lower(profile.Restrictions))
-            if (r.StartsWith("no_"))
-            {
-                var term = r[3..].Trim();
-                if (term.Length > 0 && term is not ("meat" or "fish") && WholeWord(term, text)) return true;
-            }
-        return false;
-    }
+    // Hard filter (safety net): allergies / avoid_ingredients / no_<x> restrictions. Delegates to the shared
+    // ProfileFilter (token/plural aware) so the safety net matches the RecipeEngine's own hard filter exactly.
+    internal static bool HasDisallowedIngredients(Recipe recipe, MealProfile profile) =>
+        ProfileFilter.Violates(recipe.Ingredients, profile);
 
     // ---- flyer-deal lookup ----
 
@@ -191,12 +196,16 @@ public sealed class MealSuggestionService
         var empty = new Dictionary<string, List<Deal>>();
         if (_factory is null || ingredients.Count == 0) return empty;
 
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
+        // InvariantCulture: a device on a non-Gregorian calendar (e.g. th-TH Buddhist) would otherwise stamp
+        // the year as 2569, and every SQL date() comparison against Gregorian batches would silently fail.
+        var today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var deals = new List<Deal>();
         try
         {
             using var conn = _factory.Open();
             using var cmd = conn.CreateCommand();
+            // NULL/blank validity dates are treated as open-ended (matches FlyersRepo.ListActiveDeals / the
+            // Deals page); requiring both dates would silently drop deals from date-less manual ingests.
             cmd.CommandText = """
                 SELECT d.title, d.description,
                        CAST(COALESCE(d.unit_price, d.norm_unit_price, d.deal_total) AS REAL) AS price,
@@ -205,9 +214,8 @@ public sealed class MealSuggestionService
                 JOIN flyer_batches b ON b.id = d.flyer_id
                 LEFT JOIN stores s ON s.id = d.store_id
                 WHERE b.status = 'active'
-                  AND b.valid_from IS NOT NULL AND b.valid_to IS NOT NULL
-                  AND TRIM(b.valid_from) <> '' AND TRIM(b.valid_to) <> ''
-                  AND date(b.valid_from) <= date($today) AND date(b.valid_to) >= date($today)
+                  AND (b.valid_from IS NULL OR TRIM(b.valid_from) = '' OR date(b.valid_from) <= date($today))
+                  AND (b.valid_to   IS NULL OR TRIM(b.valid_to)   = '' OR date(b.valid_to)   >= date($today))
                 LIMIT 5000
                 """;
             cmd.Parameters.AddWithValue("$today", today);
@@ -312,7 +320,4 @@ public sealed class MealSuggestionService
 
     private static IEnumerable<string> Lower(IEnumerable<string> values) =>
         values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim().ToLowerInvariant());
-
-    private static bool WholeWord(string term, string text) =>
-        term.Length > 0 && Regex.IsMatch(text, $@"\b{Regex.Escape(term)}\b", RegexOptions.IgnoreCase);
 }
