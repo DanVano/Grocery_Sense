@@ -11,7 +11,7 @@
     <MudNumericField T="int" @bind-Value="_numRecipes" Label="Recipes" Min="1" Max="12" Style="max-width:110px" />
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restaurant"
                OnClick="SuggestAsync" Disabled="@_busy">Suggest meals</MudButton>
-    @if (_plan is not null)
+    @if (_plan is not null && !_persisted)
     {
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddShoppingCart"
                    OnClick="AddToListAsync" Disabled="@_busy">Add ingredients to list</MudButton>
@@ -85,6 +85,7 @@
 
 @code {
     private WeeklyPlan? _plan;
+    private bool _persisted;
     private int _numRecipes = 6;
     private bool _busy;
     private string? _message;
@@ -98,6 +99,7 @@
         {
             var n = _numRecipes;
             _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true));
+            _persisted = false; // a fresh suggestion can be added again
         }
         catch (Exception ex) { Fail(ex.Message); }
         finally { _busy = false; }
@@ -105,16 +107,18 @@
 
     private async Task AddToListAsync()
     {
+        if (_plan is null || _persisted) return;
         _busy = true;
         _message = null;
         try
         {
-            var n = _numRecipes;
-            // Deterministic scoring: rebuilding with the same count yields the same plan, now persisted.
-            _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true,
-                persistToShoppingList: true, addedBy: "Meal plan"));
+            // Persist the exact plan the user reviewed — do NOT rebuild (a rebuild reads the current recipe
+            // count + live DB/deal state and can diverge from what's shown). _persisted guards a double-tap.
+            var plan = _plan;
+            await Task.Run(() => Planner.PersistToShoppingList(plan, addedBy: "Meal plan"));
+            _persisted = true;
             _messageSeverity = Severity.Success;
-            _message = $"Added {_plan.PlannedIngredients.Count} ingredient(s) to your shopping list.";
+            _message = $"Added {plan.PlannedIngredients.Count} ingredient(s) to your shopping list.";
         }
         catch (Exception ex) { Fail($"Add to list failed: {ex.Message}"); }
         finally { _busy = false; }

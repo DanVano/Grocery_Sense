@@ -50,7 +50,9 @@ public sealed class WeeklyPlannerService
         return plan;
     }
 
-    private void PersistToShoppingList(WeeklyPlan plan, int? plannedStoreId, string? addedBy)
+    // Public so the UI can persist the exact plan the user reviewed, rather than rebuilding it at click time
+    // (a rebuild re-reads _numRecipes + live DB/deal state and can diverge from what was shown).
+    public void PersistToShoppingList(WeeklyPlan plan, int? plannedStoreId = null, string? addedBy = null)
     {
         var by = string.IsNullOrWhiteSpace(addedBy) ? null : addedBy.Trim();
         var rows = plan.PlannedIngredients.Select(ing =>
