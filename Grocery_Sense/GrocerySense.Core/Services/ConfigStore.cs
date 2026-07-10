@@ -110,17 +110,22 @@ public sealed class ConfigStore
     public HouseholdMember AddMember(string name, string role = RoleSecondary)
     {
         var cfg = Load();
-        var nextId = cfg.Household.Members.Count == 0 ? 1 : cfg.Household.Members.Max(m => m.Id) + 1;
+        // Monotonic id: NextMemberId is repaired by EnsureHousehold to >= the current max id, so +1 never
+        // collides with a live member AND never reuses a deleted member's id.
+        var nextId = cfg.Household.NextMemberId + 1;
         var member = new HouseholdMember(nextId, (name ?? "").Trim(), SanitizeRole(role), DefaultMemberProfile());
-        Save(cfg with { Household = cfg.Household with { Members = cfg.Household.Members.Append(member).ToList() } });
+        Save(cfg with { Household = cfg.Household with {
+            Members = cfg.Household.Members.Append(member).ToList(), NextMemberId = nextId } });
         return member;
     }
 
     public void RenameMember(int memberId, string newName)
     {
+        var name = (newName ?? "").Trim();
+        if (name.Length == 0) throw new ArgumentException("Member name can't be empty.", nameof(newName));
         var cfg = Load();
         var members = cfg.Household.Members
-            .Select(m => m.Id == memberId ? m with { Name = (newName ?? "").Trim() } : m).ToList();
+            .Select(m => m.Id == memberId ? m with { Name = name } : m).ToList();
         Save(cfg with { Household = cfg.Household with { Members = members } });
     }
 
@@ -215,7 +220,7 @@ public sealed class ConfigStore
     }
 
     private static UserConfig EmptyConfig() => new(
-        ProfileVersion, "", "", "CA", new Dictionary<string, int>(), new List<int>(), null, 0.18,
+        ProfileVersion, "", "", null,
         new Household(1, 1, new List<HouseholdMember>()));
 
     private static UserConfig Normalize(UserConfig c) => c with
@@ -223,11 +228,7 @@ public sealed class ConfigStore
         ProfileVersion = ProfileVersion, // always bump to latest on load/save (safe).
         PostalCode = c.PostalCode ?? "",
         City = c.City ?? "",
-        Country = string.IsNullOrWhiteSpace(c.Country) ? "CA" : c.Country,
-        StorePriority = c.StorePriority ?? new Dictionary<string, int>(),
-        FavoriteStoreIds = c.FavoriteStoreIds ?? new List<int>(),
         MonthlyBudget = c.MonthlyBudget is > 0 ? c.MonthlyBudget : null,
-        GasCostPerKm = c.GasCostPerKm > 0 ? c.GasCostPerKm : 0.18, // gas unused (optimizer redesign) but kept valid.
         // Optimizer settings: clamp missing/invalid (e.g. 0 from an older config) back to the defaults.
         MaxStores = c.MaxStores > 0 ? c.MaxStores : 3,
         MinItemSavingPct = c.MinItemSavingPct > 0 ? c.MinItemSavingPct : 0.10,
@@ -263,7 +264,10 @@ public sealed class ConfigStore
         if (!ids.Contains(primary)) primary = members.Min(m => m.Id);
         var active = h?.ActiveMemberId ?? primary;
         if (!ids.Contains(active)) active = primary;
-        return new Household(primary, active, members);
+        // Highest id ever issued: never below the current max member id (repairs older/0 configs), and never
+        // regresses below a previously-persisted counter (so a deleted top id stays retired).
+        var nextMemberId = Math.Max(h?.NextMemberId ?? 0, members.Max(m => m.Id));
+        return new Household(primary, active, members, nextMemberId);
     }
 
     // Canonical profile shape (forward-compatible with a v2 master member). Kept whole though v1 only reads
@@ -330,8 +334,6 @@ public sealed class ConfigStore
     // Container-level copy so a handed-out snapshot can be mutated without touching the cache.
     private static UserConfig Clone(UserConfig c) => c with
     {
-        StorePriority = new Dictionary<string, int>(c.StorePriority),
-        FavoriteStoreIds = c.FavoriteStoreIds.ToList(),
         Household = c.Household with
         {
             Members = c.Household.Members

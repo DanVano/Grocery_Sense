@@ -153,16 +153,16 @@ public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadO
 
 // Household config — ports of config_store.py dataclasses.
 public record HouseholdMember(int Id, string Name, string Role, Dictionary<string, object?> Profile);
-public record Household(int PrimaryMemberId, int ActiveMemberId, IReadOnlyList<HouseholdMember> Members);
+// NextMemberId is the highest member id ever issued (monotonic). New members take NextMemberId+1 so a deleted
+// member's id is never reused — reuse would re-attribute the old member's picks/history to the new one. Older
+// configs lack the field and deserialize to 0; EnsureHousehold repairs it to at least the current max id.
+public record Household(int PrimaryMemberId, int ActiveMemberId, IReadOnlyList<HouseholdMember> Members,
+    int NextMemberId = 0);
 public record UserConfig(
     int ProfileVersion,
     string PostalCode,
     string City,
-    string Country,
-    Dictionary<string, int> StorePriority,
-    IReadOnlyList<int> FavoriteStoreIds,
     double? MonthlyBudget,
-    double GasCostPerKm,
     Household Household,
     // BasketOptimizer settings (single-profile). Defaults are the redesign's tuning starting points.
     int MaxStores = 3,

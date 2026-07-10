@@ -50,11 +50,28 @@ public sealed class ConfigStoreMemberTests : IDisposable
     }
 
     [Fact]
-    public void Master_and_last_member_cannot_be_deleted()
+    public void Master_cannot_be_deleted_even_as_the_last_member()
     {
         var cfg = New();
         var master = cfg.GetMasterMember();
-        Assert.Throws<InvalidOperationException>(() => cfg.DeleteMember(master.Id)); // master
-        Assert.Throws<InvalidOperationException>(() => cfg.DeleteMember(master.Id)); // also the only member
+
+        var ex = Assert.Throws<InvalidOperationException>(() => cfg.DeleteMember(master.Id));
+        Assert.Contains("master", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Reduce back down to just the master, then confirm the guard still holds (the count-<=1 guard is
+        // defensive: a household always keeps a master, so the master check shadows it in practice).
+        var kid = cfg.AddMember("Kid");
+        cfg.DeleteMember(kid.Id);
+        Assert.Single(cfg.ListMembers());
+        Assert.Throws<InvalidOperationException>(() => cfg.DeleteMember(master.Id));
+    }
+
+    [Fact]
+    public void Rename_rejects_a_blank_name()
+    {
+        var cfg = New();
+        var kid = cfg.AddMember("Kid");
+        Assert.Throws<ArgumentException>(() => cfg.RenameMember(kid.Id, "   "));
+        Assert.Equal("Kid", cfg.GetMember(kid.Id)!.Name); // unchanged
     }
 }
