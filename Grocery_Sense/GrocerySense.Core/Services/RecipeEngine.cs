@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 
 namespace GrocerySense.Core;
 
@@ -74,27 +73,18 @@ public sealed class RecipeEngine
         return LoadAllRecipes().FirstOrDefault(r => r.Name.Trim().ToLowerInvariant() == target);
     }
 
+    // Recipes passing the hard profile filter only (no ingredient-overlap scoring). Catalog order preserved.
+    // For callers that want "everything a household may eat", not "recipes matching these ingredients".
+    public IReadOnlyList<Recipe> RecipesMatchingProfile(MealProfile profile) =>
+        LoadAllRecipes().Where(r => SatisfiesProfile(r, profile)).ToList();
+
     // ---- profile hard filter / soft bonus (whole-word allergy/avoid match) ----
 
-    // A recipe is rejected if any allergy/avoid term, or a no_<ingredient> restriction, appears as a whole
-    // word in its ingredients (whole-word so "nut" doesn't hit "coconut"). no_meat / no_fish are umbrella
-    // diet flags, not single-ingredient bans, and are skipped here.
-    internal static bool SatisfiesProfile(Recipe recipe, MealProfile profile)
-    {
-        var text = string.Join(" ", recipe.Ingredients).ToLowerInvariant();
-
-        foreach (var term in NormalizeSet(profile.Allergies).Concat(NormalizeSet(profile.AvoidIngredients)))
-            if (WholeWord(term, text)) return false;
-
-        foreach (var restriction in NormalizeSet(profile.Restrictions))
-            if (restriction.StartsWith("no_"))
-            {
-                var term = restriction[3..].Trim();
-                if (term.Length > 0 && term is not ("meat" or "fish") && WholeWord(term, text)) return false;
-            }
-
-        return true;
-    }
+    // A recipe is rejected if any allergy/avoid term, or a no_<ingredient> restriction, matches its
+    // ingredients (see ProfileFilter — token/plural aware, so "nut" doesn't hit "coconut" but "peanuts"
+    // does block "peanut butter"). no_meat / no_fish are umbrella diet flags, not single-ingredient bans.
+    internal static bool SatisfiesProfile(Recipe recipe, MealProfile profile) =>
+        !ProfileFilter.Violates(recipe.Ingredients, profile);
 
     private static double ProfileSmallBonus(Recipe recipe, MealProfile? profile)
     {
@@ -155,9 +145,6 @@ public sealed class RecipeEngine
 
     private static HashSet<string> NormalizeSet(IEnumerable<string> values) =>
         values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim().ToLowerInvariant()).ToHashSet();
-
-    private static bool WholeWord(string term, string text) =>
-        term.Length > 0 && Regex.IsMatch(text, $@"\b{Regex.Escape(term)}\b", RegexOptions.IgnoreCase);
 
     private static long FileStamp(string path)
     {

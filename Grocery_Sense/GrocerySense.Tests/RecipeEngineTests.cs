@@ -131,6 +131,18 @@ public sealed class RecipeEngineTests : IDisposable
         Assert.DoesNotContain("Peanut Chicken Noodles", names);
     }
 
+    // Regression (#1): a plural allergy must block a compound ingredient — "peanuts" blocks "peanut butter".
+    [Fact]
+    public void Plural_allergy_blocks_compound_ingredient()
+    {
+        var eng = new RecipeEngine(WriteJson(
+            """[{"id":1,"name":"Peanut Sauce Bowl","ingredients":["peanut butter","rice"]},{"id":2,"name":"Coconut Rice","ingredients":["coconut","rice"]}]"""));
+        var names = eng.FilterByIngredientsAndProfile(new[] { "rice" },
+            new MealProfile { Allergies = ["peanuts"] }).Select(r => r.Name).ToHashSet();
+        Assert.DoesNotContain("Peanut Sauce Bowl", names);   // "peanuts" -> "peanut" token blocks "peanut butter"
+        Assert.Contains("Coconut Rice", names);              // token match must NOT let "peanut" leak into "coconut"
+    }
+
     [Fact]
     public void Avoid_ingredients_blocks_recipe() =>
         Assert.Empty(Sample().FilterByIngredientsAndProfile(new[] { "bread" },
