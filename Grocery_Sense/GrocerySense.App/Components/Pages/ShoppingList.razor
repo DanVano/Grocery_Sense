@@ -40,6 +40,10 @@
     }
     else
     {
+        @if (_swapCoverageNote is not null)
+        {
+            <MudText Class="mt-2" Typo="Typo.caption">@_swapCoverageNote</MudText>
+        }
         @foreach (var group in _groups)
         {
             <MudPaper Class="pa-3 mt-3" Outlined="true">
@@ -97,6 +101,12 @@
                                     {
                                         <MudText Typo="Typo.caption">@i.SuggestedQtyNote</MudText>
                                     }
+                                    @if (_swapByRow.TryGetValue(i.Row.Id, out var swap))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Success">
+                                            Swap: @swap.SwapToName $@F2(swap.SwapPrice) (save @swap.SavePct.ToString("0")%)
+                                        </MudText>
+                                    }
                                 </div>
                             </div>
                         </MudListItem>
@@ -152,6 +162,8 @@ else
 @code {
     private IReadOnlyList<ShoppingListRow>? _items;
     private IReadOnlyList<ShopModeGroup>? _groups;
+    private Dictionary<int, SwapSuggestion> _swapByRow = [];
+    private string? _swapCoverageNote;
     private bool _shopMode;
     private string _newItems = "";
     private bool _busy;
@@ -189,7 +201,17 @@ else
         {
             _error = null;
             _items = await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true));
-            if (_shopMode) _groups = await Task.Run(Insights.BuildShopModeView);
+            if (_shopMode)
+            {
+                var (groups, swaps) = await Task.Run(() =>
+                {
+                    var g = Insights.BuildShopModeView();
+                    return (g, Insights.BuildSwapSuggestions(g));
+                });
+                _groups = groups;
+                _swapByRow = swaps.Suggestions.ToDictionary(s => s.RowId);
+                _swapCoverageNote = swaps.CoverageNote;
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
     }

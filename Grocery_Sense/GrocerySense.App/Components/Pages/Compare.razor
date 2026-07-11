@@ -1,0 +1,96 @@
+@page "/compare"
+@using GrocerySense.Core
+@inject UnitNormalizationService UnitNorm
+
+<MudText Typo="Typo.h5" GutterBottom="true">Unit price compare</MudText>
+<MudText Typo="Typo.body2" Class="mb-3">
+    In the aisle: enter two package prices and sizes to see which is actually cheaper per kg / L / each.
+</MudText>
+
+<MudGrid Spacing="2">
+    @foreach (var side in new[] { _a, _b })
+    {
+        <MudItem xs="12" sm="6">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.subtitle2" GutterBottom="true">Package @side.Label</MudText>
+                <MudNumericField T="double?" @bind-Value="side.Price" Label="Price $" Min="0"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                <MudNumericField T="double?" @bind-Value="side.Size" Label="Size" Min="0"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Class="mt-2" />
+                <MudSelect T="string" @bind-Value="side.Unit" Label="Unit" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Class="mt-2">
+                    @foreach (var u in Units)
+                    {
+                        <MudSelectItem T="string" Value="@u">@u</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudPaper>
+        </MudItem>
+    }
+</MudGrid>
+
+<MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary" OnClick="CompareNow"
+           Disabled="@(!InputsComplete)">Compare</MudButton>
+
+@if (_verdict is not null)
+{
+    <MudAlert Class="mt-3" Severity="@_verdictSeverity" Dense="true">@_verdict</MudAlert>
+}
+
+@code {
+    private sealed class Side(string label)
+    {
+        public string Label { get; } = label;
+        public double? Price { get; set; }
+        public double? Size { get; set; }
+        public string Unit { get; set; } = "g";
+    }
+
+    private static readonly string[] Units =
+        ["g", "kg", "lb", "oz", "ml", "L", "fl oz", "cup", "pint", "gal", "each", "dozen"];
+
+    // Display bases per dimension; first base both sides convert into wins.
+    private static readonly string[] Bases = ["kg", "L", "each"];
+
+    private readonly Side _a = new("A");
+    private readonly Side _b = new("B");
+    private string? _verdict;
+    private Severity _verdictSeverity = Severity.Info;
+
+    private bool InputsComplete =>
+        _a.Price is > 0 && _a.Size is > 0 && _b.Price is > 0 && _b.Size is > 0;
+
+    private void CompareNow()
+    {
+        _verdict = null;
+        if (!InputsComplete) return;
+
+        var perA = _a.Price!.Value / _a.Size!.Value; // $ per <unit A>
+        var perB = _b.Price!.Value / _b.Size!.Value;
+
+        foreach (var basis in Bases)
+        {
+            var na = UnitNorm.Convert(perA, _a.Unit, basis);
+            var nb = UnitNorm.Convert(perB, _b.Unit, basis);
+            if (na is null || nb is null) continue;
+
+            if (Math.Abs(na.Value - nb.Value) < 0.0001)
+            {
+                _verdictSeverity = Severity.Info;
+                _verdict = $"Same price: ${na:0.00}/{basis} both.";
+            }
+            else
+            {
+                var (winner, wp, lp) = na < nb ? ("A", na.Value, nb.Value) : ("B", nb.Value, na.Value);
+                var pct = (lp - wp) / lp * 100.0;
+                _verdictSeverity = Severity.Success;
+                _verdict = $"Package {winner} is {pct:0}% cheaper — ${wp:0.00}/{basis} vs ${lp:0.00}/{basis}.";
+            }
+            return;
+        }
+
+        // Cross-dimension (e.g. kg vs L): no honest comparison exists — say so, never fake one.
+        _verdictSeverity = Severity.Warning;
+        _verdict = $"Can't compare {_a.Unit} with {_b.Unit} — different measurement dimensions.";
+    }
+}

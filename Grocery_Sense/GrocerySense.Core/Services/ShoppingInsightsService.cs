@@ -11,9 +11,18 @@ namespace GrocerySense.Core;
 // below usual) > wait (above usual) > none (no data / nothing notable — never guess).
 public sealed class ShoppingInsightsService
 {
-    private readonly SqliteConnectionFactory _factory;
+    // Below this fraction of categorized list items, swap suggestions would be mostly noise — disclose
+    // "not enough category data" instead of suggesting from thin air.
+    internal const double MinCategoryCoverage = 0.30;
 
-    public ShoppingInsightsService(SqliteConnectionFactory factory) => _factory = factory;
+    private readonly SqliteConnectionFactory _factory;
+    private readonly ConfigStore _config;
+
+    public ShoppingInsightsService(SqliteConnectionFactory factory, ConfigStore config)
+    {
+        _factory = factory;
+        _config = config;
+    }
 
     // Store groups ordered like the Plan page reads (priority, then name); "Unassigned" (StoreId null) last.
     // Checked-off rows are included so the in-aisle view keeps showing what's already in the cart.
@@ -60,6 +69,63 @@ public sealed class ShoppingInsightsService
             .ThenBy(g => g.StoreId is { } id ? storeOrder.GetValueOrDefault(id, int.MaxValue) : int.MaxValue)
             .ThenBy(g => g.StoreName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    // Cheaper same-category alternatives at each row's planned store, using the groups BuildShopModeView
+    // already priced. A swap must beat the row's current price by >= MinItemSavingPct (the optimizer's own
+    // store-hop threshold). Rows without a planned store or price are skipped — no cross-store swaps.
+    public SwapResult BuildSwapSuggestions(IReadOnlyList<ShopModeGroup> groups)
+    {
+        var rows = groups.SelectMany(g => g.Items).ToList();
+        var mapped = rows.Where(i => i.Row.ItemId is not null).ToList();
+        if (mapped.Count == 0) return new SwapResult(Array.Empty<SwapSuggestion>(), null);
+
+        using var conn = _factory.Open();
+        var allItems = ItemsRepo.ListItems(conn);
+        var byId = allItems.ToDictionary(i => i.Id);
+
+        var categorized = mapped.Count(i =>
+            byId.TryGetValue(i.Row.ItemId!.Value, out var it) && !string.IsNullOrWhiteSpace(it.Category));
+        var coverage = (double)categorized / mapped.Count;
+        if (coverage < MinCategoryCoverage)
+            return new SwapResult(Array.Empty<SwapSuggestion>(),
+                $"Not enough category data for swap suggestions ({categorized}/{mapped.Count} list items " +
+                "categorized) — set categories on the Items page.");
+
+        // Candidate pool: every categorized item, priced at each planned store the list touches.
+        var candidateIds = allItems.Where(i => !string.IsNullOrWhiteSpace(i.Category)).Select(i => i.Id).ToList();
+        var storeIds = groups.Where(g => g.StoreId is not null).Select(g => g.StoreId!.Value).Distinct().ToList();
+        if (candidateIds.Count == 0 || storeIds.Count == 0)
+            return new SwapResult(Array.Empty<SwapSuggestion>(), null);
+
+        var flyer = PricesRepo.GetActiveFlyerPricesBatch(conn, candidateIds, storeIds);
+        var recent = PricesRepo.GetMostRecentPricesByStoreBatch(conn, candidateIds, storeIds);
+
+        var pct = _config.Load().MinItemSavingPct;
+        var suggestions = new List<SwapSuggestion>();
+        foreach (var insight in mapped)
+        {
+            if (insight.Row.PlannedStoreId is not { } storeId || insight.CurrentPrice is not { } current) continue;
+            if (!byId.TryGetValue(insight.Row.ItemId!.Value, out var item)
+                || string.IsNullOrWhiteSpace(item.Category)) continue;
+
+            SwapSuggestion? best = null;
+            foreach (var cand in allItems)
+            {
+                if (cand.Id == item.Id || cand.Category != item.Category) continue;
+                double? price = flyer.TryGetValue((cand.Id, storeId), out var fq) ? fq.UnitPrice
+                    : recent.TryGetValue((cand.Id, storeId), out var pp) && pp.UnitPrice > 0 ? pp.UnitPrice
+                    : null;
+                if (price is not { } p || p <= 0 || p >= current * (1 - pct)) continue;
+
+                var savePct = (current - p) / current * 100.0;
+                if (best is null || p < best.SwapPrice)
+                    best = new SwapSuggestion(insight.Row.Id, insight.Row.DisplayName, cand.CanonicalName,
+                        p, current, savePct);
+            }
+            if (best is not null) suggestions.Add(best);
+        }
+        return new SwapResult(suggestions, null);
     }
 
     private static ListItemInsight BuildInsight(

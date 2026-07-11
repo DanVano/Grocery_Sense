@@ -5,8 +5,15 @@ using Xunit;
 
 namespace GrocerySense.Tests;
 
-public sealed class ShoppingInsightsServiceTests
+public sealed class ShoppingInsightsServiceTests : IDisposable
 {
+    // Per-test config dir: ConfigStore writes user_config.json beside the DB in prod; tests isolate it.
+    private readonly string _cfgDir = Path.Combine(Path.GetTempPath(), $"gs_insights_{Guid.NewGuid():N}");
+
+    public ShoppingInsightsServiceTests() => Directory.CreateDirectory(_cfgDir);
+
+    public void Dispose() { try { Directory.Delete(_cfgDir, recursive: true); } catch { /* temp */ } }
+
     private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
 
     private static int AddReceipt(SqliteConnection conn, int storeId, string date)
@@ -31,7 +38,7 @@ public sealed class ShoppingInsightsServiceTests
         }
     }
 
-    private static ShoppingInsightsService Svc(TempDb db) => new(db.Factory);
+    private ShoppingInsightsService Svc(TempDb db) => new(db.Factory, new ConfigStore(_cfgDir));
 
     [Fact]
     public void Buy_badge_when_current_is_15pct_below_usual_but_not_near_low()
@@ -147,5 +154,60 @@ public sealed class ShoppingInsightsServiceTests
         using var db = new TempDb();
         StoresRepo.CreateStore(db.Conn, "Loblaws");
         Assert.Empty(Svc(db).BuildShopModeView());
+    }
+
+    // ---- cheaper swaps ----
+
+    [Fact]
+    public void Swap_suggests_cheaper_same_category_item_at_the_planned_store()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var brand = ItemsRepo.CreateItem(db.Conn, "Quick Oats Brand", category: "cereal").Id;
+        var cheap = ItemsRepo.CreateItem(db.Conn, "Store Brand Oats", category: "cereal").Id;
+        PricesRepo.AddPricePoint(db.Conn, brand, store, 10.0, "each", source: "manual", date: DaysAgo(0));
+        PricesRepo.AddPricePoint(db.Conn, cheap, store, 6.0, "each", source: "manual", date: DaysAgo(0));
+        ShoppingListRepo.AddItem(db.Conn, "Quick Oats Brand", plannedStoreId: store, itemId: brand);
+
+        var svc = Svc(db);
+        var result = svc.BuildSwapSuggestions(svc.BuildShopModeView());
+
+        Assert.Null(result.CoverageNote);
+        var swap = Assert.Single(result.Suggestions);
+        Assert.Equal("Store Brand Oats", swap.SwapToName);
+        Assert.Equal(6.0, swap.SwapPrice, 4);
+        Assert.Equal(40.0, swap.SavePct, 1);
+    }
+
+    [Fact]
+    public void Swap_low_category_coverage_discloses_instead_of_guessing()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id; // no category
+        PricesRepo.AddPricePoint(db.Conn, item, store, 5.0, "each", source: "manual", date: DaysAgo(0));
+        ShoppingListRepo.AddItem(db.Conn, "Milk", plannedStoreId: store, itemId: item);
+
+        var svc = Svc(db);
+        var result = svc.BuildSwapSuggestions(svc.BuildShopModeView());
+
+        Assert.Empty(result.Suggestions);
+        Assert.Contains("category data", result.CoverageNote);
+    }
+
+    [Fact]
+    public void Swap_ignores_candidates_priced_only_at_other_stores()
+    {
+        using var db = new TempDb();
+        var storeA = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var storeB = StoresRepo.CreateStore(db.Conn, "NoFrills").Id;
+        var brand = ItemsRepo.CreateItem(db.Conn, "Quick Oats Brand", category: "cereal").Id;
+        var cheap = ItemsRepo.CreateItem(db.Conn, "Store Brand Oats", category: "cereal").Id;
+        PricesRepo.AddPricePoint(db.Conn, brand, storeA, 10.0, "each", source: "manual", date: DaysAgo(0));
+        PricesRepo.AddPricePoint(db.Conn, cheap, storeB, 6.0, "each", source: "manual", date: DaysAgo(0));
+        ShoppingListRepo.AddItem(db.Conn, "Quick Oats Brand", plannedStoreId: storeA, itemId: brand);
+
+        var svc = Svc(db);
+        Assert.Empty(svc.BuildSwapSuggestions(svc.BuildShopModeView()).Suggestions);
     }
 }

@@ -101,6 +101,13 @@ public sealed record ShopModeGroup(
     int? StoreId, string StoreName, IReadOnlyList<ListItemInsight> Items,
     double SubtotalEstimated, int UnpricedCount);
 
+// A cheaper same-category alternative at the row's planned store (ShoppingInsightsService swaps).
+public sealed record SwapSuggestion(
+    int RowId, string ForName, string SwapToName, double SwapPrice, double CurrentPrice, double SavePct);
+
+// CoverageNote is the disclosed degrade when too few list items carry a category to suggest honestly.
+public sealed record SwapResult(IReadOnlyList<SwapSuggestion> Suggestions, string? CoverageNote);
+
 // A watchlist item whose current best price cleared its trigger. HitReason: "target" (met the user's target
 // price) | "below_usual" (no target set, but currently >= MinItemSavingPct below its usual price).
 public record WatchlistHit(
