@@ -1,8 +1,13 @@
 # Grocery Sense — v2 Implementation Plan (Family Release)
 
+> **Status 2026-07-11: all v2 feature code (Phases 1/2/4/5/6) is DONE.** What's still open lives in
+> `V2_FOLLOWUPS.md` — Phase 0's toolchain/keystore hand-offs (§1 there), Phase 3 tuning (blocked on the
+> physical backfill), and the Phase-6 release step. This file is the phase record + the Phase 0 command
+> reference; don't re-plan work from it.
+
 Scope grilled + locked 2026-07-02: `brainstorms/2026-07-02-grocery-sense-v2-plan.md` (Q&A + rationale).
 Companion docs: `PORTING.md` (v1 playbook + conventions — **all v1 conventions still apply**),
-`CONTRACT_AUDIT.md` (API ledger for the deferred surface), `BACKLOG.md` (superseded for v2 scope by this doc).
+`CONTRACT_AUDIT.md` (API ledger for the deferred surface), `archive/BACKLOG.md` (v1-era backlog, superseded by this doc).
 
 **v2 = family/household feature release to the existing friends-&-family Android ring.**
 Same trust model as v1: sideload APK, local-only, no backend, no accounts.
