@@ -2,22 +2,111 @@
 @using GrocerySense.Core
 @using GrocerySense.Domain
 @inject ShoppingListService Shopping
+@inject ShoppingInsightsService Insights
 
-<MudText Typo="Typo.h5" GutterBottom="true">Shopping List</MudText>
+<div class="d-flex align-center mb-1">
+    <MudText Typo="Typo.h5">Shopping List</MudText>
+    <MudSpacer />
+    <MudSwitch T="bool" Value="@_shopMode" ValueChanged="@ToggleShopModeAsync" Color="Color.Primary"
+               Label="Shop Mode" LabelPlacement="Placement.Start" />
+</div>
 
-<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-    <MudTextField @bind-Value="_newItems" Label="Add items (comma-separated)" Variant="Variant.Outlined"
-                  Margin="Margin.Dense" Immediate="true" FullWidth="true" />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
-               Disabled="@(_busy || string.IsNullOrWhiteSpace(_newItems))">Add</MudButton>
-</MudStack>
+@if (!_shopMode)
+{
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+        <MudTextField @bind-Value="_newItems" Label="Add items (comma-separated)" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Immediate="true" FullWidth="true" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newItems))">Add</MudButton>
+    </MudStack>
+}
 
 @if (_error is not null)
 {
     <MudAlert Class="mt-2" Severity="Severity.Error">@_error</MudAlert>
 }
 
-@if (_items is null)
+@if (_shopMode)
+{
+    @if (_groups is null)
+    {
+        <div class="d-flex justify-center pa-8">
+            <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+        </div>
+    }
+    else if (_groups.Count == 0)
+    {
+        <MudText Class="mt-4" Typo="Typo.body2">List is empty — switch off Shop Mode to add items.</MudText>
+    }
+    else
+    {
+        @foreach (var group in _groups)
+        {
+            <MudPaper Class="pa-3 mt-3" Outlined="true">
+                <MudText Typo="Typo.subtitle1">
+                    @group.StoreName — est. $@F2(group.SubtotalEstimated)
+                    @(group.UnpricedCount > 0 ? $" ({group.UnpricedCount} unpriced)" : "")
+                </MudText>
+                @if (group.StoreId is null)
+                {
+                    <MudText Typo="Typo.caption">No planned store — run Plan → Optimize → Apply to assign.</MudText>
+                }
+                <MudList T="int" Dense="true">
+                    @foreach (var i in group.Items)
+                    {
+                        <MudListItem T="int">
+                            <div class="d-flex align-center gap-2">
+                                <MudCheckBox T="bool" Value="@i.Row.IsCheckedOff"
+                                             ValueChanged="@(v => ToggleAsync(i.Row.Id, v))" Dense="true" />
+                                <div>
+                                    <MudText Style="@(i.Row.IsCheckedOff ? "text-decoration: line-through" : null)">
+                                        @i.Row.DisplayName@QtyLabel(i.Row)
+                                        @switch (i.Badge)
+                                        {
+                                            case "stock_up":
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Success">
+                                                    Stock up@(i.SuggestedQty is double q ? $" ×{q:0.##}" : "")
+                                                </MudChip>
+                                                break;
+                                            case "buy":
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                                                    Buy@(i.PctBelowUsual is double p ? $" — {p:0}% below usual" : "")
+                                                </MudChip>
+                                                break;
+                                            case "wait":
+                                                @if (i.Row.Priority == "wait_for_sale")
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">Waiting for sale</MudChip>
+                                                }
+                                                else if (i.Row.Priority != "must_have")
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning"
+                                                             OnClick="@(() => DeferAsync(i.Row.Id))">
+                                                        Wait — tap to defer
+                                                    </MudChip>
+                                                }
+                                                else
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">Above usual</MudChip>
+                                                }
+                                                break;
+                                        }
+                                    </MudText>
+                                    <MudText Typo="Typo.caption">@PriceLine(i)</MudText>
+                                    @if (i.SuggestedQtyNote is not null)
+                                    {
+                                        <MudText Typo="Typo.caption">@i.SuggestedQtyNote</MudText>
+                                    }
+                                </div>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+    }
+}
+else if (_items is null)
 {
     <div class="d-flex justify-center pa-8">
         <MudProgressCircular Indeterminate="true" aria-label="Loading" />
@@ -62,11 +151,15 @@ else
 
 @code {
     private IReadOnlyList<ShoppingListRow>? _items;
+    private IReadOnlyList<ShopModeGroup>? _groups;
+    private bool _shopMode;
     private string _newItems = "";
     private bool _busy;
     private string? _error;
 
     protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
     private static string QtyLabel(ShoppingListRow row)
     {
@@ -75,12 +168,28 @@ else
         return $" — {row.Quantity:0.##}{unit}";
     }
 
+    private static string PriceLine(ListItemInsight i)
+    {
+        if (i.CurrentPrice is not double c) return "no price";
+        var line = $"${F2(c)} ({i.PriceSource})";
+        if (i.UsualPrice is double u) line += $" · usual ${F2(u)}";
+        if (i.SixMonthLow is double l) line += $" · 6-mo low ${F2(l)}";
+        return line;
+    }
+
+    private async Task ToggleShopModeAsync(bool on)
+    {
+        _shopMode = on;
+        await ReloadAsync();
+    }
+
     private async Task ReloadAsync()
     {
         try
         {
             _error = null;
             _items = await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true));
+            if (_shopMode) _groups = await Task.Run(Insights.BuildShopModeView);
         }
         catch (Exception ex) { _error = ex.Message; }
     }
@@ -99,6 +208,9 @@ else
     private Task SetPriorityAsync(int rowId, string priority) =>
         RunAsync(() => Shopping.SetItemPriority(rowId, priority));
 
+    // Shop Mode "Wait" chip: one-tap defer to wait_for_sale (optimizer then skips it unless it's on sale).
+    private Task DeferAsync(int rowId) => RunAsync(() => Shopping.SetItemPriority(rowId, "wait_for_sale"));
+
     private Task ClearCheckedAsync() => RunAsync(Shopping.ClearAllCheckedOff);
 
     // All writes funnel through here: off the UI thread, then reload; errors surface in the alert.
@@ -109,7 +221,7 @@ else
         {
             _error = null;
             await Task.Run(work);
-            _items = await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true));
+            await ReloadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }

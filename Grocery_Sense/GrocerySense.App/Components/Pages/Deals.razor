@@ -7,6 +7,7 @@
 @inject SqliteConnectionFactory Db
 @inject PreferencesService Prefs
 @inject FlyerSyncScheduler Sync
+@inject MultiBuyDealService MultiBuy
 
 <MudText Typo="Typo.h5" GutterBottom="true">Deals</MudText>
 
@@ -61,6 +62,23 @@ else
                     <MudListItem T="int">
                         <MudText Typo="Typo.body2">
                             @DealLabel(deal.Row)
+                            @if (deal.EffectiveUnit is double eff)
+                            {
+                                <span> = $@eff.ToString("0.00") ea</span>
+                            }
+                            @if (deal.EffectiveUnit is double e && deal.UsualPrice is double usual)
+                            {
+                                @if (usual > 0 && (usual - e) / usual * 100.0 >= VerdictBelowUsualPct)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">
+                                        ↓ @(((usual - e) / usual * 100.0).ToString("0"))% vs usual
+                                    </MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">≈ usual — skip</MudChip>
+                                }
+                            }
                             @if (deal.SoftExcluded)
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Default">avoid</MudChip>
@@ -74,8 +92,11 @@ else
 }
 
 @code {
-    private sealed record DealView(FlyerDeal Row, bool SoftExcluded);
+    private sealed record DealView(FlyerDeal Row, bool SoftExcluded, double? EffectiveUnit, double? UsualPrice);
     private sealed record StoreDeals(string StoreName, IReadOnlyList<DealView> Deals);
+
+    // Verdict chip threshold: an effective price less than this % below usual reads "≈ usual — skip".
+    private const double VerdictBelowUsualPct = 5.0;
 
     private IReadOnlyList<StoreDeals>? _dealsByStore;
     private int _hiddenHardExcluded;
@@ -108,6 +129,12 @@ else
                 var storeNames = StoresRepo.ListStores(conn).ToDictionary(s => s.Id, s => s.Name);
                 var deals = new FlyersRepo().ListActiveDeals(conn);
 
+                // Usual (receipt-median) prices for mapped deals so the multi-buy label can carry a verdict.
+                var mappedIds = deals.Where(d => d.ItemId is not null).Select(d => d.ItemId!.Value).Distinct().ToList();
+                var usualMap = PricesRepo.GetUsualUnitPriceBatch(conn, mappedIds, receiptOnly: true,
+                    minSamples: PriceDropAlertService.MinReceiptSamplesForUsual,
+                    sinceDays: PriceDropAlertService.UsualLookbackDays);
+
                 var hiddenCount = 0;
                 var views = new List<(int StoreId, DealView View)>();
                 foreach (var deal in deals)
@@ -119,7 +146,21 @@ else
                         continue;
                     }
                     var soft = eff.SoftExcludes.Any(t => BasketOptimizerService.PhraseSafeHit(text, t));
-                    views.Add((deal.StoreId, new DealView(deal, soft)));
+
+                    // Multi-buy truth: parse the promo phrase ("2/$5", "BOGO") into an effective unit price.
+                    // Only a genuinely parsed deal gets the "= $X ea" label — no_deal/unit_from_total stay silent.
+                    double? effUnit = null;
+                    var adjusted = MultiBuy.Adjust($"{deal.PriceText} {deal.Title}", null,
+                        (double?)deal.UnitPrice, (double?)deal.DealTotal, null);
+                    if (adjusted.UnitPrice is > 0 && (adjusted.DealNote.StartsWith("bogo_effective")
+                        || adjusted.DealNote.StartsWith("bundle") || adjusted.DealNote.StartsWith("at(")))
+                        effUnit = adjusted.UnitPrice;
+
+                    double? usual = null;
+                    if (deal.ItemId is { } mappedId)
+                        usual = usualMap.GetValueOrDefault(mappedId, (null, 0, "unknown")).Price;
+
+                    views.Add((deal.StoreId, new DealView(deal, soft, effUnit, usual)));
                 }
 
                 var grouped = views.GroupBy(v => v.StoreId)

@@ -13,18 +13,20 @@ namespace GrocerySense.Core;
 // migration ledger. Opens connections via the factory; persistence runs in a transaction.
 public sealed class PriceDropAlertService
 {
-    // Tunables (per PORTING: keep the 15%/5%/staple defaults).
-    private const double DropBelowUsualThresholdPct = 15.0;
-    private const double NearSixMonthLowThresholdPct = 5.0;
+    // Tunables (per PORTING: keep the 15%/5%/staple defaults). The public ones are the single source for
+    // every surface that classifies a price (ShoppingInsightsService badges reuse them — no duplicated numbers).
+    public const double DropBelowUsualThresholdPct = 15.0;
+    public const double NearSixMonthLowThresholdPct = 5.0;
+    public const int UsualLookbackDays = 180;
+    public const int LowLookbackDays = 183;
+    public const int MinReceiptSamplesForUsual = 4;
+    public const double MinLowPriceFloor = 0.05;
     private const int AlertSuppressionDays = 30;
     private const int StockUpCooldownDays = 30;
-    private const int UsualLookbackDays = 180;
-    private const int LowLookbackDays = 183;
     private const int StapleLookbackDays = 90;
-    private const int MinReceiptSamplesForUsual = 4;
-    private const int StockUpHorizonDays = 42;
+    // Stock-up horizon: suggest ~4 weeks' worth (locked decision 2026-07-09; was 42), still capped at 3x typical.
+    private const int StockUpHorizonDays = 28;
     private const int MaxStockupMultiple = 3;
-    private const double MinLowPriceFloor = 0.05;
 
     private readonly SqliteConnectionFactory _factory;
 
@@ -49,7 +51,7 @@ public sealed class PriceDropAlertService
         cmd.CommandText =
             "SELECT id, item_id, store_id, store_name, item_name, current_price, usual_price, pct_below_usual, " +
             "six_month_low, pct_above_low, alert_kind, is_staple, receipt_samples, basis, source, " +
-            "last_seen_at_or_below, notes, created_at, status " +
+            "last_seen_at_or_below, notes, created_at, status, suggested_qty, suggested_qty_note " +
             "FROM price_drop_alerts WHERE status = 'open' ORDER BY created_at DESC";
         if (limit > 0)
         {
@@ -183,15 +185,10 @@ public sealed class PriceDropAlertService
 
             double? suggestedQty = null;
             string? suggestedQtyNote = null;
-            if (alertKind is "stock_up" or "both")
+            if (alertKind is "stock_up" or "both" && SuggestStockUpQty(cadenceMap, itemId) is { } sq)
             {
-                suggestedQty = ComputeSuggestedQty(cadenceMap, itemId);
-                if (suggestedQty is not null)
-                {
-                    var (avgInterval, _) = cadenceMap.GetValueOrDefault(itemId, (null, null));
-                    var intervalWeeks = (int)Math.Round((avgInterval ?? 0) / 7.0, MidpointRounding.AwayFromZero);
-                    suggestedQtyNote = $"You buy this every ~{intervalWeeks} week(s); at this low, buy {G4(suggestedQty.Value)}.";
-                }
+                suggestedQty = sq.Qty;
+                suggestedQtyNote = sq.Note;
             }
 
             var notes = BuildNotes(bestStoreName, bestUnit, usualPrice, pctBelowUsual, sixLow, pctAboveLow,
@@ -312,9 +309,9 @@ public sealed class PriceDropAlertService
             INSERT INTO price_drop_alerts
                 (item_id, store_id, store_name, item_name, current_price, usual_price, pct_below_usual,
                  six_month_low, pct_above_low, alert_kind, is_staple, receipt_samples, basis, source,
-                 last_seen_at_or_below, notes, created_at, status)
+                 last_seen_at_or_below, notes, created_at, status, suggested_qty, suggested_qty_note)
             VALUES ($item, $store, $sname, $iname, $cur, $usual, $pctb, $low, $pcta, $kind, $staple, $samples,
-                 $basis, $source, $lastseen, $notes, datetime('now'), 'open')
+                 $basis, $source, $lastseen, $notes, datetime('now'), 'open', $sqty, $sqtynote)
             """);
         cmd.Parameters.AddWithValue("$item", a.ItemId);
         cmd.Parameters.AddWithValue("$store", a.StoreId);
@@ -332,6 +329,8 @@ public sealed class PriceDropAlertService
         cmd.Parameters.AddWithValue("$source", source);
         cmd.Parameters.AddWithValue("$lastseen", OrNull(a.LastSeenAtOrBelow));
         cmd.Parameters.AddWithValue("$notes", a.Notes);
+        cmd.Parameters.AddWithValue("$sqty", OrNull(a.SuggestedQty));
+        cmd.Parameters.AddWithValue("$sqtynote", OrNull(a.SuggestedQtyNote));
         cmd.ExecuteNonQuery();
     }
 
@@ -380,19 +379,26 @@ public sealed class PriceDropAlertService
         Source: StrOrNull(r, 14) ?? "",
         LastSeenAtOrBelow: StrOrNull(r, 15),
         Notes: StrOrNull(r, 16) ?? "",
+        SuggestedQty: DblOrNull(r, 19),
+        SuggestedQtyNote: StrOrNull(r, 20),
         Id: IntOrNull(r, 0),
         CreatedAt: StrOrNull(r, 17),
         Status: StrOrNull(r, 18));
 
     // ----------------------- helpers -----------------------
 
-    private static double? ComputeSuggestedQty(IReadOnlyDictionary<int, (double?, double?)> cadence, int itemId)
+    // Shared with ShoppingInsightsService (Shop Mode stock-up hint) so the quantity math and its wording
+    // live in one place. Null when cadence data is missing/unusable — no guessed quantities.
+    public static (double Qty, string Note)? SuggestStockUpQty(
+        IReadOnlyDictionary<int, (double? AvgIntervalDays, double? TypicalQty)> cadence, int itemId)
     {
         var (avgInterval, typicalQty) = cadence.GetValueOrDefault(itemId, (null, null));
         if (avgInterval is null or <= 0 || typicalQty is null or <= 0) return null;
         var rawQty = StockUpHorizonDays / avgInterval.Value * typicalQty.Value;
         var qty = Math.Min(Math.Round(rawQty / typicalQty.Value) * typicalQty.Value, typicalQty.Value * MaxStockupMultiple);
-        return Math.Max(qty, typicalQty.Value);
+        qty = Math.Max(qty, typicalQty.Value);
+        var intervalWeeks = (int)Math.Round(avgInterval.Value / 7.0, MidpointRounding.AwayFromZero);
+        return (qty, $"You buy this every ~{intervalWeeks} week(s); at this low, buy {G4(qty)}.");
     }
 
     private static bool PassesStockupCooldown(string? lastSeenIso)

@@ -76,7 +76,7 @@ public record FlyerSyncResult(int StoresSynced, int DealsInserted, string? Skipp
 }
 
 // One price-drop alert (computed by the engine and/or persisted). SuggestedQty/Note are populated on compute
-// for stock-up alerts but NOT persisted (Python omits them too), so they're null when read from the table.
+// for stock-up alerts and persisted since migration 6 (rows written earlier read back null).
 // Id/CreatedAt/Status are null on compute and set when read back from price_drop_alerts.
 public record PriceDropAlert(
     int ItemId, string ItemName, int StoreId, string StoreName,
@@ -86,6 +86,20 @@ public record PriceDropAlert(
     string? LastSeenAtOrBelow, string Notes,
     double? SuggestedQty = null, string? SuggestedQtyNote = null,
     int? Id = null, string? CreatedAt = null, string? Status = null);
+
+// Aisle-view intel for one active shopping-list row (ShoppingInsightsService). Badge: stock_up | buy | wait |
+// none — strongest wins (stock_up > buy > wait); "none" also covers missing price/history (never guess).
+// CurrentPrice is the quote at the row's planned store only — a missing price there is disclosed as unpriced,
+// not silently swapped for another store's price. Rows without a planned store use the cheapest shop-here quote.
+public sealed record ListItemInsight(
+    ShoppingListRow Row, double? CurrentPrice, string? PriceSource, string? PriceUnit,
+    double? UsualPrice, double? PctBelowUsual, double? SixMonthLow, string Badge,
+    double? SuggestedQty = null, string? SuggestedQtyNote = null);
+
+// One Shop Mode store group. StoreId null => rows with no planned store ("Unassigned" — run Plan → Apply).
+public sealed record ShopModeGroup(
+    int? StoreId, string StoreName, IReadOnlyList<ListItemInsight> Items,
+    double SubtotalEstimated, int UnpricedCount);
 
 // A watchlist item whose current best price cleared its trigger. HitReason: "target" (met the user's target
 // price) | "below_usual" (no target set, but currently >= MinItemSavingPct below its usual price).

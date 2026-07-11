@@ -125,4 +125,29 @@ public sealed class PriceDropAlertServiceTests
         using var db = new TempDb();
         Assert.Empty(new PriceDropAlertService(db.Factory).ComputeEngineAlerts());
     }
+
+    // Stock-up suggested qty is persisted (migration 6) and survives the write -> read-back round-trip.
+    // Setup: usual $10, latest price $7 = the 6-month low, last seen 40 days ago (past the 30-day cooldown);
+    // cadence = 4 receipts over 60 days (interval 20d, qty 1) -> 28-day horizon suggests 1.
+    [Fact]
+    public void Stockup_suggested_qty_survives_persist_and_read_back()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Oats").Id;
+        foreach (var (d, price) in new[] { (100, 10.0), (80, 10.0), (60, 10.0), (40, 7.0) })
+        {
+            var rid = AddReceipt(db.Conn, store, DaysAgo(d));
+            PricesRepo.AddPricePoint(db.Conn, item, store, price, "each", quantity: 1.0,
+                source: "receipt", date: DaysAgo(d), receiptId: rid);
+        }
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.RefreshEngineAlerts());
+
+        var a = Assert.Single(svc.GetAlerts());
+        Assert.Equal("both", a.AlertKind);
+        Assert.Equal(1.0, a.SuggestedQty!.Value, 4);
+        Assert.Contains("week", a.SuggestedQtyNote);
+    }
 }

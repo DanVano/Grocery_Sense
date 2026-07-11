@@ -337,6 +337,14 @@ public static class Database
         );
         CREATE INDEX idx_member_requests_reviewed ON member_requests(reviewed);
         """,
+
+        // ----- Migration 6: persist stock-up suggested quantity on alerts -----
+        // Migration 2 kept suggested_qty compute-only (matching Python); the Savings page lost the hint on
+        // reload. Persisted now so the "buy N" guidance survives the round-trip.
+        """
+        ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty REAL;
+        ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty_note TEXT;
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

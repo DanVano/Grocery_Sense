@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PriceDropAlertService>();
         services.AddSingleton<WatchlistService>();
         services.AddSingleton<ShoppingListService>();
+        services.AddSingleton<ShoppingInsightsService>();
         services.AddSingleton<PlanningService>();
         services.AddSingleton<BasketOptimizerService>();
         services.AddSingleton<ReceiptIngestionService>();
