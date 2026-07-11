@@ -1,26 +1,42 @@
 # Grocery Sense v2 — Follow-ups, Known Gaps & Bug-fixing Landmines
 
-Consolidated as of **2026-07-03**, after Phases 1/2/4/5/6 (code) landed on `V2_Features_Implementation`.
-The per-phase detail lives in `V2_PLAN.md` (status) and `IMPLEMENTATION_NOTES.md` (decisions); this file is
-the single "what's left + what will bite you" view. State at write time: **381 tests green, 0 skipped;
-Windows head builds 0/0; nothing pushed.**
+Refreshed **2026-07-11**. v2 feature code (Phases 1/2/4/5/6), the July code-review/security fix pass,
+**and all nine food-savings recommendations** (`Grocery_Sense/brainstorms/2026-07-09-family-food-savings.md`)
+are done on `V2_Features_Implementation_Phase2` (**19 commits ahead of origin, not pushed**).
+State at write time: **416 tests green, 0 skipped; Windows head builds 0/0; Integrations builds 0/0.**
+
+The food-savings commits: `673d2bd` Shop Mode store groups + Buy/Stock-up/Wait badges + persisted
+stock-up qty (migration 6) + multi-buy verdict chips · `688c403` **real Flipp provider** (unofficial
+backflipp) + deal enrichment · `e676b4f` pantry likely-have hints + budget trip check · `d0ac9f0`
+unit-price comparator page + cheaper same-category swaps (with coverage guard).
+
+**Next step before the platform work: `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`** (push/merge/tag baseline;
+verdict on remaining backend items).
+
+Per-phase detail: `V2_PLAN.md` (plan + status) · `IMPLEMENTATION_NOTES.md` (decisions). Resolved
+review records live in `archive/` (`CODE_REVIEW_FINDINGS_2026_07.md`, the executed SyncCompleted plan);
+`SECURITY_REVIEW_FUTURE_WORK.md` stays live (standing v3 notes).
 
 ---
 
-## 1. Blocked — must happen before a v2 release (all user/environment action)
+## 1. Next up: platform Phase 0 — Android build & release plumbing (all user/environment action)
 
 | Item | Why blocked | What it needs |
 |---|---|---|
 | **Android build** | This machine has only **JDK 8** | `winget install Microsoft.OpenJDK.17`, then elevated `sdkmanager … "platforms;android-36" "build-tools;36.0.0"` (SDK is under `C:\Program Files (x86)\Android\android-sdk`), then `dotnet build … -f net10.0-android`. Commands in `V2_PLAN.md` Phase 0. |
 | **Release keystore** | Signing key = a secret the user must own | `keytool -genkeypair -v -keystore grocerysense-release.keystore -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000`. **Back it up off-machine.** Lose it → testers uninstall/reinstall and lose local data. |
-| **Signed v2 APK + on-device smoke** | Needs the two above | `dotnet publish -f net10.0-android -c Release`; smoke every route; sideload to the ring (manual reinstall). |
+| **Signed v2 APK + on-device smoke** | Needs the two above | `dotnet publish -f net10.0-android -c Release`; smoke every route (§2 list); sideload to the ring (manual reinstall). |
 | **Azure OCR budget cap** | External portal | Set the cap + check per-page cost **before** the ~50–150-receipt backfill scan. |
-| **Phase 3 tuning** | No corpus exists | Requires the physical backfill first (below). Then: measure + adjust fuzzy (0.78/0.90), optimizer (3 / 10% / $5), alert (15% / 5% / staple) thresholds; record verdicts. |
+| **iOS head** | **Needs a Mac build host (Xcode) + Apple Developer account — impossible on this PC alone** | Was parked in the v3 gate (§5). Pulling it forward means Mac hardware (or a cloud Mac / CI) *first*; the shared C#/Blazor code is platform-neutral, so the work is toolchain + head config + device smoke, not a rewrite. |
+| **Phase 3 tuning** | No corpus exists | Requires the physical backfill first (below). Then: measure + adjust fuzzy (0.78/0.90), optimizer (3 / 10% / $5), alert (15% / 5% / staple) thresholds; record verdicts in `IMPLEMENTATION_NOTES.md`. |
+
+Also outstanding: **push the 19 local commits**, then merge `V2_Features_Implementation_Phase2` → `main`
+and tag the v2 code baseline (steps in `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`).
 
 **The linchpin is the physical 6-month paper backfill.** It unblocks Phase 3 and turns on every
-intelligence feature (alerts, optimizer, savings, meal-cost estimates are all data-starved until it runs).
-Tooling has been ready since Phases 1–2: Receipts → **Backfill (multiple)** → confirm each date → fix
-mis-maps with the per-line **Fix** action / the `/items` merge.
+intelligence feature (alerts, optimizer, savings, meal-cost estimates, the new badges are all
+data-starved until it runs). Tooling has been ready since Phases 1–2: Receipts → **Backfill (multiple)**
+→ confirm each date → fix mis-maps with the per-line **Fix** action / the `/items` merge.
 
 ---
 
@@ -38,21 +54,29 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 - **Data & backup**: share-sheet backup (the file-provider wiring is the fiddly Android bit) + CSV/JSON
   export; open a backup on a **second device/emulator** to confirm it restores.
 - **Savings** (from `feat/family-savings`, pre-v2): still never smoke-tested on device (Phase-0 leftover).
+- **Food-savings recs** (all nine, committed): Shop Mode store groups + Buy/Stock-up/Wait badges on the
+  shopping list, multi-buy verdict chips on Deals, **live Flipp sync** (first real network path in the
+  app — test on device data/Wi-Fi), pantry hints + budget check on Plan, the comparator page, swap chips.
 
 ---
 
 ## 3. Known limitations (they work, but have a documented ceiling)
 
+- **The Flipp provider rides UNOFFICIAL backflipp endpoints — no key, no contract.** Flipp can change or
+  block them without notice. Failures throw loud (disclosed per store in `FlyerSyncResult.Errors`); the
+  manual flyer-photo path (`FlyerIngestService`) is the standing fallback. ToS/legal review stays a v3
+  public-release gate (§5) — fine for the friends-&-family ring, not cleared for a store listing.
 - **Alias-correction on an *unmapped* line does not back-create its price.** `ItemsAdminRepo.CorrectLineMapping`:
   a line that OCR left unmapped (`item_id` NULL) has no price row to re-point, so fixing it re-points the
   line + learns the alias but the historical price isn't recovered. Recovery path = re-import that receipt
   with `replaceExisting`. (Wrong→right mappings, the common case, fix fully.)
-- **No scan-on-ingest alerts and no local notifications.** Alerts are computed **on-demand** on the Savings
-  page only; nothing fires on a scan, and there's **no `Plugin.LocalNotification` package**. The v1 grill
-  (Q8) wanted "compute on scan → local notification + feed"; that was never built. Backfill "suppression"
-  therefore relies on correct dates keeping old rows outside `ScanRecentReceipts`' 21-day window, not on a
-  hook toggle. **If you wire scan-on-ingest later, make the backfill batch path skip it** (see the
-  `ImportBatchAsync` comment).
+- **Alerts refresh after a flyer sync, but not after a receipt scan, and there are no local notifications.**
+  The post-sync hook is wired (`FlyerSyncScheduler.SyncCompleted` → `PriceDropAlertService.RefreshEngineAlerts`,
+  commit `6b703f7`); a hook-handler failure is disclosed in `FlyerSyncResult.Errors`, not faked as a sync
+  failure. Receipt-scan-on-ingest alerting and `Plugin.LocalNotification` remain unbuilt (v1 grill Q8 → §5).
+  Backfill "suppression" therefore still relies on correct dates keeping old rows outside
+  `ScanRecentReceipts`' 21-day window. **If you wire scan-on-ingest later, make the backfill batch path
+  skip it** (see the `ImportBatchAsync` comment).
 - **Family nav badge is best-effort** — refreshed on navigation (`LocationChanged`), gated on DB-ready,
   errors swallowed. No live event from the service; the `/family` page always shows the accurate count.
 - **Meal profile is a lossy single-profile projection.** `PreferencesService.GetMealProfile` maps
@@ -111,6 +135,10 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
     component's own type is named `Preferences`).
 14. **`member_requests.member_id` has no DB FK** (members live in `user_config.json`, not a table). Its
     `item_row_ids` JSON is decoded defensively (`JsonDocument`, junk → `[]`).
+15. **`CorrectLineMapping` moves exactly ONE price row on purpose.** Two identical-description lines on one
+    receipt produce identical price rows; an unbounded UPDATE would move both when fixing the first line.
+    There is deliberately no `line_item_id` column on `prices` — add one only if that pairing ever has to be
+    exact (see the ponytail comment at the call site).
 
 ---
 
@@ -118,12 +146,15 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 
 Out of v2 by decision (grill 2026-07-02), roughly in likely-value order:
 
-- **Scan-on-ingest alerts + local notifications** (`Plugin.LocalNotification`; Android 13+ `POST_NOTIFICATIONS`) —
-  the "deal alert fires after a scan" experience. Half-specced in v1, never built.
+- **Receipt-scan-on-ingest alerts + local notifications** (`Plugin.LocalNotification`; Android 13+
+  `POST_NOTIFICATIONS`) — the "deal alert fires after a scan" experience. The flyer-sync half is now wired
+  (§3); the receipt half + notifications remain unbuilt.
 - **Phase 3 real-data tuning** (blocked on backfill — see §1).
 - **v3 platform/public-store gate:** accounts/auth · multi-device sync · OCR backend proxy + per-user rate
-  limiting · real flyer provider (Flipp) + ToS/legal · proactive push (FCM/APNs) · iOS + Apple heads ·
-  auto-update channel (Firebase App Distribution or Play) · starter dataset + central crowdsourced price DB
+  limiting · Flipp ToS/legal review (provider itself is **built**, §3 — the legal clearance is what's
+  gated) · proactive push (FCM/APNs) · **iOS + Apple heads
+  (Dan wants to revisit — see the §1 Mac-hardware prerequisite)** · auto-update channel (Firebase App
+  Distribution or Play) · starter dataset + central crowdsourced price DB
   (see `reference-python/FUTURE_FEATURES.md`).
 - **Per-member preference profiles** (merge/consensus/star machinery) — v2 is names-only; the Python
   multi-member `preferences_service` surface stays deferred.
