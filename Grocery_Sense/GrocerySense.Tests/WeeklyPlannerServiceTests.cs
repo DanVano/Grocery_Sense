@@ -118,6 +118,82 @@ public sealed class WeeklyPlannerServiceTests
         });
     }
 
+    // ---- pantry inference (LikelyHave) ----
+
+    private static int AddReceipt(TempDb db, int storeId, string date)
+    {
+        using var cmd = db.Conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
+        cmd.Parameters.AddWithValue("$s", storeId);
+        cmd.Parameters.AddWithValue("$d", date);
+        return (int)(long)cmd.ExecuteScalar()!;
+    }
+
+    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
+
+    // Receipt purchases of "rice" spaced 10 days apart, ending `lastDaysAgo` ago (cadence interval = 10d).
+    private static void SeedRiceCadence(TempDb db, int lastDaysAgo)
+    {
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "rice").Id;
+        foreach (var d in new[] { lastDaysAgo + 30, lastDaysAgo + 20, lastDaysAgo + 10, lastDaysAgo })
+        {
+            var rid = AddReceipt(db, store, DaysAgo(d));
+            PricesRepo.AddPricePoint(db.Conn, item, store, 4.0, "each", quantity: 1.0,
+                source: "receipt", date: DaysAgo(d), receiptId: rid);
+        }
+    }
+
+    [Fact]
+    public void Build_marks_recently_bought_ingredient_likely_have()
+    {
+        using var db = new TempDb();
+        SeedRiceCadence(db, lastDaysAgo: 2); // 2 days since < 0.75 x 10-day interval
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+
+        var rice = plan.PlannedIngredients.First(p => p.Name.ToLowerInvariant() == "rice");
+        Assert.True(rice.LikelyHave);
+        Assert.Contains("bought 2 day(s) ago", rice.LikelyHaveReason);
+    }
+
+    [Fact]
+    public void Build_does_not_mark_likely_have_past_the_cadence_fraction()
+    {
+        using var db = new TempDb();
+        SeedRiceCadence(db, lastDaysAgo: 9); // 9 days since >= 0.75 x 10-day interval
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+
+        var rice = plan.PlannedIngredients.First(p => p.Name.ToLowerInvariant() == "rice");
+        Assert.False(rice.LikelyHave);
+        Assert.Null(rice.LikelyHaveReason);
+    }
+
+    [Fact]
+    public void Build_never_marks_likely_have_without_cadence()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "rice").Id;
+        var rid = AddReceipt(db, store, DaysAgo(1)); // single purchase -> no interval -> no inference
+        PricesRepo.AddPricePoint(db.Conn, item, store, 4.0, "each", quantity: 1.0,
+            source: "receipt", date: DaysAgo(1), receiptId: rid);
+
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+        Assert.False(plan.PlannedIngredients.First(p => p.Name.ToLowerInvariant() == "rice").LikelyHave);
+    }
+
+    [Fact]
+    public void Persist_appends_likely_have_reason_to_notes_but_still_adds_the_row()
+    {
+        using var db = new TempDb();
+        SeedRiceCadence(db, lastDaysAgo: 2);
+        Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true, persistToShoppingList: true);
+
+        var row = List(db).GetActiveItems().First(r => r.DisplayName.ToLowerInvariant() == "rice");
+        Assert.Contains("May already have:", row.Notes);
+    }
+
     // ---- persistence ----
 
     [Fact]

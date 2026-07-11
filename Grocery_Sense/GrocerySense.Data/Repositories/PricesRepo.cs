@@ -634,6 +634,32 @@ public static class PricesRepo
         return result;
     }
 
+    // Most recent receipt-sourced purchase date per item (ISO yyyy-MM-dd), for the planner's
+    // "likely still have" pantry inference. Items with no receipt purchase in the window are absent.
+    public static IReadOnlyDictionary<int, string> GetLastReceiptPurchaseBatch(
+        SqliteConnection conn, IReadOnlyList<int> itemIds, int sinceDays = 180, SqliteTransaction? tx = null)
+    {
+        var ids = CoerceIds(itemIds);
+        var result = new Dictionary<int, string>();
+        if (ids.Count == 0) return result;
+
+        foreach (var chunk in ids.Chunk(ParamChunk))
+        {
+            var ph = Placeholders(chunk.Length);
+            using var cmd = Db.Command(conn, tx,
+                "SELECT item_id, MAX(date(COALESCE(date, created_at))) FROM prices " +
+                $"WHERE item_id IN ({ph}) AND (source = 'receipt' OR receipt_id IS NOT NULL) " +
+                "  AND date(COALESCE(date, created_at)) >= date('now', $since) GROUP BY item_id");
+            BindIn(cmd, chunk);
+            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                if (!r.IsDBNull(1))
+                    result[r.GetInt32(0)] = r.GetString(1);
+        }
+        return result;
+    }
+
     // ---------- helpers ----------
 
     private static double? Median(IReadOnlyList<double> values)

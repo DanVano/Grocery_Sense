@@ -42,6 +42,22 @@ public sealed class PricesRepoTests
     }
 
     [Fact]
+    public void LastReceiptPurchaseBatch_returns_latest_receipt_date_and_skips_manual_only_items()
+    {
+        using var db = new TempDb();
+        var (bought, store) = Seed(db, "Rice");
+        var manualOnly = ItemsRepo.CreateItem(db.Conn, "Saffron").Id;
+        PricesRepo.AddPricePoint(db.Conn, bought, store, 3.0, "each", source: "receipt", date: DaysAgo(20));
+        PricesRepo.AddPricePoint(db.Conn, bought, store, 3.0, "each", source: "receipt", date: DaysAgo(5));
+        PricesRepo.AddPricePoint(db.Conn, manualOnly, store, 9.0, "each", source: "manual", date: DaysAgo(2));
+
+        var map = PricesRepo.GetLastReceiptPurchaseBatch(db.Conn, new[] { bought, manualOnly });
+
+        Assert.Equal(DaysAgo(5), map[bought]);
+        Assert.False(map.ContainsKey(manualOnly));
+    }
+
+    [Fact]
     public void PriceStats_min_max_avg_are_numeric()
     {
         using var db = new TempDb();

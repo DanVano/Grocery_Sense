@@ -159,9 +159,12 @@ public sealed record SuggestedMeal(
     double? CostTotal = null, double? CostPerServing = null, double CostKnownRatio = 0.0);
 
 // An aggregated shopping-list ingredient across a week's suggested meals, with best-effort item mapping.
+// LikelyHave is a zero-effort pantry hint (receipt recency vs purchase cadence) — informational only,
+// the ingredient is still added to the list.
 public sealed record PlannedIngredient(
     string Name, IReadOnlyList<string> RecipeNames, int ApproximateCount,
-    int? ItemId = null, string? CanonicalName = null, double? MatchConfidence = null, string? MatchMethod = null);
+    int? ItemId = null, string? CanonicalName = null, double? MatchConfidence = null, string? MatchMethod = null,
+    bool LikelyHave = false, string? LikelyHaveReason = null);
 
 public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
 

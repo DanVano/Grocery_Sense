@@ -43,6 +43,7 @@ public sealed class WeeklyPlannerService
                     : ing with { MatchConfidence = res.Confidence, MatchMethod = res.Method };
             }).ToList();
             _mapper.FlushLearnedAliases();
+            planned = AnnotateLikelyHave(planned);
         }
 
         var plan = new WeeklyPlan(suggestions, planned);
@@ -59,6 +60,7 @@ public sealed class WeeklyPlannerService
         {
             var notes = new List<string>();
             if (ing.RecipeNames.Count > 0) notes.Add("Used in: " + string.Join(", ", ing.RecipeNames));
+            if (ing.LikelyHave && ing.LikelyHaveReason is { } why) notes.Add($"May already have: {why}");
             if (ing.ItemId is not null && ing.MatchConfidence is not null)
             {
                 var label = ing.CanonicalName ?? $"item_id={ing.ItemId}";
@@ -80,6 +82,39 @@ public sealed class WeeklyPlannerService
         using var tx = conn.BeginTransaction();
         ShoppingListRepo.BulkAddItems(conn, rows, tx);
         tx.Commit();
+    }
+
+    // Zero-effort pantry hint: an item bought (per receipts) more recently than this fraction of its usual
+    // purchase interval is probably still in the pantry. Locked decision 2026-07-09: hint only, never blocks.
+    internal const double LikelyHaveCadenceFraction = 0.75;
+
+    private List<PlannedIngredient> AnnotateLikelyHave(List<PlannedIngredient> planned)
+    {
+        var ids = planned.Where(p => p.ItemId is not null).Select(p => p.ItemId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return planned;
+
+        using var conn = _factory.Open();
+        var lastMap = PricesRepo.GetLastReceiptPurchaseBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
+        var cadence = PricesRepo.GetPurchaseCadenceBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return planned.Select(p =>
+        {
+            if (p.ItemId is not { } id) return p;
+            if (!lastMap.TryGetValue(id, out var lastIso) || !DateOnly.TryParse(lastIso, out var last)) return p;
+            var (avgInterval, _) = cadence.GetValueOrDefault(id, (null, null));
+            if (avgInterval is not > 0) return p; // no cadence -> no inference (never guess)
+
+            var daysSince = today.DayNumber - last.DayNumber;
+            if (daysSince < 0 || daysSince >= avgInterval.Value * LikelyHaveCadenceFraction) return p;
+
+            var intervalDays = (int)Math.Round(avgInterval.Value, MidpointRounding.AwayFromZero);
+            return p with
+            {
+                LikelyHave = true,
+                LikelyHaveReason = $"bought {daysSince} day(s) ago; you buy this every ~{intervalDays} day(s)",
+            };
+        }).ToList();
     }
 
     // Dedup ingredients across the week's recipes by normalized name; track the recipes using each; sort by

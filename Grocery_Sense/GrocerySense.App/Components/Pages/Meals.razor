@@ -73,6 +73,12 @@
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">new item</MudChip>
                             }
+                            @if (ing.LikelyHave)
+                            {
+                                <MudTooltip Text="@(ing.LikelyHaveReason ?? "")">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-1">likely have</MudChip>
+                                </MudTooltip>
+                            }
                         </td>
                         <td style="text-align:center">@ing.ApproximateCount</td>
                         <td>@string.Join(", ", ing.RecipeNames)</td>

@@ -4,6 +4,7 @@
 @inject BasketOptimizerService Optimizer
 @inject PlanningService Planning
 @inject ShoppingListService Shopping
+@inject BudgetService Budget
 
 <MudText Typo="Typo.h5" GutterBottom="true">Plan</MudText>
 
@@ -53,7 +54,21 @@
                     {
                         <MudChip T="string" Color="Color.Default">vs 6-mo low $@F2(sl)</MudChip>
                     }
+                    @if (_budget is { Budget: not null, Remaining: { } left })
+                    {
+                        <MudChip T="string" Color="@(IsOverRemaining(opt) ? Color.Error : Color.Default)">
+                            $@F2((double)left) left this month
+                        </MudChip>
+                    }
                 </MudStack>
+
+                @if (IsOverRemaining(opt) && _deferCandidates.Count > 0)
+                {
+                    <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">
+                        This basket exceeds what's left of the monthly budget.
+                        Consider deferring (not must-have, priciest first): @string.Join(", ", _deferCandidates).
+                    </MudAlert>
+                }
 
                 @foreach (var store in opt.Stores)
                 {
@@ -167,13 +182,49 @@
     private BasketOptimizationResult? _optimized;
     private ApplyPlanResult? _applied;
     private StorePlanResult? _plan;
+    private BudgetStatus? _budget;
+    private List<string> _deferCandidates = [];
 
     private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task OptimizeAsync()
     {
         _applied = null;
+        _budget = null;
+        _deferCandidates = [];
         _optimized = await GuardAsync(() => Optimizer.Optimize(_mode));
+        if (_optimized is { } opt)
+        {
+            var check = await GuardAsync(() => BuildBudgetCheck(opt));
+            if (check is not null) (_budget, _deferCandidates) = (check.Status, check.Defer);
+        }
+    }
+
+    private bool IsOverRemaining(BasketOptimizationResult opt) =>
+        _budget is { Budget: not null, Remaining: { } left } && (decimal)opt.BasketTotalEstimated > left;
+
+    private sealed record BudgetCheck(BudgetStatus Status, List<string> Defer);
+
+    // Trip check: basket estimate vs remaining monthly budget; over-budget lists the priciest non-must_have
+    // lines as defer candidates. Display only — nothing is removed automatically.
+    private BudgetCheck BuildBudgetCheck(BasketOptimizationResult opt)
+    {
+        var status = Budget.GetBudgetStatus();
+        var defer = new List<string>();
+        if (status.Budget is not null && status.Remaining is { } left && (decimal)opt.BasketTotalEstimated > left)
+        {
+            var mustHave = Shopping.GetActiveItems()
+                .Where(r => r.ItemId is not null && r.Priority == "must_have")
+                .Select(r => r.ItemId!.Value)
+                .ToHashSet();
+            defer = opt.Stores.SelectMany(s => s.Items)
+                .Where(i => !i.HardExcluded && !i.PriceUnknown && i.UnitPrice is not null && !mustHave.Contains(i.ItemId))
+                .OrderByDescending(i => i.UnitPrice)
+                .Take(5)
+                .Select(i => $"{i.Name} (${F2(i.UnitPrice!.Value)})")
+                .ToList();
+        }
+        return new BudgetCheck(status, defer);
     }
 
     private async Task ApplyAsync()
