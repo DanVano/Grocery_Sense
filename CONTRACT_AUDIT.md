@@ -1,5 +1,9 @@
 # Contract Audit — Python public API → C# v1 (PORTING Phase 0.B)
 
+> **⚠️ HISTORICAL (v1 audit, 2026-06-26).** The "Done?" column was never updated, and many "Defer (v2)" rows
+> were later **built in v2** (items-admin, member_requests, meal planning, family picks, db-maintenance).
+> Use as the Port/Replace/Defer ledger for any remaining deferred port — not as current state.
+
 Every public Python API tracked as **Port** (bring as-is), **Replace** (behavior/shape changes in C#), or
 **Defer** (v2 — leave unported). Source: `reference-python/ARCHITECTURE.md` Public I/O Inventory, with
 `prices_repo` verified directly (the file the scaffold trimmed). Classification follows the locked v1

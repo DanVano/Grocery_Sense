@@ -1,9 +1,10 @@
 # Grocery Sense (C# / .NET MAUI Blazor Hybrid)
 
-Port of the Python/Tkinter Grocery Sense prototype to a cross-platform iOS/Android app.
-**Status: scaffold only.** The solution compiles and the test host runs, but every service/repo
-method currently `throw new NotImplementedException(...)` with a pointer to the Python source to port
-from. This is the skeleton you fill in — not a working app yet.
+Port of the Python/Tkinter Grocery Sense prototype to an Android-first MAUI Blazor app (MudBlazor).
+**Status: v1 + v2 feature code complete** — receipt OCR, price intelligence, shopping list, deals,
+trip optimizer, budget, meal planning, family picks, backup/export; 380+ tests green. The v2 release
+is blocked on user-side hand-offs (JDK 17 + Android SDK 36, signing keystore, Azure budget cap) and
+the physical 6-month receipt backfill. **Current status + known gaps: `V2_FOLLOWUPS.md`.**
 
 ## Layout
 
@@ -23,7 +24,9 @@ Grocery_Sense_Main/                 # repo root
 ```
 
 Project dependency graph (no cycles):
-`Data → (none)`, `Integrations → (none)`, `Core → Data + Integrations`, `App`/`Tests → all three`.
+`Data → (none)`, `Core → Data`, `Integrations → Core` (implements the `Core/Abstractions` interfaces),
+`App`/`Tests → all`. Core never references Integrations — the OCR/flyer clients bind via
+`IReceiptOcrClient` / `IFlyerLayoutClient` / `IFlyerProvider` in the App composition root.
 
 Domain records live in **Data** (not Core) so Data stays dependency-free and Core can both call repos
 and use their return types without a circular reference — no repo interfaces needed.
@@ -56,29 +59,21 @@ dotnet build Grocery_Sense/GrocerySense.App/GrocerySense.App.csproj -f net10.0-w
 `dotnet build GrocerySense.sln` will try every App TFM and **fails on Windows** because iOS/macCatalyst
 can't build without a Mac. Build per-TFM as above, or set up a Mac/CI for the Apple heads.
 
-## How to port (the sequence)
+## Docs
 
-Full module/function/schema inventory + rationale: **`reference-python/ARCHITECTURE.md`**. Order
-(service-layer inward, not screen-by-screen — the money math is the product):
-
-1. **Golden tests first.** Port `reference-python/tests/price_intelligence/test_unit_normalization.py`
-   and `test_multibuy_parser.py` into `GrocerySense.Tests` and assert against the (still-stubbed)
-   services. Freezes the math before you touch it.
-2. **Data foundation.** `SqliteConnectionFactory` (pragmas) → `Database` as a **numbered migration
-   ledger** (fold the Python feature-local DDL in) → the 9 repos with raw SQL + batch chunking.
-3. **Price math.** `UnitNormalizationService`, `MultiBuyDealService`, `PriceHistoryService`,
-   `IngredientMappingService` (FuzzySharp), `PreferencesService`.
-4. **Planning.** `ShoppingListService`, `PlanningService`, `BasketOptimizerService`, `PriceDropAlertService`.
-5. **Ingest.** `AzureReceiptOcrClient` (pure) + `ReceiptIngestionService` (dedupe/mapping/DB writes) —
-   the Python `azure_docint_client` was one mixed file; it's deliberately split here.
-6. **UI.** Start with **5 Blazor routes** (Receipts, Shopping List, Deals, Plan, Preferences), not all
-   16 windows. Defer admin screens. Bind pages to services via DI (`ServiceCollectionExtensions.cs`).
+- **`V2_FOLLOWUPS.md`** — current status, known gaps, and §4 bug-fixing landmines (read before bug work).
+- `V2_PLAN.md` / `IMPLEMENTATION_NOTES.md` — v2 phase plan + running decision log.
+- `PORTING.md` / `CONTRACT_AUDIT.md` — historical v1 playbook + Port/Replace/Defer ledger
+  (status boxes frozen mid-port; the conventions are still binding).
+- `Grocery_Sense/CLAUDE.md` — agent/contributor conventions for the C# solution.
+- `reference-python/` (+ its `ARCHITECTURE.md`) — the retired Python prototype, read-only port reference.
+- `archive/` — superseded docs (old handoffs), kept for history.
 
 ## Azure credentials
 
-OCR creds (`DOCUMENTINTELLIGENCE_ENDPOINT` / `_API_KEY`) are read inside `AzureReceiptOcrClient`. For
-local dev use `dotnet user-secrets` or a non-committed `appsettings.Development.json`. **Do not commit
-keys.**
+OCR creds resolve at App composition: env vars (`GROCERY_SENSE_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` /
+`_API_KEY`) or MAUI SecureStorage keys set in-app via Preferences → Cloud OCR (Azure). **Do not commit
+or hardcode keys.**
 
 > Known deferred issue (intentionally left for a later version): a shipped mobile app cannot safely
 > hold a shared Azure key — anyone can extract it and run up the bill. Before public release, route OCR

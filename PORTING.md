@@ -1,5 +1,9 @@
 # Grocery Sense — Python → C# Porting Playbook
 
+> **⚠️ HISTORICAL — status frozen mid-v1.** The checkboxes and the "every service is a stub" framing below
+> are stale: v1 Phases 0–9 **and** v2 (`V2_PLAN.md`) are done. Current state lives in `V2_FOLLOWUPS.md`.
+> The conventions and locked product decisions in this file are still binding.
+
 Step-by-step, ordered, checkbox guide for filling in the scaffold.
 
 **Honest state of the scaffold:** every C# service/repo is a stub that

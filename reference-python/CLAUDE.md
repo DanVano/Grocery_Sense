@@ -1,5 +1,9 @@
 # Grocery Sense — CLAUDE.md
 
+> **READ-ONLY PORT REFERENCE.** This file describes the retired Python/Tkinter prototype, not the active
+> project. The product is the C# app in `../Grocery_Sense/` — its `CLAUDE.md` holds the live conventions.
+> Do not run, fix, or extend the Python code; it exists only as the porting spec.
+
 ## Overview
 
 Desktop grocery shopping optimizer for families. Tracks prices from receipts (Azure Document Intelligence OCR) and store flyers, manages a shared household shopping list, suggests meals from deals and member preferences, and optimizes multi-store trips. Single-user desktop app, local SQLite, no server.
