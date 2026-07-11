@@ -1,0 +1,132 @@
+using System.Net;
+using System.Text;
+using GrocerySense.Integrations;
+using Xunit;
+
+namespace GrocerySense.Tests;
+
+// Canned-JSON tests only — never live HTTP. The backflipp API is unofficial; these tests pin OUR mapping
+// and failure behavior, not Flipp's schema.
+public sealed class FlippClientTests
+{
+    private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> fn) : HttpMessageHandler
+    {
+        public List<string> Urls { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Urls.Add(request.RequestUri!.ToString());
+            return Task.FromResult(fn(request));
+        }
+    }
+
+    private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json"),
+    };
+
+    private const string FlyersJson =
+        """
+        {"flyers":[
+            {"id":101,"merchant":"No Frills Ontario","valid_from":"2026-07-09T00:00:00-04:00","valid_to":"2026-07-16T00:00:00-04:00"},
+            {"id":202,"merchant":"Walmart","valid_from":"2026-07-09T00:00:00-04:00","valid_to":"2026-07-16T00:00:00-04:00"}
+        ]}
+        """;
+
+    private const string ItemsJson =
+        """
+        [
+            {"name":"Gala Apples","current_price":"1.99","sale_story":"2/$5","description":"Product of Canada","page":3},
+            {"name":"Whole Chicken","current_price":8.99},
+            {"name":"","current_price":2.00}
+        ]
+        """;
+
+    private static (FlippClient Client, FakeHandler Handler) Build(Func<HttpRequestMessage, HttpResponseMessage> fn)
+    {
+        var handler = new FakeHandler(fn);
+        return (new FlippClient(new HttpClient(handler)), handler);
+    }
+
+    [Fact]
+    public async Task Maps_matching_merchant_flyer_items_to_provider_deals()
+    {
+        var (client, handler) = Build(req =>
+            req.RequestUri!.AbsolutePath.EndsWith("/flyer_items") ? Json(ItemsJson) : Json(FlyersJson));
+
+        var deals = await client.FetchFlyersForStoreAsync("No Frills", "M5V 1A1");
+
+        Assert.Equal(2, deals.Count); // blank-name item dropped
+        var apples = deals[0];
+        Assert.Equal("Gala Apples", apples["title"]);
+        Assert.Equal("2/$5", apples["price_text"]);          // promo phrase wins over the plain price
+        Assert.Equal(1.99, (double)apples["unit_price"]!, 4); // string price parsed
+        Assert.Equal("Product of Canada", apples["description"]);
+        Assert.Equal("2026-07-09", apples["valid_from"]);     // flyer window, date-only
+        Assert.Equal("2026-07-16", apples["valid_to"]);
+        Assert.Equal(3.0, (double)apples["page_index"]!, 4);
+
+        var chicken = deals[1];
+        Assert.Equal("$8.99", chicken["price_text"]); // no promo phrase -> plain price text
+
+        // Only flyer 101 (No Frills) was fetched; Walmart's 202 was filtered out.
+        Assert.Equal(2, handler.Urls.Count);
+        Assert.Contains("/flyers/101/flyer_items", handler.Urls[1]);
+
+        // Postal code is normalized (spaces stripped, uppercased) into the flyers query.
+        Assert.Contains("postal_code=M5V1A1", handler.Urls[0]);
+    }
+
+    [Fact]
+    public async Task Bare_array_flyers_root_is_accepted()
+    {
+        var (client, _) = Build(req =>
+            req.RequestUri!.AbsolutePath.EndsWith("/flyer_items")
+                ? Json(ItemsJson)
+                : Json("""[{"id":7,"merchant":"NoFrills","valid_from":"2026-07-09","valid_to":"2026-07-16"}]"""));
+
+        var deals = await client.FetchFlyersForStoreAsync("No Frills", "M5V");
+        Assert.Equal(2, deals.Count);
+    }
+
+    [Fact]
+    public async Task No_matching_merchant_returns_empty_without_item_fetches()
+    {
+        var (client, handler) = Build(_ => Json(FlyersJson));
+        var deals = await client.FetchFlyersForStoreAsync("Costco", "M5V");
+        Assert.Empty(deals);
+        Assert.Single(handler.Urls); // just the flyers listing
+    }
+
+    [Fact]
+    public async Task Http_error_throws_loud()
+    {
+        var (client, _) = Build(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+    }
+
+    [Fact]
+    public async Task Unexpected_response_shape_throws_loud()
+    {
+        var (client, _) = Build(_ => Json("""{"totally":"different"}"""));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+    }
+
+    [Fact]
+    public async Task Missing_postal_code_throws_with_actionable_message()
+    {
+        var (client, _) = Build(_ => Json(FlyersJson));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => client.FetchFlyersForStoreAsync("No Frills", "  "));
+        Assert.Contains("Preferences", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("No Frills Ontario", "No Frills", true)]
+    [InlineData("NoFrills", "No Frills", true)]
+    [InlineData("no frills", "No Frills West", true)] // containment works both directions
+    [InlineData("Walmart", "No Frills", false)]
+    [InlineData("", "No Frills", false)]
+    public void MerchantMatches_uses_normalized_containment(string merchant, string store, bool expected)
+        => Assert.Equal(expected, FlippClient.MerchantMatches(merchant, store));
+}

@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GrocerySense.Core\GrocerySense.Core.csproj" />
+    <InternalsVisibleTo Include="GrocerySense.Tests" />
   </ItemGroup>
 
   <ItemGroup>

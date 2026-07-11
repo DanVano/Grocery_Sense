@@ -5,6 +5,7 @@ using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
+using Microsoft.Data.Sqlite;
 
 namespace GrocerySense.Core;
 
@@ -12,9 +13,13 @@ namespace GrocerySense.Core;
 // via the provider and persists them into flyer_batches + flyer_deals.
 //
 // Throttled to at most twice a week (every 3.5 days); force=true bypasses it (the manual Sync button).
-// The provider is the FlippClient stub today (returns nothing), so a real sync inserts no deals until a
-// provider is wired — by design (don't fabricate deals). The meta timestamp lives beside the DB in the
-// writable app-data dir (NOT a source-relative path — mobile revokes those).
+// The meta timestamp lives beside the DB in the writable app-data dir (NOT a source-relative path —
+// mobile revokes those).
+//
+// Deals are enriched BEFORE insert (same prep FlyerIngestService.BuildDeal does: multi-buy adjust ->
+// unit guess -> item mapping -> unit normalization) — without item_id + norm prices a synced deal never
+// joins GetActiveFlyerPricesBatch, i.e. never reaches the optimizer/badges/alerts. Flyers never
+// auto-create items: an unmapped title keeps item_id NULL.
 public sealed class FlyerSyncService
 {
     public const double SyncIntervalDays = 3.5;
@@ -22,16 +27,23 @@ public sealed class FlyerSyncService
     private readonly IFlyerProvider _provider;
     private readonly SqliteConnectionFactory _factory;
     private readonly ConfigStore _config;
+    private readonly IngredientMappingService _mapper;
+    private readonly UnitNormalizationService _unitNorm;
+    private readonly MultiBuyDealService _multibuy;
     private readonly FlyersRepo _repo = new();
     private readonly string _metaPath;
 
     private static readonly Regex IsoDate = new(@"^\d{4}-\d{2}-\d{2}$");
 
-    public FlyerSyncService(IFlyerProvider provider, SqliteConnectionFactory factory, ConfigStore config)
+    public FlyerSyncService(IFlyerProvider provider, SqliteConnectionFactory factory, ConfigStore config,
+        IngredientMappingService mapper, UnitNormalizationService unitNorm, MultiBuyDealService multibuy)
     {
         _provider = provider;
         _factory = factory;
         _config = config;
+        _mapper = mapper;
+        _unitNorm = unitNorm;
+        _multibuy = multibuy;
         var dir = Path.GetDirectoryName(factory.DbPath) is { Length: > 0 } d ? d : ".";
         _metaPath = Path.Combine(dir, "flyer_sync_meta.json");
     }
@@ -95,7 +107,7 @@ public sealed class FlyerSyncService
                 using var tx = conn.BeginTransaction();
                 var flyerId = _repo.CreateFlyerBatch(conn, store.Id, validFrom, validTo,
                     sourceType: "flipp_api", sourceRef: $"auto_sync_{defaultFrom}", note: $"Auto-sync {defaultFrom}", tx: tx);
-                var rows = rawDeals.Select(d => MapDeal(flyerId, store.Id, d)).ToList();
+                var rows = rawDeals.Select(d => EnrichDeal(conn, tx, MapDeal(flyerId, store.Id, d))).ToList();
                 dealsInserted += _repo.AddDeals(conn, rows, tx);
                 tx.Commit();
             }
@@ -105,8 +117,54 @@ public sealed class FlyerSyncService
             }
         }
 
+        // The mapper buffers auto-learned aliases during EnrichDeal; flush them once per sync (own conn).
+        _mapper.FlushLearnedAliases();
+
         WriteLastSyncUtc(DateTimeOffset.UtcNow);
         return new FlyerSyncResult(storesSynced, dealsInserted, null, errors);
+    }
+
+    // Same per-deal prep as FlyerIngestService.BuildDeal, applied to a provider row: promo phrase -> effective
+    // unit price, observed-unit guess, item mapping (no auto-create), unit normalization inside the caller's tx.
+    private FlyerDeal EnrichDeal(SqliteConnection conn, SqliteTransaction tx, FlyerDeal d)
+    {
+        var title = d.Title ?? "";
+        var description = string.IsNullOrEmpty(d.Description) ? title : d.Description!;
+        var combined = $"{title} {description}".Trim();
+        if (combined.Length == 0) return d;
+
+        var adj = _multibuy.Adjust($"{title} {d.PriceText ?? ""}".Trim(), quantity: 1.0,
+            unitPrice: ToDouble(d.UnitPrice), lineTotal: ToDouble(d.DealTotal), discount: null);
+
+        var observedUnit = _unitNorm.GuessUnitFromText(combined);
+        if (observedUnit == "unknown") observedUnit = "each";
+
+        int? itemId = null;
+        double? mapConf = null;
+        var normUnitPrice = adj.UnitPrice;
+        var normUnit = observedUnit;
+        var normNote = $"flyer;{adj.DealNote}";
+
+        var m = _mapper.MapToItem(combined);
+        if (m.ItemId is not null)
+        {
+            itemId = m.ItemId;
+            mapConf = m.Confidence;
+            if (adj.UnitPrice is not null)
+            {
+                var norm = _unitNorm.Normalize(conn, m.ItemId.Value, adj.UnitPrice.Value, observedUnit, combined, tx);
+                normUnitPrice = norm.NormUnitPrice;
+                normUnit = norm.NormUnit;
+                normNote = $"{norm.Note};{adj.DealNote};flyer";
+            }
+        }
+
+        return d with
+        {
+            DealQty = adj.Quantity, DealTotal = Dec(adj.LineTotal), UnitPrice = Dec(adj.UnitPrice),
+            Unit = observedUnit, NormUnitPrice = Dec(normUnitPrice), NormUnit = normUnit, NormNote = normNote,
+            ItemId = itemId, MappingConfidence = mapConf,
+        };
     }
 
     // Maps a provider deal dict into a flyer_deals row. No item-mapping/unit-norm here (mirrors Python
@@ -172,6 +230,7 @@ public sealed class FlyerSyncService
         float f => f,
         int i => i,
         long l => l,
+        decimal m => (double)m,
         JsonElement je when je.ValueKind == JsonValueKind.Number => je.GetDouble(),
         _ => double.TryParse(o.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var p) ? p : null,
     };

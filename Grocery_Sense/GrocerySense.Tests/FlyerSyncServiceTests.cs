@@ -45,7 +45,8 @@ public sealed class FlyerSyncServiceTests : IDisposable
         ["title"] = title, ["price_text"] = $"${unitPrice}", ["unit_price"] = unitPrice, ["unit"] = "each",
     };
 
-    private FlyerSyncService Build(IFlyerProvider provider) => new(provider, _factory, _config);
+    private FlyerSyncService Build(IFlyerProvider provider) => new(provider, _factory, _config,
+        new IngredientMappingService(_factory), new UnitNormalizationService(), new MultiBuyDealService());
 
     private void WriteMeta(DateTimeOffset dt) => File.WriteAllText(_metaPath, dt.ToString("o"));
 
@@ -135,6 +136,47 @@ public sealed class FlyerSyncServiceTests : IDisposable
         var deals = new FlyersRepo().ListActiveDeals(conn, storeId: storeB);
         Assert.Equal(2, deals.Count);
         Assert.Contains(deals, d => d.Title == "Apples" && d.UnitPrice == 2.50m);
+    }
+
+    // Deals are enriched before insert: item mapping + multi-buy effective unit price + norm fields.
+    // Without this a synced deal (item_id NULL) never joins GetActiveFlyerPricesBatch.
+    [Fact]
+    public async Task RunSync_enriches_deals_with_item_mapping_and_effective_unit_price()
+    {
+        using var conn = _factory.Open();
+        var store = StoresRepo.CreateStore(conn, "Mart").Id;
+        var item = ItemsRepo.CreateItem(conn, "Apples").Id;
+        // Alias keyed by the mapper's own normalization of the deal text (title doubles as description).
+        var normalized = new IngredientMappingService(_factory).MapToItem("Apples Apples").NormalizedInput;
+        new ItemAliasesRepo().UpsertAlias(conn, normalized, item, 1.0);
+
+        var provider = new FuncProvider(_ => new[]
+        {
+            new Dictionary<string, object?> { ["title"] = "Apples", ["price_text"] = "2/$5.00" },
+        });
+
+        var result = await Build(provider).RunSyncAsync(force: true);
+
+        Assert.Equal(1, result.DealsInserted);
+        var deal = Assert.Single(new FlyersRepo().ListActiveDeals(conn, storeId: store));
+        Assert.Equal(item, deal.ItemId);
+        Assert.Equal(2.50m, deal.UnitPrice); // "2/$5" -> $2.50 effective unit price
+        Assert.NotNull(deal.NormUnitPrice);
+        Assert.Contains("bundle", deal.NormNote);
+    }
+
+    [Fact]
+    public async Task RunSync_keeps_item_id_null_for_unmapped_titles()
+    {
+        using var conn = _factory.Open();
+        var store = StoresRepo.CreateStore(conn, "Mart").Id;
+
+        var provider = new FuncProvider(_ => new[] { Deal("Zorbulon Crisps", 3.99) });
+        await Build(provider).RunSyncAsync(force: true);
+
+        var deal = Assert.Single(new FlyersRepo().ListActiveDeals(conn, storeId: store));
+        Assert.Null(deal.ItemId); // flyers never auto-create items
+        Assert.Equal(3.99m, deal.UnitPrice);
     }
 
     // ---------------- FlyerSyncScheduler (sync-on-resume) ----------------

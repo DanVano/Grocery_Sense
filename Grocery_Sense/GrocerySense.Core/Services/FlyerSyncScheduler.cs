@@ -33,12 +33,15 @@ public sealed class FlyerSyncScheduler
             var result = await _sync.RunSyncAsync(force, ct);
             if (result.Ran && SyncCompleted is { } handlers)
             {
+                // Disclosed degrade: the sync succeeded; a failed post-sync hook must not be reported as a
+                // sync failure, but must not vanish either. Deals.razor renders Errors. The scheduler stays
+                // generic — it doesn't know what subscribers do. Single-subscriber assumption: a multicast
+                // invoke stops at the first throwing handler; only the DI alert-refresh hook subscribes today,
+                // so no per-handler dispatch until a second subscriber exists.
                 try { handlers(result); }
                 catch (Exception ex)
                 {
-                    // Disclosed degrade: the sync succeeded; a failed post-sync hook (alert refresh) must not
-                    // be reported as a sync failure, but must not vanish either. Deals.razor renders Errors.
-                    result = result with { Errors = [.. result.Errors, $"Post-sync alert refresh failed: {ex.Message}"] };
+                    result = result with { Errors = [.. result.Errors, $"Post-sync hook failed: {ex.Message}"] };
                 }
             }
             return result;
