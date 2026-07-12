@@ -2,8 +2,9 @@
 
 .NET 10 / C# / MAUI Blazor Hybrid (MudBlazor) grocery-savings app: receipt OCR → price
 intelligence → smart shopping list / deals / trip plan / budget. C# port of a Python original.
-Local-only (no accounts), Android-first, CAD/en-CA. v1 + v2 feature code done; the v2 release is
-blocked on user-side hand-offs (Android toolchain, keystore) — current status: `../V2_FOLLOWUPS.md`.
+Local-only (no accounts), CAD/en-CA. **Product targets: Android + iOS ONLY (2026-07-11 decision) —
+the Windows head is a dev-only harness, not a shipping target.** v1 + v2 feature code done; the v2
+release is blocked on user-side hand-offs (Android toolchain, keystore) — current status: `../V2_FOLLOWUPS.md`.
 
 ## Docs (one level up — code repo is `Grocery_Sense/`, planning lives in `Grocery_Sense_Main/`)
 - `../V2_FOLLOWUPS.md` — what's left + known gaps; **§4 bug-fixing landmines — read before touching merge/backfill/export/alert code.**
@@ -41,7 +42,7 @@ blocked on user-side hand-offs (Android toolchain, keystore) — current status:
 ```powershell
 dotnet test GrocerySense.Tests                                 # class libs + tests (SDK pinned by ../global.json)
 dotnet build GrocerySense.Integrations                         # REQUIRED after touching Azure/Flipp clients — dotnet test does NOT build this project
-dotnet build GrocerySense.App -f net10.0-windows10.0.19041.0   # Windows head; launch the exe from bin\Debug\...\win-x64\
+dotnet build GrocerySense.App -f net10.0-windows10.0.19041.0   # Windows head — DEV-ONLY harness, not a product target (retire as a verification target once the Android head builds); exe under bin\Debug\...\win-x64\
 ```
 - `dotnet build GrocerySense.sln` FAILS on Windows (iOS/macCatalyst heads need a Mac) — build per project/TFM as above.
 - Run `dotnet test` unpiped before committing — `dotnet test | tail` in an `&&` chain returns tail's exit code and can commit red.
