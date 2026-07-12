@@ -43,6 +43,38 @@ public sealed class ShoppingListService
             addedBy: addedBy, addedByMemberId: addedByMemberId, plannedStoreId: plannedStoreId, itemId: itemId);
     }
 
+    // Add a flyer deal to the active list. A mapped deal (ItemId set + item still exists) resolves to the
+    // canonical item name so the row joins Shop Mode price intel and the optimizer; an unmapped deal (or one
+    // whose item was deleted) lands as a plain reminder line, disclosed in notes — we never force-create an
+    // item from flyer text, and never link a shopping row to a missing item_id (FK safety). Quantity is always
+    // 1: flyer promo phrases ("2/$5") don't carry a reliable buy quantity (MultiBuyDealService parses effective
+    // price, not offer count). Returns the new row id.
+    public int AddDealToList(FlyerDeal deal)
+    {
+        using var conn = _factory.Open();
+
+        string? canonical = null;
+        if (deal.ItemId is { } itemId && ItemsRepo.GetItemsByIds(conn, [itemId]).TryGetValue(itemId, out var item))
+            canonical = item.CanonicalName;
+
+        var mapped = canonical is not null;
+        var name = mapped ? canonical! : DealTitle(deal);
+        var note = mapped ? DealNote(deal) : $"{DealNote(deal)} · not price-tracked";
+        var itemLink = mapped ? deal.ItemId : null;   // drop the link when the item didn't resolve
+
+        return ShoppingListRepo.AddItem(conn, name, quantity: 1.0, unit: deal.Unit ?? "", category: "",
+            notes: note, plannedStoreId: deal.StoreId, itemId: itemLink);
+    }
+
+    private static string DealTitle(FlyerDeal d) =>
+        d.Title is { Length: > 0 } t ? t : d.Description is { Length: > 0 } de ? de : "(deal)";
+
+    private static string DealNote(FlyerDeal d) =>
+        d.PriceText is { Length: > 0 } pt ? $"From deal: {pt}"
+        : d.UnitPrice is decimal up
+            ? $"From deal: ${up.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}{(d.Unit is { Length: > 0 } u ? $"/{u}" : "")}"
+            : "From deal";
+
     public void SoftDeleteItem(int itemId)
     {
         using var conn = _factory.Open();

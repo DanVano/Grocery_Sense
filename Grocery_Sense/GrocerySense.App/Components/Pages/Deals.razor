@@ -8,6 +8,8 @@
 @inject PreferencesService Prefs
 @inject FlyerSyncScheduler Sync
 @inject MultiBuyDealService MultiBuy
+@inject ShoppingListService Shopping
+@inject ISnackbar Snackbar
 
 <MudText Typo="Typo.h5" GutterBottom="true">Deals</MudText>
 
@@ -60,30 +62,35 @@ else
                 @foreach (var deal in group.Deals)
                 {
                     <MudListItem T="int">
-                        <MudText Typo="Typo.body2">
-                            @DealLabel(deal.Row)
-                            @if (deal.EffectiveUnit is double eff)
-                            {
-                                <span> = $@eff.ToString("0.00") ea</span>
-                            }
-                            @if (deal.EffectiveUnit is double e && deal.UsualPrice is double usual)
-                            {
-                                @if (usual > 0 && (usual - e) / usual * 100.0 >= VerdictBelowUsualPct)
+                        <div class="d-flex align-center gap-1">
+                            <MudText Typo="Typo.body2">
+                                @DealLabel(deal.Row)
+                                @if (deal.EffectiveUnit is double eff)
                                 {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">
-                                        ↓ @(((usual - e) / usual * 100.0).ToString("0"))% vs usual
-                                    </MudChip>
+                                    <span> = $@eff.ToString("0.00") ea</span>
                                 }
-                                else
+                                @if (deal.EffectiveUnit is double e && deal.UsualPrice is double usual)
                                 {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">≈ usual — skip</MudChip>
+                                    @if (usual > 0 && (usual - e) / usual * 100.0 >= VerdictBelowUsualPct)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success">
+                                            ↓ @(((usual - e) / usual * 100.0).ToString("0"))% vs usual
+                                        </MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default">≈ usual — skip</MudChip>
+                                    }
                                 }
-                            }
-                            @if (deal.SoftExcluded)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Default">avoid</MudChip>
-                            }
-                        </MudText>
+                                @if (deal.SoftExcluded)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">avoid</MudChip>
+                                }
+                            </MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart" Size="Size.Small"
+                                           OnClick="@(() => AddDealAsync(deal.Row))" aria-label="Add to shopping list" />
+                        </div>
                     </MudListItem>
                 }
             </MudList>
@@ -224,6 +231,23 @@ else
             _syncCts?.Dispose();
             _syncCts = null;
         }
+    }
+
+    // Add a deal to the active shopping list. Mapped deals land under their store with price intel; unmapped
+    // deals land as a disclosed text row (see ShoppingListService.AddDealToList). List is user-managed —
+    // duplicates are allowed, no dedupe.
+    private async Task AddDealAsync(FlyerDeal deal)
+    {
+        try
+        {
+            var name = await Task.Run(() =>
+            {
+                Shopping.AddDealToList(deal);
+                return DealLabel(deal);
+            });
+            Snackbar.Add($"Added {name} — see Shopping List", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Couldn't add: {ex.Message}", Severity.Error); }
     }
 
     private void CancelSync() => _syncCts?.Cancel();
