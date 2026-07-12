@@ -106,7 +106,7 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        var item = svc.EnsureItemExists("Cheese");
+        var item = svc.GetOrCreateItem("Cheese");
         PricesRepo.AddPricePoint(db.Conn, item.Id, store, 8.00, "each"); // dated today
         PricesRepo.AddPricePoint(db.Conn, item.Id, store, 8.00, "each");
         PricesRepo.AddPricePoint(db.Conn, item.Id, store, 8.00, "each");

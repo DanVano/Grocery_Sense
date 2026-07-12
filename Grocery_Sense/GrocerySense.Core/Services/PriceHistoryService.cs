@@ -39,12 +39,6 @@ public sealed class PriceHistoryService
                ?? ItemsRepo.CreateItem(conn, clean, category: category, defaultUnit: defaultUnit);
     }
 
-    public Item EnsureItemExists(string canonicalName)
-    {
-        using var conn = _factory.Open();
-        return GetOrCreateItem(conn, canonicalName);
-    }
-
     // ---------- recording prices ----------
 
     public int RecordPriceFromReceipt(string itemName, int storeId, double unitPrice, string unit,
@@ -124,32 +118,6 @@ public sealed class PriceHistoryService
         return outMap;
     }
 
-    // Per-store aggregation over a trailing window.
-    public StoreStats StatsForItemByStore(int itemId, int storeId, int windowDays)
-    {
-        using var conn = _factory.Open();
-        var points = PricesRepo.GetPricesForItem(conn, itemId, storeId, windowDays);
-
-        var prices = new List<double>();
-        var units = new List<string>();
-        var dates = new List<string>();
-        foreach (var p in points)
-        {
-            prices.Add(p.UnitPrice);
-            if (!string.IsNullOrWhiteSpace(p.Unit)) units.Add(p.Unit.Trim());
-            if (!string.IsNullOrEmpty(p.Date)) dates.Add(p.Date);
-        }
-
-        var unitHint = units.Count > 0
-            ? units.GroupBy(u => u).OrderByDescending(g => g.Count()).First().Key   // mode; stable -> first-seen on ties
-            : "";
-        var mostRecent = dates.Count > 0 ? dates.Max()! : "";
-
-        if (prices.Count == 0)
-            return new StoreStats(null, null, null, 0, unitHint, mostRecent);
-        return new StoreStats(prices.Average(), prices.Min(), prices.Max(), prices.Count, unitHint, mostRecent);
-    }
-
     // Classify a candidate unit price vs an inflation-adjusted, recency-weighted baseline over a ~730-day
     // window (Stage 4 I1). The baseline lifts each past price to today's dollars; min/max stay NOMINAL for the
     // historical-range line (adjusting them would fabricate prices that never existed). PriceDropAlert and
@@ -216,18 +184,6 @@ public sealed class PriceHistoryService
         }
 
         return new DealClassification(item, true, classification, percent, baseline, min, max, count, message);
-    }
-
-    public string DescribeItemHistory(string itemName, int windowDays = 365)
-    {
-        var stats = GetItemStats(itemName, windowDays);
-        if (stats is null)
-            return $"No price history found for '{itemName}' in the last {windowDays} days.";
-
-        return $"Price history for '{stats.Item.CanonicalName}' (last {windowDays} days):\n" +
-               $"  • Average: {F2(stats.AvgUnitPrice!.Value)} per unit\n" +
-               $"  • Range:   {F2(stats.MinUnitPrice!.Value)} – {F2(stats.MaxUnitPrice!.Value)}\n" +
-               $"  • Samples: {stats.SampleCount} data points";
     }
 
     private static string Today() => DateTime.Today.ToString("yyyy-MM-dd");

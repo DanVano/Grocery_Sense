@@ -17,15 +17,7 @@ public sealed class ConfigStore
     private const string RoleMaster = "master";
     private const string RoleSecondary = "secondary";
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        // ponytail: no sort_keys (Python had it for stable diffs); STJ has no built-in key sort and it isn't load-bearing.
-    };
-
     private readonly string _configFile;
-    private readonly string _cacheFile;
     private readonly object _sync = new();
 
     private UserConfig? _cache;
@@ -37,7 +29,6 @@ public sealed class ConfigStore
     public ConfigStore(string configDir)
     {
         _configFile = Path.Combine(configDir, "user_config.json");
-        _cacheFile = Path.Combine(configDir, "deals_cache.json");
     }
 
     // ---------------- config load/save ----------------
@@ -155,54 +146,6 @@ public sealed class ConfigStore
                     allergies.Add(token);
         return allergies;
     }
-
-    // ---------------- deals cache (regenerable, 7-day TTL) ----------------
-
-    public object? CacheGet(string key, int maxAgeDays = 7)
-    {
-        var cache = LoadCache();
-        if (!cache.TryGetValue(key, out var entry)) return null;
-        var ageDays = (NowEpoch() - entry.StoredAt) / 86400.0;
-        if (ageDays < 0 || ageDays > maxAgeDays) return null; // reject expired + future-stamped (clock skew).
-        return entry.Value;
-    }
-
-    public void CacheSet(string key, object value, int maxAgeDays = 7)
-    {
-        lock (_sync)
-        {
-            var now = NowEpoch();
-            var cache = LoadCache();
-            cache[key] = new CacheEntry(now, JsonSerializer.SerializeToElement(value, JsonOpts));
-            foreach (var stale in cache
-                         .Where(kv => { var a = (now - kv.Value.StoredAt) / 86400.0; return a < 0 || a > maxAgeDays; })
-                         .Select(kv => kv.Key).ToList())
-                cache.Remove(stale);
-            AtomicWrite(_cacheFile, JsonSerializer.SerializeToUtf8Bytes(cache, JsonOpts));
-        }
-    }
-
-    // ponytail: the deals cache (CacheGet/CacheSet) has NO production callers — it's exercised only by tests,
-    // which run on the Windows head where reflection STJ is fine. So this path is intentionally left on
-    // reflection JsonOpts (not source-gen). If it's ever revived for on-device use, it needs a typed cache
-    // value + a source-gen context — SerializeToElement over an arbitrary `object` can't be AOT-safe.
-    private Dictionary<string, CacheEntry> LoadCache()
-    {
-        if (!File.Exists(_cacheFile)) return new();
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, CacheEntry>>(File.ReadAllText(_cacheFile), JsonOpts)
-                   ?? new();
-        }
-        catch (JsonException)
-        {
-            // The deals cache is regenerable — resetting is acceptable, but disclose it (no silent degrade).
-            Console.Error.WriteLine($"deals_cache.json was corrupt; rebuilding empty cache ({_cacheFile}).");
-            return new();
-        }
-    }
-
-    private sealed record CacheEntry(double StoredAt, JsonElement Value);
 
     // ---------------- internals ----------------
 
@@ -366,10 +309,7 @@ public sealed class ConfigStore
         return fi.Exists ? (fi.LastWriteTimeUtc, fi.Length) : null;
     }
 
-    private static double NowEpoch() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-
-    // temp -> flush(true) -> atomic replace, so a crash mid-write never leaves a truncated file. The caller
-    // supplies UTF-8 bytes so it picks the serializer: source-gen for the config, reflection JsonOpts for the cache.
+    // temp -> flush(true) -> atomic replace, so a crash mid-write never leaves a truncated config file.
     private static void AtomicWrite(string path, byte[] utf8Bytes)
     {
         var dir = Path.GetDirectoryName(path);

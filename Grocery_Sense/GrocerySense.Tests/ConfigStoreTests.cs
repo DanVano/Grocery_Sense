@@ -95,21 +95,6 @@ public sealed class ConfigStoreTests : IDisposable
     }
 
     [Fact]
-    public void DealsCache_set_get_respects_ttl()
-    {
-        var store = New();
-        store.CacheSet("flyers:loblaws", new { count = 3 }, maxAgeDays: 7);
-
-        var hit = store.CacheGet("flyers:loblaws");
-        Assert.NotNull(hit);
-        Assert.Equal(3, ((JsonElement)hit!).GetProperty("count").GetInt32());
-
-        // Expired read (maxAge 0) is a miss; missing key is a miss.
-        Assert.Null(store.CacheGet("flyers:loblaws", maxAgeDays: 0));
-        Assert.Null(store.CacheGet("nope"));
-    }
-
-    [Fact]
     public void Save_raises_Changed_for_prefs_invalidation()
     {
         var store = New();

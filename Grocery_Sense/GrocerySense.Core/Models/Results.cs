@@ -11,9 +11,6 @@ public record NormalizedPrice(double NormUnitPrice, string NormUnit, string Note
 // PriceHistoryService results — typed replacements for the Python dict returns.
 public record ItemStats(Item Item, double? AvgUnitPrice, double? MinUnitPrice, double? MaxUnitPrice, int SampleCount);
 
-public record StoreStats(
-    double? AvgPrice, double? MinPrice, double? MaxPrice, int SampleCount, string UnitHint, string MostRecentDate);
-
 public record DealClassification(
     Item? Item, bool HasHistory, string Classification, double? PercentVsAvg,
     double? AvgUnitPrice, double? MinUnitPrice, double? MaxUnitPrice, int SampleCount, string Message);

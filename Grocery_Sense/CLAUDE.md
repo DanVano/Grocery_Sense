@@ -26,7 +26,7 @@ release is blocked on user-side hand-offs (Android toolchain, keystore) — curr
 - **Money columns are TEXT round-tripping `decimal` — never REAL.** Floats drop cents; keep `decimal` end-to-end. **SQL `SUM`/`AVG` over money is banned — aggregate in C#.**
 - Repos: static classes, signature `(SqliteConnection conn, …, SqliteTransaction? tx = null)` — the caller owns the transaction. Multi-table writes (ingest, merge, plan write-back, migrations) run in ONE transaction and get a no-partial-rows test.
 - A new table with an `item_id` column must be added to BOTH `ItemsAdminRepo.ItemIdTables` and the FK-sweep test's list, or `MergeItems` silently orphans its rows.
-- DB at `FileSystem.AppDataDirectory/grocery_sense.db`; `ConfigStore` JSON (`user_config.json`, `deals_cache.json`) beside it. Preferences live in config JSON, not the DB.
+- DB at `FileSystem.AppDataDirectory/grocery_sense.db`; `ConfigStore` JSON (`user_config.json`) beside it. Preferences live in config JSON, not the DB.
 - Migrations run off the UI thread via `App/Services/AppStartup` (Loading/Ready/Error state machine). A broken DB must be visible — surface the error, never retry silently.
 
 ## Integrations
