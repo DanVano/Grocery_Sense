@@ -59,6 +59,30 @@ public sealed class BudgetService
         return ReceiptsRepo.GetSpendTrend(conn, months);
     }
 
+    // Year-over-year context line for the Budget page (Stage 4 I3). Compares this month's spend to the same
+    // month last year (matched by year-month key — GetTrend is sparse, skipping receipt-free months) and
+    // surfaces the current-year food-inflation rate. Both months must have receipts, else EnoughHistory=false
+    // and nulls — an honest empty state, never a padded number. With ~4 receipts/month the prior-year month
+    // often won't exist yet; it fills in with normal use.
+    public InflationContext GetInflationContext()
+    {
+        var now = DateTime.UtcNow;
+        var currentKey = now.ToString("yyyy-MM");
+        var lastYearKey = now.AddYears(-1).ToString("yyyy-MM");
+
+        var byMonth = GetTrend(13).ToDictionary(p => p.Month, p => p.Total);
+        if (!byMonth.TryGetValue(currentKey, out var current) || !byMonth.TryGetValue(lastYearKey, out var prior)
+            || prior <= 0)
+            return new InflationContext(null, null, EnoughHistory: false);
+
+        var spendYoyPct = (double)((current - prior) / prior) * 100.0;
+
+        var rates = _config.Load().FoodInflationByYear;
+        double? foodPct = rates is not null && rates.TryGetValue(now.Year.ToString(), out var r) ? r : null;
+
+        return new InflationContext(spendYoyPct, foodPct, EnoughHistory: true);
+    }
+
     // Persist a new monthly budget; null/non-positive clears it.
     public void SaveMonthlyBudget(double? amount)
     {

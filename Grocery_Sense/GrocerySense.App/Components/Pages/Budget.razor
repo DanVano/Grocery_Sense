@@ -39,6 +39,20 @@ else
                 @(_status.Remaining is decimal r ? $" — ${r:0.00} remaining" : "")
             </MudText>
         }
+        @if (_inflation is { EnoughHistory: true, SpendYoyPct: double yoy })
+        {
+            <MudText Typo="Typo.caption" Class="d-block mt-2">
+                Your spend @yoy.ToString("+0.0;-0.0")% y/y@(_inflation.FoodInflationPct is double fp
+                    ? $" · CAD food inflation {fp.ToString("+0.0;-0.0", System.Globalization.CultureInfo.InvariantCulture)}%"
+                    : "")
+            </MudText>
+        }
+        else if (_inflation is not null)
+        {
+            <MudText Typo="Typo.caption" Class="d-block mt-2 mud-text-secondary">
+                Not enough history yet for a year-over-year comparison.
+            </MudText>
+        }
     </MudPaper>
 
     <MudPaper Class="pa-3 mb-3" Outlined="true">
@@ -87,6 +101,7 @@ else
 @code {
     private BudgetStatus? _status;
     private IReadOnlyList<SpendTrendPoint>? _trend;
+    private InflationContext? _inflation;
     private double? _budgetInput;
     private bool _busy;
     private string? _error;
@@ -105,7 +120,8 @@ else
         try
         {
             _error = null;
-            (_status, _trend) = await Task.Run(() => (BudgetSvc.GetBudgetStatus(), BudgetSvc.GetTrend()));
+            (_status, _trend, _inflation) = await Task.Run(() =>
+                (BudgetSvc.GetBudgetStatus(), BudgetSvc.GetTrend(), BudgetSvc.GetInflationContext()));
             _budgetInput = _status.Budget is decimal b ? (double)b : null;
         }
         catch (Exception ex) { _error = ex.Message; }

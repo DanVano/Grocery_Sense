@@ -112,4 +112,66 @@ public sealed class BudgetServiceTests : IDisposable
         svc.SaveMonthlyBudget(0); // clears
         Assert.Equal("unset", svc.GetBudgetStatus().Status);
     }
+
+    private static void AddReceiptOn(SqliteConnection conn, int storeId, decimal total, string date)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO receipts (store_id, purchase_date, total_amount, source) VALUES ($s, $d, $t, 'receipt')";
+        cmd.Parameters.AddWithValue("$s", storeId);
+        cmd.Parameters.AddWithValue("$d", date);
+        cmd.Parameters.AddWithValue("$t", total);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static string MonthDate(DateTime d) => d.ToString("yyyy-MM") + "-15";
+
+    [Fact]
+    public void GetInflationContext_reports_yoy_and_food_rate_when_both_months_present()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var now = DateTime.UtcNow;
+        AddReceiptOn(db.Conn, store, 120m, MonthDate(now));            // this month
+        AddReceiptOn(db.Conn, store, 100m, MonthDate(now.AddYears(-1))); // same month last year
+
+        var config = new ConfigStore(_cfgDir);
+        config.Save(config.Load() with
+        {
+            FoodInflationByYear = new Dictionary<string, double> { [now.Year.ToString()] = 4.3 },
+        });
+
+        var ctx = new BudgetService(config, db.Factory).GetInflationContext();
+
+        Assert.True(ctx.EnoughHistory);
+        Assert.Equal(20.0, ctx.SpendYoyPct!.Value, 6); // (120-100)/100
+        Assert.Equal(4.3, ctx.FoodInflationPct);
+    }
+
+    [Fact]
+    public void GetInflationContext_is_empty_without_a_prior_year_month()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        AddReceiptOn(db.Conn, store, 120m, MonthDate(DateTime.UtcNow)); // this month only
+
+        var ctx = new BudgetService(new ConfigStore(_cfgDir), db.Factory).GetInflationContext();
+
+        Assert.False(ctx.EnoughHistory);
+        Assert.Null(ctx.SpendYoyPct);
+        Assert.Null(ctx.FoodInflationPct);
+    }
+
+    [Fact]
+    public void GetInflationContext_is_empty_without_a_current_month()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        AddReceiptOn(db.Conn, store, 100m, MonthDate(DateTime.UtcNow.AddYears(-1))); // prior year only
+
+        var ctx = new BudgetService(new ConfigStore(_cfgDir), db.Factory).GetInflationContext();
+
+        Assert.False(ctx.EnoughHistory);
+        Assert.Null(ctx.SpendYoyPct);
+    }
 }

@@ -25,6 +25,12 @@ public record BudgetStatus(
     double? PctUsed, bool? OverBudget, string Status,
     decimal ProjectedSpend, string ProjectedStatus);
 
+// Budget year-over-year context (Stage 4 I3). SpendYoyPct is the household's own spend change (NOT a price
+// index); FoodInflationPct is the current-year rate from the editable table (null when that year is absent).
+// EnoughHistory is false when this month or the same month last year has no receipts — surface an honest
+// "not enough history yet" instead of a fabricated number.
+public record InflationContext(double? SpendYoyPct, double? FoodInflationPct, bool EnoughHistory);
+
 public record DealAdjusted(double Quantity, double? UnitPrice, double? LineTotal, string DealNote);
 
 public record MappingResult(int? ItemId, string? CanonicalName, double Confidence, string Method, string NormalizedInput);
