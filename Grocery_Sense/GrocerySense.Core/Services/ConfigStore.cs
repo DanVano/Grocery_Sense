@@ -233,6 +233,10 @@ public sealed class ConfigStore
         MaxStores = c.MaxStores > 0 ? c.MaxStores : 3,
         MinItemSavingPct = c.MinItemSavingPct > 0 ? c.MinItemSavingPct : 0.10,
         MinStoreSaving = c.MinStoreSaving > 0 ? c.MinStoreSaving : 5.0,
+        // Seed the StatCan defaults only when absent (null/empty) — a user-edited table is left untouched.
+        FoodInflationByYear = c.FoodInflationByYear is { Count: > 0 }
+            ? c.FoodInflationByYear
+            : new Dictionary<string, double>(InflationRates.Seed),
         Household = EnsureHousehold(c.Household),
     };
 

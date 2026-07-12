@@ -191,4 +191,7 @@ public record UserConfig(
     // BasketOptimizer settings (single-profile). Defaults are the redesign's tuning starting points.
     int MaxStores = 3,
     double MinItemSavingPct = 0.10,
-    double MinStoreSaving = 5.0);
+    double MinStoreSaving = 5.0,
+    // Editable CAD food-inflation rate table {year-string -> annual %}. null on older configs; ConfigStore
+    // seeds InflationRates.Seed when absent and never overwrites a user-edited table (Stage 4 I0).
+    IReadOnlyDictionary<string, double>? FoodInflationByYear = null);

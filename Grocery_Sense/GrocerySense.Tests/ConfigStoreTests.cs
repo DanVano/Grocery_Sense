@@ -118,4 +118,24 @@ public sealed class ConfigStoreTests : IDisposable
         store.Save(store.Load());
         Assert.Equal(1, fired);
     }
+
+    [Fact]
+    public void FoodInflation_seeds_defaults_when_absent()
+    {
+        var cfg = New().Load();
+        Assert.NotNull(cfg.FoodInflationByYear);
+        Assert.Equal(InflationRates.Seed["2022"], cfg.FoodInflationByYear!["2022"]);
+    }
+
+    [Fact]
+    public void FoodInflation_roundtrips_and_user_edits_are_not_clobbered()
+    {
+        var store = New();
+        var edited = new Dictionary<string, double>(store.Load().FoodInflationByYear!) { ["2026"] = 5.1 };
+        store.Save(store.Load() with { FoodInflationByYear = edited });
+
+        // Fresh instance -> reads from disk; Normalize must not re-seed over the edit.
+        var reloaded = New().Load();
+        Assert.Equal(5.1, reloaded.FoodInflationByYear!["2026"]);
+    }
 }
