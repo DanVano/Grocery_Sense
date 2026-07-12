@@ -5,17 +5,23 @@ Refreshed **2026-07-11**. v2 feature code (Phases 1/2/4/5/6), the July code-revi
 are done on `V2_Features_Implementation_Phase2` (**19 commits ahead of origin, not pushed**).
 State at write time: **416 tests green, 0 skipped; Windows head builds 0/0; Integrations builds 0/0.**
 
+**Product targets (decided 2026-07-11): Android + iOS ONLY.** All new features, updates, and bug
+fixes target the mobile apps. The Windows head stays only as a dev harness (build checks + fixture
+verification) until the Android head runs on this machine, then retires as a verification target.
+
 The food-savings commits: `673d2bd` Shop Mode store groups + Buy/Stock-up/Wait badges + persisted
 stock-up qty (migration 6) + multi-buy verdict chips · `688c403` **real Flipp provider** (unofficial
 backflipp) + deal enrichment · `e676b4f` pantry likely-have hints + budget trip check · `d0ac9f0`
 unit-price comparator page + cheaper same-category swaps (with coverage guard).
 
-**Next step before the platform work: `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`** (push/merge/tag baseline;
-verdict on remaining backend items).
+**The active execution plan is `V3_Phase0_plan.md`** (master: Android bring-up → backfill →
+inflation feature → iOS; merges the platform plan, the backfill grill protocol, and
+`INFLATION_ADJUSTMENT_PLAN.md`). `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md` = the git-closeout detail it
+starts with (push/merge/tag baseline).
 
 Per-phase detail: `V2_PLAN.md` (plan + status) · `IMPLEMENTATION_NOTES.md` (decisions). Resolved
-review records live in `archive/` (`CODE_REVIEW_FINDINGS_2026_07.md`, the executed SyncCompleted plan);
-`SECURITY_REVIEW_FUTURE_WORK.md` stays live (standing v3 notes).
+review records (July code-review findings, the executed SyncCompleted plan) were verified implemented
+and deleted 2026-07-11; `SECURITY_REVIEW_FUTURE_WORK.md` stays live (standing v3 notes).
 
 ---
 
@@ -26,14 +32,18 @@ review records live in `archive/` (`CODE_REVIEW_FINDINGS_2026_07.md`, the execut
 | **Android build** | This machine has only **JDK 8** | `winget install Microsoft.OpenJDK.17`, then elevated `sdkmanager … "platforms;android-36" "build-tools;36.0.0"` (SDK is under `C:\Program Files (x86)\Android\android-sdk`), then `dotnet build … -f net10.0-android`. Commands in `V2_PLAN.md` Phase 0. |
 | **Release keystore** | Signing key = a secret the user must own | `keytool -genkeypair -v -keystore grocerysense-release.keystore -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000`. **Back it up off-machine.** Lose it → testers uninstall/reinstall and lose local data. |
 | **Signed v2 APK + on-device smoke** | Needs the two above | `dotnet publish -f net10.0-android -c Release`; smoke every route (§2 list); sideload to the ring (manual reinstall). |
-| **Azure OCR budget cap** | External portal | Set the cap + check per-page cost **before** the ~50–150-receipt backfill scan. |
+| **Azure OCR budget cap** | External portal | Set the cap + check per-page cost **before** the ~50-receipt backfill scan. |
 | **iOS head** | **Needs a Mac build host (Xcode) + Apple Developer account — impossible on this PC alone** | Was parked in the v3 gate (§5). Pulling it forward means Mac hardware (or a cloud Mac / CI) *first*; the shared C#/Blazor code is platform-neutral, so the work is toolchain + head config + device smoke, not a rewrite. |
 | **Phase 3 tuning** | No corpus exists | Requires the physical backfill first (below). Then: measure + adjust fuzzy (0.78/0.90), optimizer (3 / 10% / $5), alert (15% / 5% / staple) thresholds; record verdicts in `IMPLEMENTATION_NOTES.md`. |
 
 Also outstanding: **push the 19 local commits**, then merge `V2_Features_Implementation_Phase2` → `main`
 and tag the v2 code baseline (steps in `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`).
 
-**The linchpin is the physical 6-month paper backfill.** It unblocks Phase 3 and turns on every
+**The linchpin is the physical paper backfill** — corpus reality (counted 2026-07-11): **50 receipts
+spanning the last 12 months**, most crumpled, oldest fading (do it soon). Session protocol grilled
+2026-07-11: `Grocery_Sense/brainstorms/2026-07-11-receipt-backfill-session-grill.md` (one photo per
+receipt · chunks of 10 oldest-first · date confirmed against paper, no-date = skip, no rescue ·
+fix pass after, repeat items only). It unblocks Phase 3 and turns on every
 intelligence feature (alerts, optimizer, savings, meal-cost estimates, the new badges are all
 data-starved until it runs). Tooling has been ready since Phases 1–2: Receipts → **Backfill (multiple)**
 → confirm each date → fix mis-maps with the per-line **Fix** action / the `/items` merge.
@@ -119,7 +129,7 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
    str()-coercion-of-non-string-ingredients test and the module-singleton-delegation tests are dropped as
    C#-irrelevant; (c) a null profile in `MealSuggestionService` = empty profile (the `/meals` route resolves
    the real one via an injected provider, not a config read inside the service).
-9. **Backfill "never default to today" is the rule that protects 6 months of history.** `ImportBatchAsync`
+9. **Backfill "never default to today" is the rule that protects the price history.** `ImportBatchAsync`
    only commits with an explicit confirmed date; a null resolver result **skips** the receipt (no write).
    Never add a today-fallback to the batch path (the single-scan path keeps its mtime/today fallback — that's
    fine for a fresh scan).
