@@ -363,3 +363,17 @@ keystore hand-offs.
   over a timestamped cache subdir (so a re-export never shares stale files). Last-backup timestamp persists
   in MAUI `Preferences` (fully-qualified `Microsoft.Maui.Storage.Preferences` to avoid clashing with the
   `Preferences` Razor component's own type name).
+
+## v3 pivot — product targets are Android + iOS only (2026-07-11)
+
+Decision (user, backfill grill session close-out): Grocery Sense ships on **Android and iOS only**.
+All new features, updates, and bug fixes target the mobile apps.
+
+- **The Windows head is demoted to a dev-only harness** — kept for fast build checks and fixture
+  verification on this PC until the Android head builds locally (v3 Phase A), then it retires as a
+  verification target. It was never distributed; nothing to migrate.
+- `net10.0-windows` / `net10.0-maccatalyst` TFMs still sit in `GrocerySense.App.csproj` — removal is
+  a code change deferred to the v3 platform work (maccatalyst is unused and can drop whenever
+  convenient; windows drops when the harness retires).
+- Living docs updated same day (README, `Grocery_Sense/CLAUDE.md`, `V2_FOLLOWUPS.md`, v3 plan);
+  historical docs (PORTING, CONTRACT_AUDIT, V2_PLAN, archive/, brainstorms/) intentionally untouched.
