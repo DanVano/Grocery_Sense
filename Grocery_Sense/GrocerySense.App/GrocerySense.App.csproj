@@ -22,14 +22,14 @@
         <Nullable>enable</Nullable>
 
         <!-- Display name -->
-        <ApplicationTitle>GrocerySense.App</ApplicationTitle>
+        <ApplicationTitle>Grocery Sense</ApplicationTitle>
 
         <!-- App Identifier -->
-        <ApplicationId>com.companyname.grocerysense.app</ApplicationId>
+        <ApplicationId>ca.danvano.grocerysense</ApplicationId>
 
-        <!-- Versions -->
-        <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-        <ApplicationVersion>1</ApplicationVersion>
+        <!-- Versions. versionCode (ApplicationVersion) strictly increases per release: r1=2, r2=3, r3=4. -->
+        <ApplicationDisplayVersion>2.0</ApplicationDisplayVersion>
+        <ApplicationVersion>2</ApplicationVersion>
 
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>
