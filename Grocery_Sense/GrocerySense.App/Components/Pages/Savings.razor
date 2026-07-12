@@ -3,6 +3,8 @@
 @using GrocerySense.Domain
 @inject WatchlistService Watchlist
 @inject PriceDropAlertService Alerts
+@inject ShoppingListService Shopping
+@inject ISnackbar Snackbar
 
 <MudText Typo="Typo.h5" GutterBottom="true">Savings</MudText>
 
@@ -99,18 +101,28 @@
                     @foreach (var a in _alerts)
                     {
                         <MudListItem T="int">
-                            <MudText Typo="Typo.body2">
-                                <b>@a.ItemName</b>
-                                <MudChip T="string" Size="Size.Small"
-                                         Color="@(a.AlertKind == "below_usual" ? Color.Success : Color.Info)">
-                                    @KindLabel(a.AlertKind)
-                                </MudChip>
-                            </MudText>
-                            <MudText Typo="Typo.caption">@a.Notes</MudText>
-                            @if (a.SuggestedQtyNote is { Length: > 0 } note)
-                            {
-                                <MudText Typo="Typo.caption"><b>@note</b></MudText>
-                            }
+                            <div class="d-flex align-center gap-1">
+                                <div>
+                                    <MudText Typo="Typo.body2">
+                                        <b>@a.ItemName</b>
+                                        <MudChip T="string" Size="Size.Small"
+                                                 Color="@(a.AlertKind == "below_usual" ? Color.Success : Color.Info)">
+                                            @KindLabel(a.AlertKind)
+                                        </MudChip>
+                                    </MudText>
+                                    <MudText Typo="Typo.caption">@a.Notes</MudText>
+                                    @if (a.SuggestedQtyNote is { Length: > 0 } note)
+                                    {
+                                        <MudText Typo="Typo.caption"><b>@note</b></MudText>
+                                    }
+                                </div>
+                                <MudSpacer />
+                                <MudButton Size="Size.Small" Variant="Variant.Text"
+                                           StartIcon="@Icons.Material.Filled.AddShoppingCart"
+                                           OnClick="@(() => AddAlertAsync(a))">
+                                    @(a.SuggestedQty is double sq ? $"Add to list (qty {sq:0.##})" : "Add to list")
+                                </MudButton>
+                            </div>
                         </MudListItem>
                     }
                 </MudList>
@@ -172,6 +184,14 @@
     {
         await Guard(() => { Watchlist.RemoveWatch(watchId); return 0; });
         await ReloadWatchlistAsync();
+    }
+
+    // Add an alert's item (with its suggested stock-up qty when present) to the active list. The alert cards
+    // are recomputed each visit and adding isn't the same as acting on it in-store, so the card is left in place.
+    private async Task AddAlertAsync(PriceDropAlert alert)
+    {
+        await Guard(() => { Shopping.AddAlertToList(alert); return 0; });
+        if (_error is null) Snackbar.Add($"Added {alert.ItemName} — see Shopping List", Severity.Success);
     }
 
     private async Task ReloadWatchlistAsync()

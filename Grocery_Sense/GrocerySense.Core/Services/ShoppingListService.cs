@@ -66,6 +66,17 @@ public sealed class ShoppingListService
             notes: note, plannedStoreId: deal.StoreId, itemId: itemLink);
     }
 
+    // Add a price-drop / stock-up alert's item to the active list. The alert was just computed from the current
+    // items/prices join, so ItemName/ItemId/StoreId are all live — no re-lookup needed. Carries the suggested
+    // stock-up quantity + cadence note when present; SuggestedQty absent => 1. Returns the new row id.
+    public int AddAlertToList(PriceDropAlert alert)
+    {
+        using var conn = _factory.Open();
+        return ShoppingListRepo.AddItem(conn, alert.ItemName, quantity: alert.SuggestedQty ?? 1.0,
+            unit: "", category: "", notes: alert.SuggestedQtyNote ?? "From price alert",
+            plannedStoreId: alert.StoreId, itemId: alert.ItemId);
+    }
+
     private static string DealTitle(FlyerDeal d) =>
         d.Title is { Length: > 0 } t ? t : d.Description is { Length: > 0 } de ? de : "(deal)";
 

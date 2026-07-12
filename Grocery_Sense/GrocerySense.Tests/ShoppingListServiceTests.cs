@@ -104,10 +104,51 @@ public sealed class ShoppingListServiceTests
         Assert.Contains("not price-tracked", row.Notes);
     }
 
+    [Fact]
+    public void AddAlertToList_carries_suggested_quantity_and_note()
+    {
+        using var db = new TempDb();
+        var svc = new ShoppingListService(db.Factory);
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        var alert = MakeAlert(item, "Milk", store, suggestedQty: 2, note: "You buy this ~every 21 days; buy 2");
+
+        svc.AddAlertToList(alert);
+
+        var row = Assert.Single(svc.GetActiveItems());
+        Assert.Equal("Milk", row.DisplayName);
+        Assert.Equal(item, row.ItemId);
+        Assert.Equal(store, row.PlannedStoreId);
+        Assert.Equal(2, row.Quantity);
+        Assert.Equal("You buy this ~every 21 days; buy 2", row.Notes);
+    }
+
+    [Fact]
+    public void AddAlertToList_without_suggested_qty_falls_back_to_one()
+    {
+        using var db = new TempDb();
+        var svc = new ShoppingListService(db.Factory);
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Eggs").Id;
+        var alert = MakeAlert(item, "Eggs", store, suggestedQty: null, note: null);
+
+        svc.AddAlertToList(alert);
+
+        var row = Assert.Single(svc.GetActiveItems());
+        Assert.Equal(1, row.Quantity);
+        Assert.Equal("From price alert", row.Notes);
+    }
+
     private static FlyerDeal MakeDeal(int storeId, string title, string priceText, int? itemId) =>
         new(Id: 0, FlyerId: 0, AssetId: null, StoreId: storeId, PageIndex: null,
             Title: title, Description: null, PriceText: priceText,
             DealQty: null, DealTotal: null, UnitPrice: null, Unit: null,
             NormUnitPrice: null, NormUnit: null, NormNote: null,
             ItemId: itemId, MappingConfidence: null, Confidence: null, CreatedAt: null);
+
+    private static PriceDropAlert MakeAlert(int itemId, string itemName, int storeId, double? suggestedQty, string? note) =>
+        new(ItemId: itemId, ItemName: itemName, StoreId: storeId, StoreName: "Loblaws",
+            CurrentPrice: 5.0, UsualPrice: 10.0, PctBelowUsual: 50.0, SixMonthLow: null, PctAboveLow: null,
+            AlertKind: "stock_up", IsStaple: true, ReceiptSamples: 4, Basis: "median", Source: "receipt",
+            LastSeenAtOrBelow: null, Notes: "", SuggestedQty: suggestedQty, SuggestedQtyNote: note);
 }
