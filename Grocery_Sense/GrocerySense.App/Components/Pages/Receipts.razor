@@ -37,6 +37,23 @@
     <MudAlert Class="mb-2" Severity="@_messageSeverity" Dense="true">@_message</MudAlert>
 }
 
+@if (_anyReceiptsExist || HasActiveFilter)
+{
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudSelect T="int?" Value="_filterStoreId" ValueChanged="OnStoreFilterChanged" Label="Store"
+                   Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Clearable="true"
+                   Style="max-width:220px">
+            <MudSelectItem T="int?" Value="@((int?)null)">All stores</MudSelectItem>
+            @foreach (var store in _stores)
+            {
+                <MudSelectItem T="int?" Value="@((int?)store.Id)">@store.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudDateRangePicker Label="Date range" DateRange="_filterRange" DateRangeChanged="OnDateFilterChanged"
+                            Clearable="true" Margin="Margin.Dense" Style="max-width:280px" />
+    </MudStack>
+}
+
 @if (_receipts is null)
 {
     <div class="d-flex justify-center pa-8">
@@ -45,7 +62,9 @@
 }
 else if (_receipts.Count == 0)
 {
-    <MudText Typo="Typo.body2">No receipts yet — import a photo above.</MudText>
+    <MudText Typo="Typo.body2">
+        @(_anyReceiptsExist ? "No receipts match the current filter." : "No receipts yet — import a photo above.")
+    </MudText>
 }
 else
 {
@@ -112,6 +131,10 @@ else
 @code {
     private IReadOnlyList<ReceiptSummary>? _receipts;
     private readonly Dictionary<int, IReadOnlyList<ReceiptLineItemRow>> _lines = new();
+    private IReadOnlyList<Store> _stores = [];
+    private int? _filterStoreId;
+    private DateRange? _filterRange;
+    private bool _anyReceiptsExist;
     private bool _busy;
     private bool _replaceDuplicates;
     private string _stage = "";
@@ -120,20 +143,59 @@ else
     private Severity _messageSeverity = Severity.Info;
     private CancellationTokenSource? _cts;
 
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    private bool HasActiveFilter => _filterStoreId is not null || _filterRange is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // includeArchived: old receipts may reference a store the user has since archived.
+            _stores = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return StoresRepo.ListStores(conn, includeArchived: true);
+            });
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        await ReloadAsync();
+    }
 
     private async Task ReloadAsync()
     {
         try
         {
-            _receipts = await Task.Run(() =>
+            // Snapshot filter state before the async query — the user may change it mid-reload.
+            var storeId = _filterStoreId;
+            var since = _filterRange?.Start is DateTime s ? s.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null;
+            var until = _filterRange?.End is DateTime e ? e.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null;
+            var hasFilter = storeId is not null || since is not null || until is not null;
+
+            var (rows, anyExist) = await Task.Run(() =>
             {
                 using var conn = Db.Open();
-                return ReceiptsRepo.ListRecentReceipts(conn);
+                var list = ReceiptsRepo.ListRecentReceipts(conn, storeId: storeId, since: since, until: until);
+                // Probe unfiltered existence only when a filter hid everything — lets the empty state
+                // distinguish "no receipts match" from "no receipts yet".
+                var exist = list.Count > 0 || (hasFilter && ReceiptsRepo.ListRecentReceipts(conn, limit: 1).Count > 0);
+                return (list, exist);
             });
+            _receipts = rows;
+            _anyReceiptsExist = anyExist;
             _lines.Clear();
         }
         catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    private async Task OnStoreFilterChanged(int? storeId)
+    {
+        _filterStoreId = storeId;
+        await ReloadAsync();
+    }
+
+    private async Task OnDateFilterChanged(DateRange? range)
+    {
+        _filterRange = range;
+        await ReloadAsync();
     }
 
     private async Task OnExpandedAsync(int receiptId, bool expanded)

@@ -1,4 +1,5 @@
 using GrocerySense.Data.Repositories;
+using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -116,6 +117,36 @@ public sealed class ReceiptsRepoTests
         // The signature still points at B, not the restored receipt.
         Assert.Equal(b, SignatureReceiptId(db.Conn, "dup-sig"));
     }
+
+    [Fact]
+    public void ListRecentReceipts_filters_by_store_and_date_range()
+    {
+        using var db = new TempDb();
+        var a = StoresRepo.CreateStore(db.Conn, "Store A").Id;
+        var b = StoresRepo.CreateStore(db.Conn, "Store B").Id;
+        var r1 = InsertReceipt(db.Conn, a, "2026-01-15", 1.00m, null, null);
+        var r2 = InsertReceipt(db.Conn, b, "2026-03-10", 2.00m, null, null);
+        var r3 = InsertReceipt(db.Conn, a, "2026-06-20", 3.00m, null, null);
+
+        // no filter — all three (id DESC ordering)
+        Assert.Equal(new[] { r3, r2, r1 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn)));
+
+        // store filter narrows to A's two receipts
+        Assert.Equal(new[] { r3, r1 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, storeId: a)));
+
+        // date range is inclusive on both bounds
+        Assert.Equal(new[] { r2, r1 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, until: "2026-03-31")));
+        Assert.Equal(new[] { r3, r2 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, since: "2026-03-01")));
+        Assert.Equal(new[] { r2 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, since: "2026-03-01", until: "2026-03-31")));
+
+        // store + date combined
+        Assert.Equal(new[] { r3 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, storeId: a, since: "2026-06-01")));
+
+        // limit + offset still apply after filtering (A's receipts, newest first, take one skipping the newest)
+        Assert.Equal(new[] { r1 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, limit: 1, offset: 1, storeId: a)));
+    }
+
+    private static int[] Ids(IEnumerable<ReceiptSummary> rows) => rows.Select(r => r.Id).ToArray();
 
     // ---- SQL insert helpers (receipts_repo has no create methods — ingestion writes these) ----
 
