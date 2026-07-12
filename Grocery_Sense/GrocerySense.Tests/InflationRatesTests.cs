@@ -51,4 +51,16 @@ public sealed class InflationRatesTests
         Assert.Equal((1.0, false), InflationRates.Multiplier(new(2024, 1, 1), new(2022, 1, 1), Rates));
         Assert.Equal((1.0, false), InflationRates.Multiplier(new(2023, 5, 1), new(2023, 5, 1), Rates));
     }
+
+    [Theory]
+    [InlineData(-20.0, true)]
+    [InlineData(50.0, true)]
+    [InlineData(0.0, true)]
+    [InlineData(-20.1, false)]
+    [InlineData(50.1, false)]
+    [InlineData(900.0, false)]
+    public void IsRateInBounds_rejects_outside_minus20_to_50(double pct, bool expected)
+    {
+        Assert.Equal(expected, InflationRates.IsRateInBounds(pct));
+    }
 }

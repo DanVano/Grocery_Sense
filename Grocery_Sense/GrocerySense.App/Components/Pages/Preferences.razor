@@ -97,6 +97,31 @@ else
         </MudStack>
     </MudPaper>
 
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudText Typo="Typo.subtitle1">Food inflation rates</MudText>
+        <MudText Typo="Typo.caption">
+            Annual CAD food-price inflation per year (seeded from StatCan). Edit the current year's provisional
+            figure and add each January's final number. Used to age old prices to today's dollars for the deal
+            and optimizer baselines. Allowed range −20% to 50% (out-of-range values are rejected, not clamped).
+        </MudText>
+        @foreach (var row in _rates)
+        {
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mt-2">
+                <MudText Style="min-width:3.5rem">@row.Year</MudText>
+                <MudNumericField T="double" @bind-Value="row.Pct" Label="Annual %" Min="-20" Max="50" Step="0.1"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:9rem" />
+            </MudStack>
+        }
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mt-3">
+            <MudNumericField T="int" @bind-Value="_newRateYear" Label="Year" Min="2000" Max="2100"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:7rem" />
+            <MudNumericField T="double" @bind-Value="_newRatePct" Label="Annual %" Min="-20" Max="50" Step="0.1"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:9rem" />
+            <MudButton Size="Size.Small" Color="Color.Primary" OnClick="AddRateRow"
+                       Disabled="@(_newRateYear <= 0)">Add year</MudButton>
+        </MudStack>
+    </MudPaper>
+
     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@_busy">Save preferences</MudButton>
 
     <MudPaper Class="pa-3 mt-4" Outlined="true">
@@ -144,6 +169,12 @@ else
     private int _maxStores = 3;
     private int _minItemSavingPct = 10;
     private double _minStoreSaving = 5.0;
+    private List<RateRow> _rates = new();
+    private int _newRateYear;
+    private double _newRatePct;
+
+    // Reference type so @bind-Value mutates the row in place across the list.
+    private sealed class RateRow { public int Year { get; set; } public double Pct { get; set; } }
     private string _azureEndpoint = "";
     private string _azureKey = "";
     private IReadOnlyList<HouseholdMember> _members = Array.Empty<HouseholdMember>();
@@ -166,6 +197,11 @@ else
             _maxStores = cfg.MaxStores;
             _minItemSavingPct = (int)Math.Round(cfg.MinItemSavingPct * 100);
             _minStoreSaving = cfg.MinStoreSaving;
+            _rates = (cfg.FoodInflationByYear ?? InflationRates.Seed)
+                .Select(kv => new RateRow { Year = int.TryParse(kv.Key, out var y) ? y : 0, Pct = kv.Value })
+                .Where(r => r.Year > 0)
+                .OrderBy(r => r.Year)
+                .ToList();
 
             var profile = Config.GetMasterMember().Profile;
             _allergies = AsCommaList(profile.GetValueOrDefault("allergies"));
@@ -198,6 +234,13 @@ else
         try
         {
             _error = null;
+            // Reject out-of-range rates loudly (never clamp — a 900% typo would corrupt every adjusted baseline).
+            if (_rates.FirstOrDefault(r => !InflationRates.IsRateInBounds(r.Pct)) is { } bad)
+            {
+                _error = $"Food inflation rate for {bad.Year} ({bad.Pct:0.#}%) is out of range " +
+                         $"({InflationRates.RateMinPct:0}% to {InflationRates.RateMaxPct:0}%).";
+                return; // finally still resets _busy
+            }
             await Task.Run(() =>
             {
                 var cfg = Config.Load();
@@ -223,6 +266,7 @@ else
                     MaxStores = _maxStores,
                     MinItemSavingPct = _minItemSavingPct / 100.0,
                     MinStoreSaving = _minStoreSaving,
+                    FoodInflationByYear = _rates.ToDictionary(r => r.Year.ToString(), r => r.Pct),
                     Household = cfg.Household with { Members = members },
                 });
             });
@@ -319,6 +363,17 @@ else
         }
         catch (Exception ex) { _error = $"Export failed: {ex.Message}"; }
         finally { _busy = false; }
+    }
+
+    // Add or update a year's rate. Persisted only when the user hits Save preferences (with validation).
+    private void AddRateRow()
+    {
+        if (_newRateYear <= 0) return;
+        if (_rates.FirstOrDefault(r => r.Year == _newRateYear) is { } existing) existing.Pct = _newRatePct;
+        else _rates.Add(new RateRow { Year = _newRateYear, Pct = _newRatePct });
+        _rates = _rates.OrderBy(r => r.Year).ToList();
+        _newRateYear = 0;
+        _newRatePct = 0;
     }
 
     private static string FormatStamp(string iso) =>

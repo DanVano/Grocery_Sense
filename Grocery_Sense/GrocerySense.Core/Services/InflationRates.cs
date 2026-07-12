@@ -8,6 +8,12 @@ public static class InflationRates
     // Recency half-life for the adjusted baseline (I1+). Hardcoded, not a user setting — tune on device.
     public const double HalfLifeDays = 90;
 
+    // Accepted bounds for a user-edited annual rate (I4). Reject outside this range — fail loud, never clamp
+    // (a clamped 900% typo would silently corrupt every adjusted baseline).
+    public const double RateMinPct = -20;
+    public const double RateMaxPct = 50;
+    public static bool IsRateInBounds(double pct) => pct is >= RateMinPct and <= RateMaxPct;
+
     // StatCan annual food-inflation % (2026 provisional). Seeded into user_config.json only when absent,
     // then user-editable (Preferences, I4). Year-string keys match the snake_case JSON dict shape.
     public static IReadOnlyDictionary<string, double> Seed { get; } = new Dictionary<string, double>
