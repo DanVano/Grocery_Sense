@@ -97,6 +97,10 @@
                                         }
                                     </MudText>
                                     <MudText Typo="Typo.caption">@PriceLine(i)</MudText>
+                                    @if (!string.IsNullOrWhiteSpace(i.Row.Notes))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@i.Row.Notes</MudText>
+                                    }
                                     @if (i.SuggestedQtyNote is not null)
                                     {
                                         <MudText Typo="Typo.caption">@i.SuggestedQtyNote</MudText>
@@ -136,9 +140,15 @@ else
                     <div class="d-flex align-center gap-1">
                         <MudCheckBox T="bool" Value="@row.IsCheckedOff"
                                      ValueChanged="@(v => ToggleAsync(row.Id, v))" Dense="true" />
-                        <MudText Style="@(row.IsCheckedOff ? "text-decoration: line-through" : null)">
-                            @row.DisplayName@QtyLabel(row)
-                        </MudText>
+                        <div>
+                            <MudText Style="@(row.IsCheckedOff ? "text-decoration: line-through" : null)">
+                                @row.DisplayName@QtyLabel(row)
+                            </MudText>
+                            @if (!string.IsNullOrWhiteSpace(row.Notes))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@row.Notes</MudText>
+                            }
+                        </div>
                         <MudSpacer />
                         <MudSelect T="string" Value="@row.Priority"
                                    ValueChanged="@(v => SetPriorityAsync(row.Id, v))"
