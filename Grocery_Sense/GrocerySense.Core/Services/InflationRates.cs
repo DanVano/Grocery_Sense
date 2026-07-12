@@ -52,4 +52,27 @@ public static class InflationRates
         }
         return (multiplier, missingYear);
     }
+
+    // Recency-weighted average of inflation-adjusted prices. Each point is lifted to `today` via Multiplier,
+    // then weighted by 0.5^(ageDays / halfLife) so recent prices dominate. Undated points must be filtered by
+    // the caller (never fabricate a date). Returns (null, 0) when there is nothing to average.
+    public static (double? Baseline, int SampleCount) WeightedAdjustedAverage(
+        IEnumerable<(DateOnly Date, double Price)> points,
+        DateOnly today,
+        IReadOnlyDictionary<string, double> ratesByYear,
+        double halfLifeDays = HalfLifeDays)
+    {
+        double sumWeight = 0, sumWeightedAdj = 0;
+        int n = 0;
+        foreach (var (date, price) in points)
+        {
+            var (mult, _) = Multiplier(date, today, ratesByYear);
+            var ageDays = Math.Max(0, today.DayNumber - date.DayNumber); // future-dated => treat as current
+            var weight = Math.Pow(0.5, ageDays / halfLifeDays);
+            sumWeight += weight;
+            sumWeightedAdj += weight * (price * mult);
+            n++;
+        }
+        return sumWeight > 0 ? (sumWeightedAdj / sumWeight, n) : (null, 0);
+    }
 }

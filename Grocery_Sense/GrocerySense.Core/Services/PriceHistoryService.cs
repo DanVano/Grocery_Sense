@@ -13,8 +13,15 @@ namespace GrocerySense.Core;
 public sealed class PriceHistoryService
 {
     private readonly SqliteConnectionFactory _factory;
+    private readonly ConfigStore? _configStore;
 
-    public PriceHistoryService(SqliteConnectionFactory factory) => _factory = factory;
+    // ponytail: ConfigStore optional — DI injects the real one (rate table lives in user_config.json); legacy
+    // callers / tests pass null and fall back to InflationRates.Seed, the same StatCan defaults a fresh config seeds.
+    public PriceHistoryService(SqliteConnectionFactory factory, ConfigStore? configStore = null)
+    {
+        _factory = factory;
+        _configStore = configStore;
+    }
 
     // ---------- item helpers ----------
 
@@ -143,8 +150,11 @@ public sealed class PriceHistoryService
         return new StoreStats(prices.Average(), prices.Min(), prices.Max(), prices.Count, unitHint, mostRecent);
     }
 
-    // Classify a candidate unit price vs the trailing-window average.
-    public DealClassification ClassifyDeal(string itemName, double candidateUnitPrice, int windowDays = 180)
+    // Classify a candidate unit price vs an inflation-adjusted, recency-weighted baseline over a ~730-day
+    // window (Stage 4 I1). The baseline lifts each past price to today's dollars; min/max stay NOMINAL for the
+    // historical-range line (adjusting them would fabricate prices that never existed). PriceDropAlert and
+    // sixMonthLow are deliberately untouched (V2_FOLLOWUPS §4 landmine).
+    public DealClassification ClassifyDeal(string itemName, double candidateUnitPrice, int windowDays = 730)
     {
         using var conn = _factory.Open();
         var item = ItemsRepo.GetItemByName(conn, itemName.Trim());
@@ -152,21 +162,30 @@ public sealed class PriceHistoryService
             return new DealClassification(null, false, "no_data", null, null, null, null, 0,
                 $"No price history for '{itemName}'. You can start building history by scanning receipts or entering prices.");
 
-        var stats = PricesRepo.GetPriceStatsForItem(conn, item.Id, sinceDays: windowDays);
-        if (stats.Count == 0)
-            return new DealClassification(item, false, "no_data", null, null, null, null, 0,
-                $"No price history for '{item.CanonicalName}' in the last {windowDays} days.");
+        var rates = _configStore?.Load().FoodInflationByYear ?? InflationRates.Seed;
+        var points = PricesRepo.GetPricesForItem(conn, item.Id, storeId: null, sinceDays: windowDays);
 
-        var avg = stats.AvgPrice;
-        var min = stats.MinPrice;
-        var max = stats.MaxPrice;
-        var count = stats.Count;
-        if (avg is null or <= 0)
-            return new DealClassification(item, false, "no_data", null, avg, min, max, count,
+        // Dated points only — inflation adjustment needs a real date; never fabricate one for an undated row.
+        var dated = new List<(DateOnly Date, double Price)>();
+        foreach (var p in points)
+            if (DateOnly.TryParseExact(p.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+                dated.Add((d, p.UnitPrice));
+
+        if (dated.Count == 0)
+            return new DealClassification(item, false, "no_data", null, null, null, null, 0,
+                $"No dated price history for '{item.CanonicalName}' in the last {windowDays} days.");
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var (baseline, count) = InflationRates.WeightedAdjustedAverage(dated, today, rates);
+        var min = dated.Min(x => x.Price);
+        var max = dated.Max(x => x.Price);
+
+        if (baseline is null or <= 0)
+            return new DealClassification(item, false, "no_data", null, baseline, min, max, count,
                 "Price data is invalid or incomplete.");
 
-        // Positive percent = cheaper than avg; negative = more expensive.
-        var percent = (avg.Value - candidateUnitPrice) / avg.Value * 100.0;
+        // Positive percent = cheaper than the adjusted baseline; negative = more expensive.
+        var percent = (baseline.Value - candidateUnitPrice) / baseline.Value * 100.0;
 
         string classification;
         string message;
@@ -174,14 +193,14 @@ public sealed class PriceHistoryService
         {
             classification = "weak_data";
             message = $"Limited data for '{item.CanonicalName}' (n={count}). Current price {F2(candidateUnitPrice)} " +
-                      $"vs avg {F2(avg.Value)} ({Pct(percent)} vs avg).";
+                      $"vs inflation-adjusted avg {F2(baseline.Value)} ({Pct(percent)} vs avg).";
         }
         else
         {
             classification = percent switch
             {
-                >= 20.0 => "great",
-                >= 10.0 => "good",
+                >= 15.0 => "great",
+                >= 7.0 => "good",
                 > -10.0 => "typical",
                 _ => "expensive",
             };
@@ -192,11 +211,11 @@ public sealed class PriceHistoryService
                 "typical" => "➖ Typical price",
                 _ => "⚠️ More expensive than usual",
             };
-            message = $"{prefix} for '{item.CanonicalName}': {F2(candidateUnitPrice)} vs your average {F2(avg.Value)} " +
-                      $"({Pct(percent)} vs avg). Historical range: {F2(min!.Value)}–{F2(max!.Value)} from {count} data points.";
+            message = $"{prefix} for '{item.CanonicalName}': {F2(candidateUnitPrice)} vs your inflation-adjusted avg {F2(baseline.Value)} " +
+                      $"({Pct(percent)} vs avg). Historical range: {F2(min)}–{F2(max)} from {count} data points.";
         }
 
-        return new DealClassification(item, true, classification, percent, avg, min, max, count, message);
+        return new DealClassification(item, true, classification, percent, baseline, min, max, count, message);
     }
 
     public string DescribeItemHistory(string itemName, int windowDays = 365)
