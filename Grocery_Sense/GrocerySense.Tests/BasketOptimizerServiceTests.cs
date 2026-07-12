@@ -228,6 +228,26 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         Assert.DoesNotContain(r.Warnings, w => w.Contains("wait for sale"));
     }
 
+    // I2: usualAvg is now inflation-adjusted + recency-weighted, so an old cheap price no longer drags the
+    // baseline down. A naive two-point mean of (2, 4) = 3 would report SaveVsUsual = 3 - 4 = -1 (looks like
+    // overpaying); the weighted-adjusted baseline stays near the recent 4, so the phantom "overpay" vanishes.
+    [Fact]
+    public void Old_cheap_point_no_longer_depresses_usual_average()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var a = Store(db, "A");
+        var milk = Listed(db, "milk");
+        PricesRepo.AddPricePoint(db.Conn, milk, a, 2.00, "each", source: "manual", date: "2026-01-01"); // old & cheap
+        PricesRepo.AddPricePoint(db.Conn, milk, a, 4.00, "each", source: "manual", date: Today);        // recent
+
+        var plan = svc.Optimize("best_savings").Stores.SelectMany(s => s.Items).Single(i => i.ItemId == milk);
+        Assert.Equal(4.00, plan.UnitPrice); // chosen = most-recent store price
+        Assert.NotNull(plan.SaveVsUsual);
+        Assert.True(plan.SaveVsUsual > -0.7,
+            $"weighted-adjusted usual should stay near 4, not the naive mean 3 (SaveVsUsual={plan.SaveVsUsual})");
+    }
+
     [Fact]
     public void Totals_are_quantity_weighted()
     {

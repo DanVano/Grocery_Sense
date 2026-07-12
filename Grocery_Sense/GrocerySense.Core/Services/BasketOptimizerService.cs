@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
@@ -74,7 +75,21 @@ public sealed class BasketOptimizerService
         var flyerQuotes = PricesRepo.GetActiveFlyerPricesBatch(conn, basketIds, storeIds);
         var storeQuotes = PricesRepo.GetMostRecentPricesByStoreBatch(conn, basketIds, storeIds);
         var globalQuotes = PricesRepo.GetMostRecentPricesGlobalBatch(conn, basketIds);
-        var usualAvg = PricesRepo.GetRecentAvgUnitPriceGlobalBatch(conn, basketIds, sinceDays: 180);
+        // usualAvg is now the inflation-adjusted, recency-weighted baseline (Stage 4 I2) — an old cheap point
+        // no longer depresses it. sixLow stays the FACTUAL lowest price paid (adjusting it fabricates a price
+        // that never existed); PriceDropAlert is untouched (V2_FOLLOWUPS §4 landmine).
+        var rates = cfg.FoodInflationByYear ?? InflationRates.Seed;
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var usualAvg = new Dictionary<int, double>();
+        foreach (var id in basketIds) // ponytail: per-item query loop; batch only if basket size ever hurts.
+        {
+            var dated = new List<(DateOnly Date, double Price)>();
+            foreach (var p in PricesRepo.GetPricesForItem(conn, id, storeId: null, sinceDays: 730))
+                if (DateOnly.TryParseExact(p.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+                    dated.Add((d, p.UnitPrice));
+            if (InflationRates.WeightedAdjustedAverage(dated, today, rates).Baseline is { } b and > 0)
+                usualAvg[id] = b;
+        }
         var sixLow = PricesRepo.GetSixMonthLowBatch(conn, basketIds, sinceDays: 183);
 
         // Price each basket item per store (flyer -> recent store price), plus its cheapest-anywhere fallback.
