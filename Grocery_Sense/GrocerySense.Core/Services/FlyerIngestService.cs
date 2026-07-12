@@ -64,7 +64,7 @@ public sealed class FlyerIngestService
                 var (operationId, analyze) = await _layout.AnalyzeLayoutFileAsync(fp, ct);
 
                 // Persist the raw JSON so a reprocess doesn't re-pay Azure (keyed by operation id).
-                var rawJsonStr = JsonSerializer.Serialize(analyze);
+                var rawJsonStr = RawJson.ToJsonString(analyze);
                 var safeStem = Trunc(Regex.Replace(Path.GetFileNameWithoutExtension(fp), @"[^a-zA-Z0-9_\-]+", "_"), 80);
                 File.WriteAllText(Path.Combine(rawJsonDir, $"{safeStem}__{operationId}.json"), rawJsonStr);
                 var rawSha = Sha256(Encoding.UTF8.GetBytes(rawJsonStr));

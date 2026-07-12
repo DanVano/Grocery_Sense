@@ -281,7 +281,7 @@ public sealed class ReceiptIngestionService
             }
         }
 
-        var rawJsonStr = JsonSerializer.Serialize(rawJson);
+        var rawJsonStr = RawJson.ToJsonString(rawJson);
         return new ReceiptIngest(storeId, purchaseDate, subtotal, tax, total, filePath, ConfidenceTo15(overallConf),
             operationId, null, rawJsonStr, fileHash, signature, lines);
     }

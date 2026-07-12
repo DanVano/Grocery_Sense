@@ -37,8 +37,13 @@ public sealed class AzureReceiptOcrClient : IReceiptOcrClient
         // ReceiptIngestionService navigates. The operation result is { status, analyzeResult: {...} }.
         using var doc = JsonDocument.Parse(operation.GetRawResponse().Content);
         var analyzeResult = doc.RootElement.TryGetProperty("analyzeResult", out var ar) ? ar : doc.RootElement;
-        var rawJson = JsonSerializer.Deserialize<Dictionary<string, object?>>(analyzeResult.GetRawText())
-                      ?? new Dictionary<string, object?>();
+        // Build the loosely-typed dict directly from the JsonDocument (values = cloned JsonElement, detached
+        // from the disposed doc). Avoids reflection-based Deserialize<Dictionary<string,object?>>, which the
+        // downstream re-serialize + iOS full AOT can't rely on (B1). Same shape ReceiptIngestionService navigates.
+        var rawJson = new Dictionary<string, object?>();
+        if (analyzeResult.ValueKind == JsonValueKind.Object)
+            foreach (var p in analyzeResult.EnumerateObject())
+                rawJson[p.Name] = p.Value.Clone();
 
         string operationId;
         try { operationId = operation.Id; } catch { operationId = Guid.NewGuid().ToString("N"); }
