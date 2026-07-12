@@ -63,7 +63,7 @@ public sealed class ConfigStore
         var normalized = Normalize(cfg);
         lock (_sync)
         {
-            AtomicWriteJson(_configFile, normalized);
+            AtomicWrite(_configFile, JsonSerializer.SerializeToUtf8Bytes(normalized, UserConfigJsonContext.Default.UserConfig));
             _cache = normalized;
             _cacheKey = StatKey(_configFile);
         }
@@ -178,10 +178,14 @@ public sealed class ConfigStore
                          .Where(kv => { var a = (now - kv.Value.StoredAt) / 86400.0; return a < 0 || a > maxAgeDays; })
                          .Select(kv => kv.Key).ToList())
                 cache.Remove(stale);
-            AtomicWriteJson(_cacheFile, cache);
+            AtomicWrite(_cacheFile, JsonSerializer.SerializeToUtf8Bytes(cache, JsonOpts));
         }
     }
 
+    // ponytail: the deals cache (CacheGet/CacheSet) has NO production callers — it's exercised only by tests,
+    // which run on the Windows head where reflection STJ is fine. So this path is intentionally left on
+    // reflection JsonOpts (not source-gen). If it's ever revived for on-device use, it needs a typed cache
+    // value + a source-gen context — SerializeToElement over an arbitrary `object` can't be AOT-safe.
     private Dictionary<string, CacheEntry> LoadCache()
     {
         if (!File.Exists(_cacheFile)) return new();
@@ -207,7 +211,9 @@ public sealed class ConfigStore
         if (!File.Exists(_configFile)) return EmptyConfig();
         try
         {
-            return JsonSerializer.Deserialize<UserConfig>(File.ReadAllText(_configFile), JsonOpts) ?? EmptyConfig();
+            // Source-gen (no reflection) — this path runs on every start and must survive iOS full AOT (B1).
+            return JsonSerializer.Deserialize(File.ReadAllText(_configFile), UserConfigJsonContext.Default.UserConfig)
+                   ?? EmptyConfig();
         }
         catch (JsonException e)
         {
@@ -362,15 +368,16 @@ public sealed class ConfigStore
 
     private static double NowEpoch() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
 
-    // temp -> flush(true) -> atomic replace, so a crash mid-write never leaves a truncated config.
-    private static void AtomicWriteJson<T>(string path, T data)
+    // temp -> flush(true) -> atomic replace, so a crash mid-write never leaves a truncated file. The caller
+    // supplies UTF-8 bytes so it picks the serializer: source-gen for the config, reflection JsonOpts for the cache.
+    private static void AtomicWrite(string path, byte[] utf8Bytes)
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         var tmp = path + ".tmp";
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            JsonSerializer.Serialize(fs, data, JsonOpts);
+            fs.Write(utf8Bytes, 0, utf8Bytes.Length);
             fs.Flush(flushToDisk: true);
         }
         if (File.Exists(path)) File.Replace(tmp, path, null);

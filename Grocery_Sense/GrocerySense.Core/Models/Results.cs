@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using GrocerySense.Domain;
 
 namespace GrocerySense.Core;
@@ -186,7 +187,9 @@ public sealed record PlannedIngredient(
 public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
 
 // Household config — ports of config_store.py dataclasses.
-public record HouseholdMember(int Id, string Name, string Role, Dictionary<string, object?> Profile);
+public record HouseholdMember(int Id, string Name, string Role,
+    // Polymorphic profile — converted with Utf8JsonReader/Writer (no reflection) so UserConfig source-gen is AOT-safe.
+    [property: JsonConverter(typeof(ProfileDictionaryConverter))] Dictionary<string, object?> Profile);
 // NextMemberId is the highest member id ever issued (monotonic). New members take NextMemberId+1 so a deleted
 // member's id is never reused — reuse would re-attribute the old member's picks/history to the new one. Older
 // configs lack the field and deserialize to 0; EnsureHousehold repairs it to at least the current max id.

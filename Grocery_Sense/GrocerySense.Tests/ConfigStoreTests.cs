@@ -120,6 +120,26 @@ public sealed class ConfigStoreTests : IDisposable
     }
 
     [Fact]
+    public void Member_profile_concrete_types_survive_source_gen_roundtrip()
+    {
+        // Exercises ProfileDictionaryConverter.Write over the concrete types a fresh (never-round-tripped)
+        // profile holds: Dictionary<string,double>, List<string>, bool. They must reload as JsonElement.
+        var store = New();
+        var cfg = store.Load();
+        var profile = cfg.Household.Members[0].Profile;
+        profile["preferred_protein_weights"] = new Dictionary<string, double> { ["chicken"] = 2.0 };
+        profile["favorite_cuisines"] = new List<string> { "thai", "italian" };
+        profile["eats_meat"] = false;
+        store.Save(cfg);
+
+        var reloaded = New().Load().Household.Members[0].Profile; // fresh instance -> reads from disk
+        Assert.Equal(2.0, ((JsonElement)reloaded["preferred_protein_weights"]!).GetProperty("chicken").GetDouble());
+        var cuisines = ((JsonElement)reloaded["favorite_cuisines"]!).EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("thai", cuisines);
+        Assert.False(((JsonElement)reloaded["eats_meat"]!).GetBoolean());
+    }
+
+    [Fact]
     public void FoodInflation_seeds_defaults_when_absent()
     {
         var cfg = New().Load();
