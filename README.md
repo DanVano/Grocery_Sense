@@ -1,10 +1,11 @@
 # Grocery Sense (C# / .NET MAUI Blazor Hybrid)
 
-Port of the Python/Tkinter Grocery Sense prototype to an Android-first MAUI Blazor app (MudBlazor).
+Port of the Python/Tkinter Grocery Sense prototype to a **mobile-only (Android + iOS)** MAUI Blazor
+app (MudBlazor). The Windows head exists solely as a local dev harness — it is not a product target.
 **Status: v1 + v2 feature code complete** — receipt OCR, price intelligence, shopping list, deals,
 trip optimizer, budget, meal planning, family picks, backup/export; 380+ tests green. The v2 release
 is blocked on user-side hand-offs (JDK 17 + Android SDK 36, signing keystore, Azure budget cap) and
-the physical 6-month receipt backfill. **Current status + known gaps: `V2_FOLLOWUPS.md`.**
+the physical receipt backfill (50 receipts / last 12 months). **Current status + known gaps: `V2_FOLLOWUPS.md`.**
 
 ## Layout
 
@@ -52,7 +53,7 @@ dotnet test Grocery_Sense/GrocerySense.Tests/GrocerySense.Tests.csproj
 
 # the app — pick a platform head (needs MAUI workloads, see above):
 dotnet build Grocery_Sense/GrocerySense.App/GrocerySense.App.csproj -f net10.0-android
-dotnet build Grocery_Sense/GrocerySense.App/GrocerySense.App.csproj -f net10.0-windows10.0.19041.0   # local dev on Windows
+dotnet build Grocery_Sense/GrocerySense.App/GrocerySense.App.csproj -f net10.0-windows10.0.19041.0   # dev-only harness — NOT a product target
 # net10.0-ios / net10.0-maccatalyst require a Mac build host.
 ```
 
