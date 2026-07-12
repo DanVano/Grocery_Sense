@@ -31,6 +31,12 @@ public class DiResolutionSmokeTests
             => Task.FromResult(("fake-op", new Dictionary<string, object?>()));
     }
 
+    // ScanAlertNotificationService (registered in Core) needs an ILocalNotifier; the head binds the real one.
+    private sealed class FakeLocalNotifier : ILocalNotifier
+    {
+        public Task<bool> ShowAsync(string title, string body, CancellationToken ct = default) => Task.FromResult(false);
+    }
+
     [Fact]
     public void Every_registered_service_resolves()
     {
@@ -40,6 +46,7 @@ public class DiResolutionSmokeTests
         services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
         services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
         services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
+        services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
 
         using var provider = services.BuildServiceProvider(validateScopes: true);
 
@@ -59,6 +66,7 @@ public class DiResolutionSmokeTests
             services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
             services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
             services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
+            services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
             using var provider = services.BuildServiceProvider(validateScopes: true);
 
             var factory = provider.GetRequiredService<SqliteConnectionFactory>();

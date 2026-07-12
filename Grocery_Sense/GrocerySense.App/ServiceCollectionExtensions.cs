@@ -1,3 +1,4 @@
+using GrocerySense.App.Services;
 using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Integrations;
@@ -19,6 +20,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFlyerProvider, FlippClient>();
         services.AddSingleton<IFlyerLayoutClient, AppFlyerLayoutClient>();
         services.AddSingleton<Services.AppStartup>();
+
+        // ILocalNotifier binding for ScanAlertNotificationService (A7) — the repo's first platform conditional.
+        // Android posts a real notification; other heads no-op to false (in-app line still shows).
+#if ANDROID
+        services.AddSingleton<ILocalNotifier, AndroidLocalNotifier>();
+#else
+        services.AddSingleton<ILocalNotifier, NoOpLocalNotifier>();
+#endif
 
         return services;
     }

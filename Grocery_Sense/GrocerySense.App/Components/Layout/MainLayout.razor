@@ -5,6 +5,7 @@
 @inject AppStartup Startup
 @inject FamilyRequestsService Family
 @inject NavigationManager Nav
+@inject PendingNavigationService PendingNav
 
 <MudThemeProvider />
 <MudPopoverProvider />
@@ -72,13 +73,24 @@
     {
         Startup.Changed += OnStartupChanged;
         Nav.LocationChanged += OnLocationChanged;
+        PendingNav.RouteSet += OnPendingRouteSet; // warm notification tap
         _ = Startup.EnsureStartedAsync();
     }
 
     private void OnStartupChanged()
     {
         RefreshFamilyBadge();
+        ConsumePendingRoute(); // cold start: a notification-tap route was captured before Blazor was up
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnPendingRouteSet() => _ = InvokeAsync(ConsumePendingRoute);
+
+    // Navigate to a route captured from a notification tap (deep link, A7). Only once the shell is ready.
+    private void ConsumePendingRoute()
+    {
+        if (Startup.Status != StartupStatus.Ready) return; // still pending; drained on the Ready transition
+        if (PendingNav.TakePendingRoute() is { Length: > 0 } route) Nav.NavigateTo(route);
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
@@ -103,5 +115,6 @@
     {
         Startup.Changed -= OnStartupChanged;
         Nav.LocationChanged -= OnLocationChanged;
+        PendingNav.RouteSet -= OnPendingRouteSet;
     }
 }

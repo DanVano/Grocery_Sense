@@ -227,7 +227,34 @@ public sealed class PriceDropAlertService
             while (r.Read())
                 rows.Add((r.GetInt32(0), r.IsDBNull(1) ? 0 : r.GetInt32(1), r.GetDouble(2)));
         }
+        return OpenBelowUsualAlertsFromRows(conn, rows);
+    }
 
+    // Receipt-SCOPED scan (A7): open below-usual alerts from the lines of ONE receipt only. The single-scan
+    // notification path uses this — a global date-window scan (ScanRecentReceipts) would credit a freshly
+    // scanned receipt with alerts from OTHER recent receipts (e.g. backfilled recent-dated ones), the
+    // misattribution landmine (V2_FOLLOWUPS §4). Returns the number of new alerts opened.
+    public int ScanReceipt(long receiptId)
+    {
+        using var conn = _factory.Open();
+        var rows = new List<(int ItemId, int StoreId, double Paid)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "SELECT item_id, store_id, CAST(unit_price AS REAL) AS paid " +
+                "FROM prices WHERE receipt_id = $rid AND item_id IS NOT NULL AND unit_price IS NOT NULL";
+            cmd.Parameters.AddWithValue("$rid", receiptId);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                rows.Add((r.GetInt32(0), r.IsDBNull(1) ? 0 : r.GetInt32(1), r.GetDouble(2)));
+        }
+        return OpenBelowUsualAlertsFromRows(conn, rows);
+    }
+
+    // Shared body for both the date-window and receipt-scoped scans: for each (item, store) row priced far
+    // enough below usual, open ONE below-usual alert (strongest per pair), skipping dismissed + already-open.
+    private int OpenBelowUsualAlertsFromRows(SqliteConnection conn, List<(int ItemId, int StoreId, double Paid)> rows)
+    {
         var dismissed = LoadRecentDismissedKeys(conn, null);
         var itemIds = rows.Select(x => x.ItemId).Distinct().ToList();
         var itemsMap = ItemsRepo.GetItemsByIds(conn, itemIds);

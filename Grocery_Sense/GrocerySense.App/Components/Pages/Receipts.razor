@@ -7,6 +7,7 @@
 @inject ReceiptIngestionService Ingest
 @inject SqliteConnectionFactory Db
 @inject IDialogService DialogService
+@inject ScanAlertNotificationService ScanAlerts
 
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
@@ -268,6 +269,16 @@ else
                 _message = outcome.ReplacedExisting
                     ? $"Receipt #{outcome.ReceiptId} imported (replaced an earlier duplicate)."
                     : $"Receipt #{outcome.ReceiptId} imported.";
+
+                // Single-scan only (A7). Receipt-scoped so this can't inherit other receipts' alerts. The line
+                // is appended whenever alerts opened — regardless of whether the OS notification actually fired
+                // (notifications may be denied). The Backfill path never calls this — it must not notify.
+                if (outcome.ReceiptId is { } rid)
+                {
+                    var scan = await ScanAlerts.AfterSingleScanAsync(rid, _cts.Token);
+                    if (scan.Opened > 0)
+                        _message += $" · {scan.Opened} new price alert(s) — see Savings";
+                }
             }
             await ReloadAsync();
         }
