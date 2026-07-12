@@ -25,6 +25,8 @@ public static class ServiceCollectionExtensions
         // Android posts a real notification; other heads no-op to false (in-app line still shows).
 #if ANDROID
         services.AddSingleton<ILocalNotifier, AndroidLocalNotifier>();
+#elif IOS
+        services.AddSingleton<ILocalNotifier, IosLocalNotifier>();
 #else
         services.AddSingleton<ILocalNotifier, NoOpLocalNotifier>();
 #endif
