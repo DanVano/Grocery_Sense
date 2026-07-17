@@ -6,6 +6,13 @@ namespace GrocerySense.Core;
 // platform layer resolves it via DI. Thread-safe: MainActivity's intent thread writes, the UI thread reads.
 public sealed class PendingNavigationService
 {
+    // Allowlist of routes a notification tap may deep-link to. This is the trust boundary: on Android the
+    // launcher MainActivity is exported, so a hostile app can start it with an arbitrary `notification_route`
+    // intent extra. Restricting to known in-app paths stops that from forcing navigation to an unintended
+    // page or (via NavigateTo on an absolute URL) opening attacker content externally. Add a route here — the
+    // one place it gets security-reviewed — when a new deep link is introduced.
+    private static readonly HashSet<string> AllowedRoutes = new(StringComparer.Ordinal) { "/savings" };
+
     private readonly object _sync = new();
     private string? _pendingRoute;
 
@@ -15,7 +22,8 @@ public sealed class PendingNavigationService
 
     public void Set(string route)
     {
-        if (string.IsNullOrWhiteSpace(route)) return;
+        // Drop null/blank AND anything not on the allowlist — the incoming value is untrusted (OS intent).
+        if (!AllowedRoutes.Contains(route)) return;
         lock (_sync) _pendingRoute = route;
         RouteSet?.Invoke();
     }

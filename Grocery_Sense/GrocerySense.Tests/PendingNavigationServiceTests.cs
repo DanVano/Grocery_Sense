@@ -41,4 +41,24 @@ public sealed class PendingNavigationServiceTests
         Assert.Equal(0, fired);
         Assert.Null(svc.TakePendingRoute());
     }
+
+    // Security: the route arrives from an OS intent (Android's exported launcher activity), so anything
+    // outside the allowlist — an external URL, a scheme, or an unintended in-app page — must be dropped.
+    [Theory]
+    [InlineData("https://evil.example")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("//evil.example")]
+    [InlineData("/preferences")]
+    [InlineData("/savings?x=1")]
+    public void Non_allowlisted_route_is_rejected(string hostile)
+    {
+        var svc = new PendingNavigationService();
+        var fired = 0;
+        svc.RouteSet += () => fired++;
+
+        svc.Set(hostile);
+
+        Assert.Equal(0, fired);
+        Assert.Null(svc.TakePendingRoute());
+    }
 }
