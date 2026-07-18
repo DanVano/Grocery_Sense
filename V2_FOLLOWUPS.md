@@ -74,19 +74,24 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 
 - **The Flipp provider rides UNOFFICIAL backflipp endpoints — no key, no contract.** Flipp can change or
   block them without notice. Failures throw loud (disclosed per store in `FlyerSyncResult.Errors`); the
-  manual flyer-photo path (`FlyerIngestService`) is the standing fallback. ToS/legal review stays a v3
-  public-release gate (§5) — fine for the friends-&-family ring, not cleared for a store listing.
+  manual flyer-photo path (`FlyerIngestService`, reachable via Deals → "Import flyer") is the standing
+  fallback. Sync covers only `ShopHere && IsActive` stores (2026-07-18 — fewer unofficial calls, matches
+  every downstream consumer). ToS/legal review stays a v3 public-release gate (§5) — fine for the
+  friends-&-family ring, not cleared for a store listing.
 - **Alias-correction on an *unmapped* line does not back-create its price.** `ItemsAdminRepo.CorrectLineMapping`:
   a line that OCR left unmapped (`item_id` NULL) has no price row to re-point, so fixing it re-points the
   line + learns the alias but the historical price isn't recovered. Recovery path = re-import that receipt
   with `replaceExisting`. (Wrong→right mappings, the common case, fix fully.)
-- **Alerts refresh after a flyer sync, but not after a receipt scan, and there are no local notifications.**
-  The post-sync hook is wired (`FlyerSyncScheduler.SyncCompleted` → `PriceDropAlertService.RefreshEngineAlerts`,
-  commit `6b703f7`); a hook-handler failure is disclosed in `FlyerSyncResult.Errors`, not faked as a sync
-  failure. Receipt-scan-on-ingest alerting and `Plugin.LocalNotification` remain unbuilt (v1 grill Q8 → §5).
-  Backfill "suppression" therefore still relies on correct dates keeping old rows outside
-  `ScanRecentReceipts`' 21-day window. **If you wire scan-on-ingest later, make the backfill batch path
-  skip it** (see the `ImportBatchAsync` comment).
+- **Alerts refresh after flyer sync AND single receipt scans, with native local notifications (2026-07-18:
+  both halves built).** Post-sync hook: `FlyerSyncScheduler.SyncCompleted` → `PriceDropAlertService.RefreshEngineAlerts`
+  (a hook-handler failure is disclosed in `FlyerSyncResult.Errors`, not faked as a sync failure) — and since
+  the flyer-price unification (`GetActiveFlyerPricesBatch` reads `flyer_deals`) the refresh actually sees
+  synced deals; before that fix it scanned never-populated legacy tables. Receipt half:
+  `ScanAlertNotificationService.AfterSingleScanAsync` (receipt-scoped `ScanReceipt`, not the date-window
+  scan) + native notifiers (`AndroidLocalNotifier`/`IosLocalNotifier` — platform APIs, not
+  `Plugin.LocalNotification`) deep-linking to `/savings`, which now shows the persisted open alerts +
+  dismiss. **The backfill batch path deliberately skips scan-on-ingest** (see the `ImportBatchAsync`
+  comment) — keep it that way; backfill suppression still relies on correct dates.
 - **Family nav badge is best-effort** — refreshed on navigation (`LocationChanged`), gated on DB-ready,
   errors swallowed. No live event from the service; the `/family` page always shows the accurate count.
 - **Meal profile is a lossy single-profile projection.** `PreferencesService.GetMealProfile` maps
@@ -114,10 +119,9 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 4. **`dotnet test` piped into `tail`/`grep` in an `&&` chain masks the exit code** (the pipeline returns
    `tail`'s status), so a failing test can slip past a `&& git commit`. This bit once (committed red, amended
    clean). **Run `dotnet test` as its own command before committing.**
-5. **`dotnet test` does NOT build `GrocerySense.Integrations`** (Tests refs Core+Data only). Azure/Flipp
-   client compile errors are invisible to the test run — after touching `AzureReceiptOcrClient`,
-   `FlyerDocIntClient`, or `FlippClient`, run `dotnet build GrocerySense.Integrations` separately. Those
-   clients are **compile-verified only** (no offline test; behavior confirmed on-device).
+5. **(Obsolete since Tests gained an Integrations reference — kept for history.)** `GrocerySense.Tests`
+   now references `GrocerySense.Integrations`, so `dotnet test` builds it and `FlippClientTests` /
+   `AzureDocIntClientSecurityTests` run offline. Live endpoint behavior is still confirmed on-device only.
 6. **Adding a table breaks a migration test on purpose.** `DatabaseMigrationTests.Fresh_database_reaches_latest_version_with_all_tables`
    has an `expected` present-list and a `DoesNotContain` absent-list. A new table must be added to `expected`
    (this bit me: `member_requests` was in the old "deferred, must-not-exist" list).
@@ -156,9 +160,9 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 
 Out of v2 by decision (grill 2026-07-02), roughly in likely-value order:
 
-- **Receipt-scan-on-ingest alerts + local notifications** (`Plugin.LocalNotification`; Android 13+
-  `POST_NOTIFICATIONS`) — the "deal alert fires after a scan" experience. The flyer-sync half is now wired
-  (§3); the receipt half + notifications remain unbuilt.
+- **~~Receipt-scan-on-ingest alerts + local notifications~~ — DONE (2026-07-18, no longer deferred).**
+  Both halves built: see §3. Native platform notifiers were used instead of the `Plugin.LocalNotification`
+  package this entry originally named.
 - **Phase 3 real-data tuning** (blocked on backfill — see §1).
 - **v3 platform/public-store gate:** accounts/auth · multi-device sync · OCR backend proxy + per-user rate
   limiting · Flipp ToS/legal review (provider itself is **built**, §3 — the legal clearance is what's

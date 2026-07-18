@@ -41,7 +41,7 @@ release is blocked on user-side hand-offs (Android toolchain, keystore) — curr
 ## Build / run
 ```powershell
 dotnet test GrocerySense.Tests                                 # class libs + tests (SDK pinned by ../global.json)
-dotnet build GrocerySense.Integrations                         # REQUIRED after touching Azure/Flipp clients — dotnet test does NOT build this project
+dotnet build GrocerySense.Integrations                         # optional since Tests refs Integrations (dotnet test builds it); still handy for a fast compile check
 dotnet build GrocerySense.App -f net10.0-windows10.0.19041.0   # Windows head — DEV-ONLY harness, not a product target (retire as a verification target once the Android head builds); exe under bin\Debug\...\win-x64\
 ```
 - `dotnet build GrocerySense.sln` FAILS on Windows (iOS/macCatalyst heads need a Mac) — build per project/TFM as above.
