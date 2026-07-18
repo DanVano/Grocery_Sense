@@ -169,7 +169,12 @@ public sealed record MealProfile
 public sealed record SuggestedMeal(
     Recipe Recipe, double TotalScore, double PreferenceScore, double DealScore, double PriceScore,
     double VarietyScore, IReadOnlyList<string> Reasons,
-    double? CostTotal = null, double? CostPerServing = null, double CostKnownRatio = 0.0);
+    double? CostTotal = null, double? CostPerServing = null, double CostKnownRatio = 0.0,
+    // Pantry-aware marginal cost (null when the service has no DB factory): what this meal costs in NEW
+    // spend after discounting likely-on-hand ingredients. Exact-name matching only (same keying as the
+    // baseline cost estimate) — disclosed estimate, same caveats as CostTotal.
+    double? MarginalCostTotal = null, int? NewIngredientCount = null,
+    IReadOnlyList<string>? LikelyHaveIngredients = null);
 
 // An aggregated shopping-list ingredient across a week's suggested meals, with best-effort item mapping.
 // LikelyHave is a zero-effort pantry hint (receipt recency vs purchase cadence) — informational only,

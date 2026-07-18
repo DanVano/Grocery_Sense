@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using GrocerySense.Data;
+using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 
 namespace GrocerySense.Core;
@@ -50,6 +51,8 @@ public sealed class MealSuggestionService
             _priceHistory?.GetBaselinePrices(allIngredients, windowDays: 90)
             ?? new Dictionary<string, double?>();
 
+        var likelyHave = ComputeLikelyHaveSet(allIngredients);
+
         var suggestions = new List<SuggestedMeal>(filtered.Count);
         foreach (var r in filtered)
         {
@@ -67,12 +70,56 @@ public sealed class MealSuggestionService
             if (preferenceScore > 0.5) reasons.Add("Matches your meat or tag preferences.");
             if (varietyScore < 0) reasons.Add("You cooked this recently, slightly deprioritized.");
 
+            var haveNames = r.Ingredients.Where(i => likelyHave.Contains(i.ToLowerInvariant())).ToList();
+            int? newCount = _factory is null ? null : r.Ingredients.Count - haveNames.Count;
+            double? marginal = null;
+            if (_factory is not null && costTotal is not null)
+            {
+                var haveCost = haveNames.Sum(i => baselineMap.GetValueOrDefault(i.ToLowerInvariant()) ?? 0.0);
+                marginal = Math.Max(0.0, costTotal.Value - haveCost);
+            }
+            if (haveNames.Count > 0)
+                reasons.Add($"You likely already have {haveNames.Count} ingredient(s): {string.Join(", ", haveNames)}.");
+
             suggestions.Add(new SuggestedMeal(r, total, preferenceScore, dealScore, priceScore, varietyScore,
-                reasons, costTotal, costPerServing, costRatio));
+                reasons, costTotal, costPerServing, costRatio,
+                MarginalCostTotal: marginal, NewIngredientCount: newCount,
+                LikelyHaveIngredients: _factory is null ? null : haveNames));
         }
 
         // Stable sort by descending score (matches Python's stable sort).
         return suggestions.OrderByDescending(s => s.TotalScore).Take(maxRecipes).ToList();
+    }
+
+    // Same likely-have rule as WeeklyPlannerService.AnnotateLikelyHave (receipt recency vs cadence, shared
+    // LikelyHaveCadenceFraction), but resolved by EXACT canonical item name — the same keying the baseline
+    // cost estimate uses, and deliberately NOT IngredientMappingService: MapToItem buffers alias learns
+    // that a later flush (planner/ingest on the same singleton) would persist. This path must be read-only.
+    // ponytail: exact-name matching misses fuzzy variants; add a read-only mapper mode if that ever matters.
+    private HashSet<string> ComputeLikelyHaveSet(IReadOnlyList<string> ingredients)
+    {
+        var have = new HashSet<string>();
+        if (_factory is null || ingredients.Count == 0) return have;
+
+        using var conn = _factory.Open();
+        var itemsByName = ItemsRepo.GetItemsByNames(conn, ingredients); // keys are the lowercased names
+        if (itemsByName.Count == 0) return have;
+
+        var ids = itemsByName.Values.Select(i => i.Id).Distinct().ToList();
+        var lastMap = PricesRepo.GetLastReceiptPurchaseBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
+        var cadence = PricesRepo.GetPurchaseCadenceBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        foreach (var (name, item) in itemsByName)
+        {
+            if (!lastMap.TryGetValue(item.Id, out var lastIso) || !DateOnly.TryParse(lastIso, out var last)) continue;
+            var (interval, _) = cadence.GetValueOrDefault(item.Id, (null, null));
+            if (interval is not > 0) continue; // no cadence -> no inference (never guess)
+            var daysSince = today.DayNumber - last.DayNumber;
+            if (daysSince >= 0 && daysSince < interval.Value * WeeklyPlannerService.LikelyHaveCadenceFraction)
+                have.Add(name); // ingredients arrive lowercased from CollectAllIngredients
+        }
+        return have;
     }
 
     // ---- scoring helpers (internal for direct test coverage) ----

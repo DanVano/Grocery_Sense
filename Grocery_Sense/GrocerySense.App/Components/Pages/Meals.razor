@@ -9,6 +9,10 @@
 
 <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-2">
     <MudNumericField T="int" @bind-Value="_numRecipes" Label="Recipes" Min="1" Max="12" Style="max-width:110px" />
+    <MudSelect T="string" @bind-Value="_sortBy" Label="Sort" Dense="true" Style="max-width:180px">
+        <MudSelectItem T="string" Value="@("score")">Best value</MudSelectItem>
+        <MudSelectItem T="string" Value="@("new_spend")">Lowest new spend</MudSelectItem>
+    </MudSelect>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restaurant"
                OnClick="SuggestAsync" Disabled="@_busy">Suggest meals</MudButton>
     @if (_plan is not null && !_persisted)
@@ -36,7 +40,7 @@
     else
     {
         <MudExpansionPanels MultiExpansion="false" Class="mb-3">
-            @foreach (var meal in _plan.Suggestions)
+            @foreach (var meal in SortedSuggestions())
             {
                 <MudExpansionPanel>
                     <TitleContent>
@@ -44,7 +48,7 @@
                             <MudText>@meal.Recipe.Name</MudText>
                             <MudSpacer />
                             <MudText Typo="Typo.caption">
-                                score @meal.TotalScore.ToString("0.00")@(CostLabel(meal))
+                                score @meal.TotalScore.ToString("0.00")@(CostLabel(meal))@(NewSpendLabel(meal))
                             </MudText>
                         </div>
                     </TitleContent>
@@ -129,6 +133,21 @@
         catch (Exception ex) { Fail($"Add to list failed: {ex.Message}"); }
         finally { _busy = false; }
     }
+
+    private string _sortBy = "score";
+
+    // Display-order only — PersistToShoppingList still gets the original _plan, and ingredient
+    // aggregation is order-independent.
+    private IEnumerable<SuggestedMeal> SortedSuggestions() =>
+        _plan is null ? Array.Empty<SuggestedMeal>()
+        : _sortBy == "new_spend"
+            ? _plan.Suggestions.OrderBy(m => m.MarginalCostTotal ?? double.MaxValue)
+            : _plan.Suggestions;
+
+    private static string NewSpendLabel(SuggestedMeal meal) =>
+        meal.MarginalCostTotal is double m && meal.NewIngredientCount is int n
+            ? $" · {n} new ≈ ${m:0.00}"
+            : "";
 
     private static string CostLabel(SuggestedMeal meal) => meal.CostPerServing is double c
         ? $" · ≈ ${c:0.00}/serving{(meal.CostKnownRatio < 1.0 ? " (partial)" : "")}"
