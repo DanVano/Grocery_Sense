@@ -44,6 +44,13 @@ All Phase-1 skipped fixtures now run green + a preference-merge test. 184 tests,
 - **PriceHistory dict returns → typed records** (`ItemStats`, `StoreStats`, `DealClassification`) per the
   convention. Ported the full public surface (incl. `record_manual_price`, `get_baseline_prices`,
   `stats_for_item_by_store`, `describe_item_history`) since Phase-4 Planning/Optimizer consume them.
+  - **Superseded 2026-07-18 (ponytail audit):** the full-parity surface above was trimmed to what the C#
+    app actually calls — Phase-4 Planning ended up not consuming most of it. **Removed as unused:**
+    `StatsForItemByStore` + `StoreStats`, `DescribeItemHistory`, `GetItemStats` + `ItemStats`, and the
+    singular `GetBaselinePrice` (prod uses the batched `GetBaselinePrices` via MealSuggestion); also
+    `EnsureItemExists` and the ConfigStore deals cache, plus `ConfigStore.GetHouseholdAllergies` (live
+    allergy filtering is master-profile-only through `PreferencesService`). Commits `7510789` + `5a509ee`.
+    **Still live:** `DealClassification`, `GetBaselinePrices`, `RecordManualPrice`, `PriceDropAlert.GetAlerts`.
 - **PreferencesService = single-profile Replace, not a port.** Implemented only
   `ComputeEffectivePreferences`; **removed (not stubbed)** the v2 / Phase-8-UI methods (`GetMealProfile`,
   `GetHouseholdBaselineProfile`, `GetEffectiveEditStateForMember`, `ValidateAddExclude`,
