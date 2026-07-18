@@ -1,0 +1,45 @@
+@* Manual flyer import confirmation: the ingest service requires a store, so Import stays disabled until
+   one is picked. Validity dates prefill today/+7 (the same defaults FlyerSyncService uses) and are
+   clearable — a cleared date ingests as NULL = open-ended, matching FlyersRepo.ListActiveDeals. *@
+@using GrocerySense.Domain
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            @FileCount file@(FileCount == 1 ? "" : "s") selected
+        </MudText>
+        <MudSelect T="int?" @bind-Value="_storeId" Label="Store" Required="true" Margin="Margin.Dense">
+            @foreach (var s in Stores)
+            {
+                <MudSelectItem T="int?" Value="@((int?)s.Id)">@s.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudDatePicker Label="Valid from" @bind-Date="_from" Editable="true" Clearable="true"
+                       DateFormat="yyyy-MM-dd" />
+        <MudDatePicker Label="Valid to" @bind-Date="_to" Editable="true" Clearable="true"
+                       DateFormat="yyyy-MM-dd" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_storeId is null)"
+                   OnClick="Confirm">Import</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Result(int StoreId, string? ValidFrom, string? ValidTo);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public IReadOnlyList<Store> Stores { get; set; } = Array.Empty<Store>();
+    [Parameter] public int FileCount { get; set; }
+
+    private int? _storeId;
+    private DateTime? _from = DateTime.Today;
+    private DateTime? _to = DateTime.Today.AddDays(7);
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(new Result(
+        _storeId!.Value, _from?.ToString("yyyy-MM-dd"), _to?.ToString("yyyy-MM-dd"))));
+
+    private void Cancel() => MudDialog.Cancel();
+}

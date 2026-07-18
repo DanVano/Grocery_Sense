@@ -7,9 +7,11 @@
 @inject SqliteConnectionFactory Db
 @inject PreferencesService Prefs
 @inject FlyerSyncScheduler Sync
+@inject FlyerIngestService FlyerIngest
 @inject MultiBuyDealService MultiBuy
 @inject ShoppingListService Shopping
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <MudText Typo="Typo.h5" GutterBottom="true">Deals</MudText>
 
@@ -17,10 +19,14 @@
     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SyncAsync" Disabled="@_syncing">
         Sync flyers
     </MudButton>
-    @if (_syncing)
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.UploadFile"
+               OnClick="ImportAsync" Disabled="@(_syncing || _importing)">
+        Import flyer (photo/PDF)
+    </MudButton>
+    @if (_syncing || _importing)
     {
         <MudButton Variant="Variant.Text" OnClick="CancelSync">Cancel</MudButton>
-        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Syncing" />
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Working" />
     }
 </MudStack>
 
@@ -42,8 +48,7 @@
 else if (_dealsByStore.Count == 0)
 {
     <MudText Typo="Typo.body2">
-        No active deals. Flyer deals appear here after a flyer ingest or provider sync
-        (no deal provider is connected yet).
+        No active deals. Sync flyers to pull deals for your stores, or import a flyer photo/PDF.
     </MudText>
 }
 else
@@ -109,9 +114,18 @@ else
     private int _hiddenHardExcluded;
     private string? _error;
     private bool _syncing;
+    private bool _importing;
     private string? _syncMessage;
     private Severity _syncSeverity = Severity.Info;
     private CancellationTokenSource? _syncCts;
+
+    private static readonly FilePickerFileType FlyerFileTypes = new(
+        new Dictionary<DevicePlatform, IEnumerable<string>>
+        {
+            [DevicePlatform.Android] = new[] { "image/*", "application/pdf" },
+            [DevicePlatform.iOS] = new[] { "public.image", "com.adobe.pdf" },
+            [DevicePlatform.WinUI] = new[] { ".jpg", ".jpeg", ".png", ".webp", ".pdf" },
+        });
 
     protected override Task OnInitializedAsync() => ReloadAsync();
 
@@ -231,6 +245,86 @@ else
             _syncCts?.Dispose();
             _syncCts = null;
         }
+    }
+
+    // Manual flyer fallback: pick photo/PDF pages, confirm store + validity in a dialog, ingest via the
+    // Azure layout client. Picks are copied into app-data first (source URIs can expire on Android).
+    // Errors fail loud into the alert — missing Azure creds must read as "not configured", never as "no deals".
+    private async Task ImportAsync()
+    {
+        _importing = true;
+        _syncMessage = null;
+        _syncCts = new CancellationTokenSource();
+        var copied = new List<string>();
+        try
+        {
+            var picks = await FilePicker.Default.PickMultipleAsync(new PickOptions
+            {
+                PickerTitle = "Pick flyer photos or PDFs",
+                FileTypes = FlyerFileTypes,
+            });
+            var picked = picks?.Where(p => p is not null).Select(p => p!).ToList() ?? new List<FileResult>();
+            if (picked.Count == 0) return; // user backed out
+
+            List<Store> stores;
+            using (var conn = Db.Open())
+                stores = StoresRepo.ListStores(conn).ToList();
+            if (stores.Count == 0)
+            {
+                _syncSeverity = Severity.Info;
+                _syncMessage = "Add a store before importing a flyer.";
+                return;
+            }
+
+            var parameters = new DialogParameters<FlyerImportDialog>
+            {
+                { d => d.Stores, stores },
+                { d => d.FileCount, picked.Count },
+            };
+            var dialog = await DialogService.ShowAsync<FlyerImportDialog>("Import flyer", parameters);
+            if (await dialog.Result is not { Canceled: false, Data: FlyerImportDialog.Result choice }) return;
+
+            var ct = _syncCts.Token;
+            foreach (var pick in picked)
+                copied.Add(await CopyPickToAppDataAsync(pick, ct));
+
+            var rawJsonDir = Path.Combine(FileSystem.AppDataDirectory, "flyer_raw_json");
+            var result = await FlyerIngest.IngestAssetsAsync(choice.StoreId, choice.ValidFrom, choice.ValidTo,
+                copied, rawJsonDir, sourceType: "manual_upload", ct: ct);
+
+            _syncSeverity = Severity.Success;
+            _syncMessage = $"Imported {result.DealsCount} deal(s) from {result.AssetsCount} page(s).";
+            await ReloadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            _syncSeverity = Severity.Info;
+            _syncMessage = "Import cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _syncSeverity = Severity.Error;
+            _syncMessage = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+            _syncCts?.Dispose();
+            _syncCts = null;
+        }
+    }
+
+    // Picker streams are copied into app-data before ingest (mirrors Receipts.razor — source paths expire).
+    private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
+    {
+        var dir = Path.Combine(FileSystem.AppDataDirectory, "flyers");
+        Directory.CreateDirectory(dir);
+        var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
+        var path = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
+        await using var src = await pick.OpenReadAsync();
+        await using var dst = File.Create(path);
+        await src.CopyToAsync(dst, ct);
+        return path;
     }
 
     // Add a deal to the active shopping list. Mapped deals land under their store with price intel; unmapped

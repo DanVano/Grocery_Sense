@@ -197,6 +197,29 @@ public sealed class FlyerIngestServiceTests : IDisposable
         Assert.NotEmpty(Directory.GetFiles(_rawDir, "*.json"));
     }
 
+    // Split-brain regression (flyer unification): a manually ingested, mapped deal must surface through
+    // GetActiveFlyerPricesBatch — the query the optimizer/watchlist/alerts/badges read.
+    [Fact]
+    public async Task IngestAssets_mapped_deal_reaches_GetActiveFlyerPricesBatch()
+    {
+        using var db = new TempDb();
+        var storeId = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Apples").Id;
+        // Alias keyed by the mapper's own normalization of the combined deal text BuildDeal maps
+        // (title + extracted description, which here is "$5.99/kg Fresh Apples").
+        var normalized = new IngredientMappingService(db.Factory)
+            .MapToItem("Fresh Apples $5.99/kg Fresh Apples").NormalizedInput;
+        new ItemAliasesRepo().UpsertAlias(db.Conn, normalized, item, 1.0);
+        var svc = Build(db, CannedLayout());
+
+        await svc.IngestAssetsAsync(storeId, null, null, new[] { WriteAsset("flyer-bytes") }, _rawDir);
+
+        var quotes = PricesRepo.GetActiveFlyerPricesBatch(db.Conn, new[] { item }, new[] { storeId });
+        var quote = quotes[(item, storeId)];
+        Assert.Equal("flyer", quote.Source);
+        Assert.Equal(2.50, quote.UnitPrice); // "2/$5" -> $2.50 effective unit price
+    }
+
     [Fact]
     public async Task IngestAssets_requires_store_id()
     {
