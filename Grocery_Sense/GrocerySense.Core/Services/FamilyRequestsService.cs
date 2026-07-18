@@ -1,6 +1,7 @@
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
+using Microsoft.Data.Sqlite;
 
 namespace GrocerySense.Core;
 
@@ -12,23 +13,25 @@ namespace GrocerySense.Core;
 public sealed class FamilyRequestsService
 {
     private readonly ConfigStore _config;
-    private readonly ShoppingListService _shopping;
     private readonly RecipeEngine _engine;
     private readonly PreferencesService _preferences;
+    private readonly IngredientMappingService _mapper;
     private readonly SqliteConnectionFactory _factory;
 
-    public FamilyRequestsService(ConfigStore config, ShoppingListService shopping, RecipeEngine engine,
-        PreferencesService preferences, SqliteConnectionFactory factory)
+    public FamilyRequestsService(ConfigStore config, RecipeEngine engine,
+        PreferencesService preferences, IngredientMappingService mapper, SqliteConnectionFactory factory)
     {
         _config = config;
-        _shopping = shopping;
         _engine = engine;
         _preferences = preferences;
+        _mapper = mapper;
         _factory = factory;
     }
 
     // Add a recipe's ingredients to the shared list, attributed to the member. Returns the created request
     // (secondary picker) or null (master picker). Throws on an unknown recipe — fail loud, not an empty pick.
+    // Ingredient rows + the review request commit in ONE transaction: a mid-pick failure must not leave a
+    // partial meal on the list (or orphaned rows with no request to undo them from).
     public MemberRequestRow? PickMeal(int memberId, string recipeName)
     {
         var recipe = _engine.GetRecipeByName(recipeName)
@@ -42,12 +45,22 @@ public sealed class FamilyRequestsService
                 $"\"{recipe.Name}\" is no longer allowed by the household's allergy/exclude settings.");
 
         var name = MemberName(memberId);
-        var rowIds = recipe.Ingredients
-            .Select(ing => _shopping.AddSingleItem(ing, 1.0, "each", notes: $"Family pick: {recipeName}",
-                addedBy: name, addedByMemberId: memberId))
-            .ToList();
+        // Map before the write transaction (match-only; the mapper opens its own connection).
+        var mapped = recipe.Ingredients.Select(ing => (Name: ing, ItemId: _mapper.MapToItem(ing).ItemId)).ToList();
 
-        return CreateRequestIfSecondary(memberId, name, "meal", recipeName, rowIds);
+        MemberRequestRow? request;
+        using (var conn = _factory.Open())
+        using (var tx = conn.BeginTransaction())
+        {
+            var rowIds = mapped
+                .Select(m => ShoppingListRepo.AddItem(conn, m.Name, 1.0, "each", notes: $"Family pick: {recipeName}",
+                    addedBy: name, addedByMemberId: memberId, itemId: m.ItemId, tx: tx))
+                .ToList();
+            request = CreateRequestIfSecondary(conn, tx, memberId, name, "meal", recipeName, rowIds);
+            tx.Commit();
+        }
+        _mapper.FlushLearnedAliases(); // after commit — the flush opens its own write connection
+        return request;
     }
 
     // Add a single item to the shared list, attributed to the member.
@@ -57,10 +70,19 @@ public sealed class FamilyRequestsService
         if (label.Length == 0) throw new ArgumentException("Item text is required.");
 
         var name = MemberName(memberId);
-        var rowId = _shopping.AddSingleItem(label, quantity, string.IsNullOrEmpty(unit) ? "each" : unit,
-            notes: "Family pick", addedBy: name, addedByMemberId: memberId);
+        var itemId = _mapper.MapToItem(label).ItemId;
 
-        return CreateRequestIfSecondary(memberId, name, "item", label, new[] { rowId });
+        MemberRequestRow? request;
+        using (var conn = _factory.Open())
+        using (var tx = conn.BeginTransaction())
+        {
+            var rowId = ShoppingListRepo.AddItem(conn, label, quantity, string.IsNullOrEmpty(unit) ? "each" : unit,
+                notes: "Family pick", addedBy: name, addedByMemberId: memberId, itemId: itemId, tx: tx);
+            request = CreateRequestIfSecondary(conn, tx, memberId, name, "item", label, new[] { rowId });
+            tx.Commit();
+        }
+        _mapper.FlushLearnedAliases();
+        return request;
     }
 
     // Recipe names a member may pick: household hard excludes / allergies are hidden (whole-household, so no
@@ -90,23 +112,24 @@ public sealed class FamilyRequestsService
         MemberRequestsRepo.MarkReviewed(conn, requestId);
     }
 
-    // Undo a pick: soft-delete the shopping_list rows it created, then mark the request reviewed.
+    // Undo a pick: soft-delete the shopping_list rows it created + mark reviewed, in one transaction.
     public void RemoveRequest(int requestId)
     {
         using var conn = _factory.Open();
         var req = MemberRequestsRepo.GetRequest(conn, requestId);
         if (req is null) return;
-        foreach (var rowId in req.ItemRowIds) _shopping.SoftDeleteItem(rowId);
-        MemberRequestsRepo.MarkReviewed(conn, requestId);
+        using var tx = conn.BeginTransaction();
+        foreach (var rowId in req.ItemRowIds) ShoppingListRepo.DeleteItem(conn, rowId, tx);
+        MemberRequestsRepo.MarkReviewed(conn, requestId, tx);
+        tx.Commit();
     }
 
-    private MemberRequestRow? CreateRequestIfSecondary(int memberId, string name, string kind, string label,
-        IReadOnlyList<int> rowIds)
+    private MemberRequestRow? CreateRequestIfSecondary(SqliteConnection conn, SqliteTransaction tx,
+        int memberId, string name, string kind, string label, IReadOnlyList<int> rowIds)
     {
         if (!_config.IsSecondary(memberId)) return null; // master picks don't create a review row
-        using var conn = _factory.Open();
-        var reqId = MemberRequestsRepo.AddRequest(conn, memberId, name, kind, label, rowIds);
-        return MemberRequestsRepo.GetRequest(conn, reqId);
+        var reqId = MemberRequestsRepo.AddRequest(conn, memberId, name, kind, label, rowIds, tx);
+        return MemberRequestsRepo.GetRequest(conn, reqId, tx);
     }
 
     private string MemberName(int memberId) => _config.GetMember(memberId)?.Name is { Length: > 0 } n

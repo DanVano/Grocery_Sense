@@ -1,4 +1,5 @@
 using GrocerySense.Core;
+using GrocerySense.Data.Repositories;
 using Xunit;
 
 namespace GrocerySense.Tests;
@@ -16,8 +17,8 @@ public sealed class FamilyRequestsServiceTests : IDisposable
     {
         var config = new ConfigStore(_dir);
         var list = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
-        var svc = new FamilyRequestsService(config, list, new RecipeEngine(SampleFixture),
-            new PreferencesService(config), db.Factory);
+        var svc = new FamilyRequestsService(config, new RecipeEngine(SampleFixture),
+            new PreferencesService(config), new IngredientMappingService(db.Factory), db.Factory);
         return (svc, config, list);
     }
 
@@ -115,5 +116,46 @@ public sealed class FamilyRequestsServiceTests : IDisposable
         var (svc, config, _) = Build(db);
         var kid = config.AddMember("Kid");
         Assert.Throws<ArgumentException>(() => svc.PickMeal(kid.Id, "No Such Dish"));
+    }
+
+    // Pick ingredients map to canonical items (match-only) so family picks reach the optimizer.
+    [Fact]
+    public void Meal_pick_maps_known_ingredients_to_item_ids()
+    {
+        using var db = new TempDb();
+        var (svc, config, list) = Build(db);
+        var beef = ItemsRepo.CreateItem(db.Conn, "Beef").Id; // exact ingredient (case differs), maps via fuzzy
+        var kid = config.AddMember("Kid");
+
+        svc.PickMeal(kid.Id, "Beef Stir Fry");
+
+        var rows = list.GetActiveItems();
+        Assert.Contains(rows, r => r.ItemId == beef);       // known ingredient linked
+        Assert.Contains(rows, r => r.ItemId is null);        // unknown ingredients stay unmapped, never force-created
+    }
+
+    // No-partial-rows (CLAUDE.md): if the request insert fails, the ingredient rows roll back with it.
+    [Fact]
+    public void Meal_pick_rolls_back_ingredient_rows_when_request_insert_fails()
+    {
+        using var db = new TempDb();
+        var (svc, config, list) = Build(db);
+        var kid = config.AddMember("Kid");
+
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE TRIGGER fail_req BEFORE INSERT ON member_requests " +
+                              "BEGIN SELECT RAISE(ABORT, 'boom'); END;";
+            cmd.ExecuteNonQuery();
+        }
+
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => svc.PickMeal(kid.Id, "Beef Stir Fry"));
+
+        Assert.Empty(list.GetActiveItems()); // zero ingredient rows survived the failed pick
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText = "DROP TRIGGER fail_req;";
+            cmd.ExecuteNonQuery();
+        }
     }
 }
