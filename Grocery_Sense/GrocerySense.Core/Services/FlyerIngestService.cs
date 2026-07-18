@@ -126,7 +126,7 @@ public sealed class FlyerIngestService
 
         if (tryItemMapping)
         {
-            var m = _mapper.MapToItem(combined);
+            var m = _mapper.MapToItem(conn, combined);
             if (m.ItemId is not null)
             {
                 itemId = m.ItemId;
