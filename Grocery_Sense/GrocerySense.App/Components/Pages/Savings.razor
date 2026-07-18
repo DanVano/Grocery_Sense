@@ -122,6 +122,11 @@
                                            OnClick="@(() => AddAlertAsync(a))">
                                     @(a.SuggestedQty is double sq ? $"Add to list (qty {sq:0.##})" : "Add to list")
                                 </MudButton>
+                                @if (a.Id is not null)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                                   OnClick="@(() => DismissAsync(a))" aria-label="Dismiss alert" />
+                                }
                             </div>
                         </MudListItem>
                     }
@@ -154,8 +159,21 @@
     protected override async Task OnInitializedAsync()
     {
         await ReloadWatchlistAsync();
-        // Display-only compute (not persisted); staples only, so the list stays signal, not noise.
-        _alerts = await Guard(() => Alerts.ComputeEngineAlerts(staplesOnly: true)) ?? Array.Empty<PriceDropAlert>();
+        // Refresh + load the PERSISTED open alerts — the same rows receipt-scan notifications deep-link to,
+        // so a notification tap lands on the alert that fired it. Refresh is idempotent (re-derives open
+        // engine rows, honors the 30-day dismissed suppression) and coexists with the SyncCompleted DI hook.
+        await Guard(() => Alerts.RefreshEngineAlerts(staplesOnly: true));
+        await ReloadAlertsAsync();
+    }
+
+    private async Task ReloadAlertsAsync() =>
+        _alerts = await Guard(() => Alerts.GetAlerts()) ?? Array.Empty<PriceDropAlert>();
+
+    private async Task DismissAsync(PriceDropAlert alert)
+    {
+        if (alert.Id is not int id) return; // only persisted rows are dismissible
+        await Guard(() => { Alerts.DismissAlert(id); return 0; });
+        await ReloadAlertsAsync();
     }
 
     private Task<IEnumerable<string>> SearchItems(string value, CancellationToken ct)
@@ -186,8 +204,8 @@
         await ReloadWatchlistAsync();
     }
 
-    // Add an alert's item (with its suggested stock-up qty when present) to the active list. The alert cards
-    // are recomputed each visit and adding isn't the same as acting on it in-store, so the card is left in place.
+    // Add an alert's item (with its suggested stock-up qty when present) to the active list. Adding isn't the
+    // same as acting on it in-store, so the card stays open — the user dismisses it explicitly when done.
     private async Task AddAlertAsync(PriceDropAlert alert)
     {
         await Guard(() => { Shopping.AddAlertToList(alert); return 0; });
