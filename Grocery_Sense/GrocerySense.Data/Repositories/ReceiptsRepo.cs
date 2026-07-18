@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
@@ -22,17 +23,27 @@ public static class ReceiptsRepo
         if (!string.IsNullOrEmpty(until)) where.Add("r.purchase_date <= $until");
         var whereSql = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
 
+        // Select the receipt PAGE first (filter + limit/offset), then count line items only for that page.
+        // The old shape GROUP BY'd the entire receipt_line_items table before applying the LIMIT, so recent-
+        // receipt latency grew with total line-item history rather than with the page actually returned.
         using var cmd = Db.Command(conn, tx,
             $"""
-            SELECT r.id, r.purchase_date, r.total_amount, r.subtotal_amount, r.tax_amount, r.store_id,
-                   COALESCE(s.name, '') AS store_name, r.file_path, r.created_at, COALESCE(li.cnt, 0) AS item_count
-            FROM receipts r
-            LEFT JOIN stores s ON s.id = r.store_id
-            LEFT JOIN (SELECT receipt_id, COUNT(1) AS cnt FROM receipt_line_items GROUP BY receipt_id) li
-                ON li.receipt_id = r.id
-            {whereSql}
-            ORDER BY r.id DESC
-            LIMIT $limit OFFSET $offset
+            WITH page AS (
+                SELECT r.id, r.purchase_date, r.total_amount, r.subtotal_amount, r.tax_amount,
+                       r.store_id, r.file_path, r.created_at
+                FROM receipts r
+                {whereSql}
+                ORDER BY r.id DESC
+                LIMIT $limit OFFSET $offset
+            )
+            SELECT p.id, p.purchase_date, p.total_amount, p.subtotal_amount, p.tax_amount, p.store_id,
+                   COALESCE(s.name, '') AS store_name, p.file_path, p.created_at,
+                   COUNT(li.id) AS item_count
+            FROM page p
+            LEFT JOIN stores s ON s.id = p.store_id
+            LEFT JOIN receipt_line_items li ON li.receipt_id = p.id
+            GROUP BY p.id
+            ORDER BY p.id DESC
             """);
         if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
         if (!string.IsNullOrEmpty(since)) cmd.Parameters.AddWithValue("$since", since);
@@ -108,9 +119,19 @@ public static class ReceiptsRepo
 
     public static MonthSpend GetMonthSpend(SqliteConnection conn, string yearMonth, SqliteTransaction? tx = null)
     {
+        // Parse "yyyy-MM" into a half-open [start, end) date range so the query can seek
+        // idx_receipts_purchase_date instead of STRFTIME-scanning every receipt. purchase_date is ISO TEXT,
+        // so a lexical range compare is a correct date-range compare. AddMonths handles Dec->Jan and leap Feb.
+        if (!DateOnly.TryParseExact((yearMonth ?? "").Trim() + "-01", "yyyy-MM-dd",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+            throw new ArgumentException($"yearMonth must be in 'yyyy-MM' format: '{yearMonth}'", nameof(yearMonth));
+        var startIso = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var endIso = start.AddMonths(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
         using var cmd = Db.Command(conn, tx,
-            "SELECT total_amount FROM receipts WHERE STRFTIME('%Y-%m', purchase_date) = $ym AND total_amount IS NOT NULL");
-        cmd.Parameters.AddWithValue("$ym", yearMonth);
+            "SELECT total_amount FROM receipts WHERE purchase_date >= $start AND purchase_date < $end AND total_amount IS NOT NULL");
+        cmd.Parameters.AddWithValue("$start", startIso);
+        cmd.Parameters.AddWithValue("$end", endIso);
         using var r = cmd.ExecuteReader();
         decimal total = 0m;
         var count = 0;
