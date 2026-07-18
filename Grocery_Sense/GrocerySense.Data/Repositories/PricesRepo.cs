@@ -97,6 +97,35 @@ public static class PricesRepo
         return rows;
     }
 
+    // Batch of GetPricesForItem (all stores, oldest-first) for many items in one round-trip — replaces the
+    // optimizer's per-item history loop. Every requested id gets an entry (empty list if it has no rows in
+    // the window). Same `date >= cutoff` filter and ASC ordering as the single-item reader; id ASC tiebreak
+    // makes same-date ordering deterministic.
+    public static IReadOnlyDictionary<int, IReadOnlyList<PricePoint>> GetPricesForItemsBatch(
+        SqliteConnection conn, IReadOnlyList<int> itemIds, int sinceDays = 365, SqliteTransaction? tx = null)
+    {
+        var ids = CoerceIds(itemIds);
+        var rows = ids.ToDictionary(i => i, _ => new List<PricePoint>());
+        if (ids.Count == 0) return rows.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<PricePoint>)kv.Value);
+
+        foreach (var chunk in ids.Chunk(ParamChunk))
+        {
+            var ph = Placeholders(chunk.Length);
+            using var cmd = Db.Command(conn, tx,
+                $"SELECT {PriceCols} FROM prices WHERE item_id IN ({ph}) AND date >= $cutoff " +
+                "ORDER BY item_id ASC, date ASC, id ASC");
+            BindIn(cmd, chunk);
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var point = MapPricePoint(reader);
+                if (rows.TryGetValue(point.ItemId, out var list)) list.Add(point);
+            }
+        }
+        return rows.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<PricePoint>)kv.Value);
+    }
+
     public static PricePoint? GetMostRecentPrice(SqliteConnection conn, int itemId, int? storeId = null,
         SqliteTransaction? tx = null)
     {

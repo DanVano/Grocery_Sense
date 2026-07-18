@@ -84,11 +84,12 @@ public sealed class BasketOptimizerService
         // that never existed); PriceDropAlert is untouched (V2_FOLLOWUPS §4 landmine).
         var rates = cfg.FoodInflationByYear ?? InflationRates.Seed;
         var today = DateOnly.FromDateTime(DateTime.Today);
+        var historyByItem = PricesRepo.GetPricesForItemsBatch(conn, basketIds, sinceDays: 730);
         var usualAvg = new Dictionary<int, double>();
-        foreach (var id in basketIds) // ponytail: per-item query loop; batch only if basket size ever hurts.
+        foreach (var id in basketIds)
         {
             var dated = new List<(DateOnly Date, double Price)>();
-            foreach (var p in PricesRepo.GetPricesForItem(conn, id, storeId: null, sinceDays: 730))
+            foreach (var p in historyByItem[id])
                 if (DateOnly.TryParseExact(p.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
                     dated.Add((d, p.UnitPrice));
             if (InflationRates.WeightedAdjustedAverage(dated, today, rates).Baseline is { } b and > 0)
