@@ -185,6 +185,10 @@ public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadO
 // "uses ingredients that are on sale this week" line in FormatMealExplanation (DealScore > 0.2).
 public sealed record PickableRecipe(string Name, bool OnSaleThisWeek);
 
+// One overdue staple on the restock draft (StapleRestockService). No quantity suggestion on purpose:
+// receipt quantities carry units (kg/L/each) that can't be honestly mapped onto a new list row.
+public sealed record RestockSuggestion(int ItemId, string Name, int DaysSinceLast, int IntervalDays);
+
 // Household config — ports of config_store.py dataclasses.
 public record HouseholdMember(int Id, string Name, string Role,
     // Polymorphic profile — converted with Utf8JsonReader/Writer (no reflection) so UserConfig source-gen is AOT-safe.

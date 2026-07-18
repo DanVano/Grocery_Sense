@@ -3,6 +3,7 @@
 @using GrocerySense.Domain
 @inject ShoppingListService Shopping
 @inject ShoppingInsightsService Insights
+@inject StapleRestockService Restock
 
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.h5">Shopping List</MudText>
@@ -19,6 +20,29 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newItems))">Add</MudButton>
     </MudStack>
+
+    @if (_restock is { Count: > 0 })
+    {
+        <MudPaper Class="pa-3 mt-2" Outlined="true">
+            <div class="d-flex align-center">
+                <MudText Typo="Typo.subtitle2">Probably running low</MudText>
+                <MudSpacer />
+                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@_busy"
+                           OnClick="AddAllRestockAsync">Add all</MudButton>
+            </div>
+            @foreach (var s in _restock)
+            {
+                <div class="d-flex align-center gap-2">
+                    <MudText Typo="Typo.body2">
+                        @s.Name — every ~@s.IntervalDays d, last bought @s.DaysSinceLast d ago
+                    </MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@_busy"
+                               OnClick="@(() => AddRestockAsync(s))">Add</MudButton>
+                </div>
+            }
+        </MudPaper>
+    }
 }
 
 @if (_error is not null)
@@ -171,6 +195,7 @@ else
 
 @code {
     private IReadOnlyList<ShoppingListRow>? _items;
+    private IReadOnlyList<RestockSuggestion> _restock = Array.Empty<RestockSuggestion>();
     private IReadOnlyList<ShopModeGroup>? _groups;
     private Dictionary<int, SwapSuggestion> _swapByRow = [];
     private string? _swapCoverageNote;
@@ -211,6 +236,9 @@ else
         {
             _error = null;
             _items = await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true));
+            _restock = _shopMode
+                ? Array.Empty<RestockSuggestion>()
+                : await Task.Run(() => Restock.GetSuggestions());
             if (_shopMode)
             {
                 var (groups, swaps) = await Task.Run(() =>
@@ -231,6 +259,19 @@ else
         Shopping.AddItemsFromText(_newItems);
         _newItems = "";
     });
+
+    private Task AddRestockAsync(RestockSuggestion s) => RunAsync(() => AddRestock(s));
+
+    private Task AddAllRestockAsync()
+    {
+        var batch = _restock;
+        return RunAsync(() => { foreach (var s in batch) AddRestock(s); });
+    }
+
+    // RunAsync reloads afterwards, which refreshes _restock — added items drop out of the draft.
+    private void AddRestock(RestockSuggestion s) =>
+        Shopping.AddSingleItem(s.Name, itemId: s.ItemId, addedBy: "Restock",
+            notes: $"You buy this every ~{s.IntervalDays} day(s); last bought {s.DaysSinceLast} day(s) ago");
 
     private Task ToggleAsync(int rowId, bool checkedOff) =>
         RunAsync(() => Shopping.CheckOffItem(rowId, checkedOff));

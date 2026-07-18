@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WatchlistService>();
         services.AddSingleton<ShoppingListService>();
         services.AddSingleton<ShoppingInsightsService>();
+        services.AddSingleton<StapleRestockService>();
         services.AddSingleton<PlanningService>();
         services.AddSingleton<BasketOptimizerService>();
         services.AddSingleton<ReceiptIngestionService>();
