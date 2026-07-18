@@ -136,7 +136,8 @@ public static class ReceiptsRepo
         decimal total = 0m;
         var count = 0;
         while (r.Read()) { total += r.GetDecimal(0); count++; }
-        return new MonthSpend(yearMonth, total, count);
+        // Echo the canonical month (parsed, so never null and whitespace-normalized) as the label.
+        return new MonthSpend(start.ToString("yyyy-MM", CultureInfo.InvariantCulture), total, count);
     }
 
     public static IReadOnlyList<SpendTrendPoint> GetSpendTrend(SqliteConnection conn, int months = 12,
