@@ -102,7 +102,7 @@ public sealed class IngredientMappingService
             if (AutoLearn && confidence >= LearnThreshold)
                 _pendingLearns.Add((normalized, bestItemId, confidence, "auto_fuzzy"));
 
-            return new MappingResult(bestItemId, best.Value, confidence, "fuzzy", normalized);
+            return new MappingResult(bestItemId, choices[best.Index].Name, confidence, "fuzzy", normalized);
         }
     }
 
@@ -165,7 +165,10 @@ public sealed class IngredientMappingService
         if (_choices is null)
         {
             _choices = ItemsRepo.ListAllItemNames(conn).Select(x => (x.Id, x.CanonicalName)).ToList();
-            _choiceNames = _choices.Select(c => c.Name).ToList();
+            // Score against lowercased names: the input side is already lowercased by NormalizePipeline, and
+            // FuzzySharp's TokenSortScorer is case-sensitive — without this "milk" vs "Milk" scores 0.75 and
+            // misses the 0.78 accept threshold. Python's rapidfuzz default_process lowercases both sides.
+            _choiceNames = _choices.Select(c => c.Name.ToLowerInvariant()).ToList();
         }
         return (_choices, _choiceNames!);
     }

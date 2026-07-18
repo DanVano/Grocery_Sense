@@ -9,23 +9,34 @@ namespace GrocerySense.Core;
 public sealed class ShoppingListService
 {
     private readonly SqliteConnectionFactory _factory;
+    private readonly IngredientMappingService _mapper;
 
-    public ShoppingListService(SqliteConnectionFactory factory) => _factory = factory;
+    public ShoppingListService(SqliteConnectionFactory factory, IngredientMappingService mapper)
+    {
+        _factory = factory;
+        _mapper = mapper;
+    }
 
     // Split a comma-separated string into items, adding each (blank entries skipped). Returns the new rows.
+    // Each name is mapped to a canonical item (match-only — typos stay unmapped, never force-created) so
+    // manual adds reach the optimizer/Shop Mode intel; the user's typed text stays as the display name.
     public IReadOnlyList<ShoppingListRow> AddItemsFromText(string text, int? plannedStoreId = null,
         string? addedBy = null, int? memberId = null)
     {
-        using var conn = _factory.Open();
         var created = new List<ShoppingListRow>();
-        foreach (var raw in (text ?? "").Split(','))
+        using (var conn = _factory.Open())
         {
-            var name = raw.Trim();
-            if (name.Length == 0) continue;
-            var rowId = ShoppingListRepo.AddItem(conn, name, addedBy: addedBy, addedByMemberId: memberId);
-            if (plannedStoreId is not null) ShoppingListRepo.SetPlannedStoreId(conn, rowId, plannedStoreId);
-            if (ShoppingListRepo.GetItem(conn, rowId) is { } match) created.Add(match);
+            foreach (var raw in (text ?? "").Split(','))
+            {
+                var name = raw.Trim();
+                if (name.Length == 0) continue;
+                var rowId = ShoppingListRepo.AddItem(conn, name, addedBy: addedBy, addedByMemberId: memberId,
+                    itemId: _mapper.MapToItem(name).ItemId);
+                if (plannedStoreId is not null) ShoppingListRepo.SetPlannedStoreId(conn, rowId, plannedStoreId);
+                if (ShoppingListRepo.GetItem(conn, rowId) is { } match) created.Add(match);
+            }
         }
+        _mapper.FlushLearnedAliases();
         return created;
     }
 
@@ -38,9 +49,15 @@ public sealed class ShoppingListService
     public int AddSingleItem(string name, double? quantity = null, string unit = "", int? plannedStoreId = null,
         string? notes = null, string? addedBy = null, int? addedByMemberId = null, int? itemId = null)
     {
-        using var conn = _factory.Open();
-        return ShoppingListRepo.AddItem(conn, name, quantity ?? 1.0, unit ?? "", category: "", notes: notes ?? "",
-            addedBy: addedBy, addedByMemberId: addedByMemberId, plannedStoreId: plannedStoreId, itemId: itemId);
+        // No explicit item link -> try to map the name (match-only; unknowns stay NULL and the optimizer
+        // discloses them instead of silently dropping the row).
+        itemId ??= _mapper.MapToItem(name).ItemId;
+        int rowId;
+        using (var conn = _factory.Open())
+            rowId = ShoppingListRepo.AddItem(conn, name, quantity ?? 1.0, unit ?? "", category: "", notes: notes ?? "",
+                addedBy: addedBy, addedByMemberId: addedByMemberId, plannedStoreId: plannedStoreId, itemId: itemId);
+        _mapper.FlushLearnedAliases();
+        return rowId;
     }
 
     // Add a flyer deal to the active list. A mapped deal (ItemId set + item still exists) resolves to the

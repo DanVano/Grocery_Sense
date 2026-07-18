@@ -287,7 +287,7 @@ public sealed class BasketOptimizerServiceTests : IDisposable
     {
         using var db = new TempDb();
         var (svc, _) = Build(db);
-        var list = new ShoppingListService(db.Factory);
+        var list = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         int a = Store(db, "A"), b = Store(db, "B");
         int x = Listed(db, "x"), y = Listed(db, "y"), z = Listed(db, "z"), w = Listed(db, "w");
         Price(db, x, a, 10); Price(db, y, a, 10); Price(db, z, a, 5); Price(db, w, a, 5);
@@ -309,7 +309,7 @@ public sealed class BasketOptimizerServiceTests : IDisposable
     public void ApplyOptimizerPlan_rolls_back_on_failure()
     {
         using var db = new TempDb();
-        var list = new ShoppingListService(db.Factory);
+        var list = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var store = Store(db, "A");
         var item = Listed(db, "milk");
         ShoppingListRepo.BulkSetPlannedStoreIdsByItemId(db.Conn, new[] { (item, (int?)store) }); // pre-set
@@ -326,6 +326,34 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         // The pre-set assignment survived (clear + write rolled back together).
         var row = ShoppingListRepo.ListActiveItems(db.Conn).Single(r => r.ItemId == item);
         Assert.Equal(store, row.PlannedStoreId);
+    }
+
+    // Unlinked rows (item_id NULL) can't be priced — they must be disclosed, not silently dropped.
+    [Fact]
+    public void Unmapped_list_rows_produce_a_warning()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var store = Store(db, "A");
+        var milk = Listed(db, "milk");
+        Price(db, milk, store, 4);
+        ShoppingListRepo.AddItem(db.Conn, "mystery scribble"); // no item link
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Contains(r.Warnings, w => w.Contains("aren't linked"));
+        Assert.Equal(4, r.BasketTotalEstimated); // unlinked row priced nothing
+    }
+
+    [Fact]
+    public void Fully_mapped_basket_has_no_unlinked_warning()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var store = Store(db, "A");
+        Price(db, Listed(db, "milk"), store, 4);
+
+        Assert.DoesNotContain(svc.Optimize("best_savings").Warnings, w => w.Contains("aren't linked"));
     }
 
     // Split-brain regression (flyer unification): an active flyer_deals row must win the item's quote.
@@ -365,7 +393,7 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         Price(db, pork, store, 8);
 
         var result = svc.Optimize("best_savings");
-        var applied = new ShoppingListService(db.Factory).ApplyOptimizerPlanToActiveList(result);
+        var applied = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory)).ApplyOptimizerPlanToActiveList(result);
 
         Assert.Single(applied.Warnings, w => w.Contains("hard-excluded"));
     }

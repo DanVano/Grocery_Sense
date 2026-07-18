@@ -41,6 +41,20 @@ public class IngredientMappingFixtureTests
         Assert.Contains(cases, c => c.Case == "exact_match" && c.Canonicals.Length == 2);
     }
 
+    // Python-parity regression: rapidfuzz lowercases both sides (default_process); the FuzzySharp scorer is
+    // case-sensitive, so without lowercased choices "milk" vs "Milk" scores 0.75 and misses the 0.78 gate.
+    [Fact]
+    public void MapToItem_fuzzy_ignores_canonical_name_casing()
+    {
+        using var db = new TempDb();
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+
+        var result = new IngredientMappingService(db.Factory).MapToItem("milk");
+
+        Assert.Equal(item, result.ItemId);
+        Assert.Equal("Milk", result.CanonicalName); // original casing reported, not the scoring key
+    }
+
     [Theory]
     [MemberData(nameof(AmbiguityCases), DisableDiscoveryEnumeration = true)]
     public void MapToItem_matches_python(AmbiguityCase c)

@@ -15,7 +15,7 @@ public sealed class FamilyRequestsServiceTests : IDisposable
     private (FamilyRequestsService Svc, ConfigStore Config, ShoppingListService List) Build(TempDb db)
     {
         var config = new ConfigStore(_dir);
-        var list = new ShoppingListService(db.Factory);
+        var list = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var svc = new FamilyRequestsService(config, list, new RecipeEngine(SampleFixture),
             new PreferencesService(config), db.Factory);
         return (svc, config, list);

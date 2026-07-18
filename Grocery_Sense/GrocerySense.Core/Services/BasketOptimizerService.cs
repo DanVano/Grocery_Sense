@@ -53,8 +53,11 @@ public sealed class BasketOptimizerService
         using var conn = _factory.Open();
         var stores = StoresRepo.ListStores(conn).Where(s => s.ShopHere && s.IsActive).ToList();
 
-        // Basket = distinct canonical item_ids on the active list, with summed quantities.
-        var rows = ShoppingListRepo.ListActiveItems(conn).Where(r => r.ItemId is not null).ToList();
+        // Basket = distinct canonical item_ids on the active list, with summed quantities. Rows without an
+        // item link can't be priced — they're counted and disclosed as a warning, never silently dropped.
+        var allRows = ShoppingListRepo.ListActiveItems(conn);
+        var unmappedRows = allRows.Count(r => r.ItemId is null);
+        var rows = allRows.Where(r => r.ItemId is not null).ToList();
         var qtyByItem = rows.GroupBy(r => r.ItemId!.Value)
             .ToDictionary(g => g.Key, g => g.Sum(r => r.Quantity <= 0 ? 1.0 : r.Quantity));
         // Per-item priority: must_have wins, then normal; wait_for_sale only when every row for the item is
@@ -65,7 +68,8 @@ public sealed class BasketOptimizerService
         var itemsMap = ItemsRepo.GetItemsByIds(conn, itemIds);
 
         if (stores.Count == 0 || itemIds.Count == 0)
-            return new BasketOptimizationResult(effMode, Array.Empty<StorePlan>(), 0, null, null, Array.Empty<string>());
+            return new BasketOptimizationResult(effMode, Array.Empty<StorePlan>(), 0, null, null,
+                unmappedRows > 0 ? new[] { UnmappedWarning(unmappedRows) } : Array.Empty<string>());
 
         // Partition hard-excluded items OUT (safety net). Soft excludes have no optimizer effect.
         var hardIds = itemIds.Where(id => itemsMap.TryGetValue(id, out var it) && IsHardExcluded(eff, it.CanonicalName)).ToHashSet();
@@ -159,10 +163,13 @@ public sealed class BasketOptimizerService
         if (hybrid) GreedyAddStores(stores, priceable, priceByStore, plan, plannedStores, maxStores, pct, minSave);
 
         var result = BuildResult(effMode, stores, primary.Id, plan, hardIds, itemsMap, qtyByItem, usualAvg, sixLow, plannedStores);
-        if (waitIds.Count > 0)
+        if (waitIds.Count > 0 || unmappedRows > 0)
         {
             var warnings = result.Warnings.ToList();
-            warnings.Add($"{waitIds.Count} item(s) marked 'wait for sale' aren't on sale now and were left unplanned.");
+            if (unmappedRows > 0)
+                warnings.Add(UnmappedWarning(unmappedRows));
+            if (waitIds.Count > 0)
+                warnings.Add($"{waitIds.Count} item(s) marked 'wait for sale' aren't on sale now and were left unplanned.");
             result = result with { Warnings = warnings };
         }
         return result;
@@ -319,6 +326,9 @@ public sealed class BasketOptimizerService
 
         return new BasketOptimizationResult(mode, plans, basketTotal, saveUsual, saveLow, warnings);
     }
+
+    private static string UnmappedWarning(int count) =>
+        $"{count} list item(s) aren't linked to a tracked item and were left out of the plan (fix on the Items page).";
 
     private static double? SumOrNull(IEnumerable<double?> values)
     {

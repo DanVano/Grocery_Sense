@@ -14,7 +14,7 @@ public sealed class WeeklyPlannerServiceTests
         new MealSuggestionService(new RecipeEngine(SampleFixture), priceHistory: null, factory: db.Factory),
         new IngredientMappingService(db.Factory), db.Factory);
 
-    private static ShoppingListService List(TempDb db) => new(db.Factory);
+    private static ShoppingListService List(TempDb db) => new(db.Factory, new IngredientMappingService(db.Factory));
 
     private static SuggestedMeal Meal(string name, string[] ingredients, int rid = 1) =>
         new(new Recipe(rid, name, null, ingredients, Array.Empty<string>(), Array.Empty<string>()),

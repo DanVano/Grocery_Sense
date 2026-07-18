@@ -11,7 +11,7 @@ public sealed class ShoppingListServiceTests
     public void AddItemsFromText_splits_and_skips_blanks()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
 
         var created = svc.AddItemsFromText("Milk, Eggs, , Bread ");
 
@@ -19,11 +19,49 @@ public sealed class ShoppingListServiceTests
         Assert.Equal(3, svc.GetActiveItems().Count);
     }
 
+    // Manual adds map to canonical items (match-only) so they reach the optimizer/Shop Mode intel.
+    [Fact]
+    public void AddSingleItem_maps_known_name_to_item_id()
+    {
+        using var db = new TempDb();
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+
+        var rowId = svc.AddSingleItem("Milk");
+
+        Assert.Equal(item, ShoppingListRepo.GetItem(db.Conn, rowId)!.ItemId);
+    }
+
+    [Fact]
+    public void AddSingleItem_keeps_unknown_name_unmapped()
+    {
+        using var db = new TempDb();
+        ItemsRepo.CreateItem(db.Conn, "Milk");
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+
+        var rowId = svc.AddSingleItem("Zorbulon Crisps"); // no match -> stays NULL, never force-created
+
+        Assert.Null(ShoppingListRepo.GetItem(db.Conn, rowId)!.ItemId);
+    }
+
+    [Fact]
+    public void AddItemsFromText_maps_each_entry_independently()
+    {
+        using var db = new TempDb();
+        var milk = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        var eggs = ItemsRepo.CreateItem(db.Conn, "Eggs").Id;
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+
+        var created = svc.AddItemsFromText("Milk, Zorbulon Crisps, Eggs");
+
+        Assert.Equal(new int?[] { milk, null, eggs }, created.Select(r => r.ItemId));
+    }
+
     [Fact]
     public void CheckOff_and_SoftDelete_drop_from_active()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var keep = svc.AddSingleItem("Milk");
         var check = svc.AddSingleItem("Eggs");
         var del = svc.AddSingleItem("Bread");
@@ -40,7 +78,7 @@ public sealed class ShoppingListServiceTests
     public void ClearAllCheckedOff_removes_only_checked()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var keep = svc.AddSingleItem("Milk");
         var check = svc.AddSingleItem("Eggs");
         svc.CheckOffItem(check);
@@ -54,7 +92,7 @@ public sealed class ShoppingListServiceTests
     public void AddSingleItem_persists_quantity_unit_and_store()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id; // planned_store_id is a FK
         svc.AddSingleItem("Apples", quantity: 3, unit: "kg", plannedStoreId: store, notes: "fuji");
 
@@ -70,7 +108,7 @@ public sealed class ShoppingListServiceTests
     public void AddDealToList_maps_to_canonical_name_and_keeps_item_link()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var item = ItemsRepo.CreateItem(db.Conn, "2% Milk").Id;
         var deal = MakeDeal(store, title: "MILK 2L", priceText: "2/$5", itemId: item);
@@ -91,7 +129,7 @@ public sealed class ShoppingListServiceTests
     public void AddDealToList_unmapped_deal_is_a_disclosed_text_row()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var deal = MakeDeal(store, title: "Fresh Basil", priceText: "$1.99", itemId: null);
 
@@ -108,7 +146,7 @@ public sealed class ShoppingListServiceTests
     public void AddAlertToList_carries_suggested_quantity_and_note()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
         var alert = MakeAlert(item, "Milk", store, suggestedQty: 2, note: "You buy this ~every 21 days; buy 2");
@@ -127,7 +165,7 @@ public sealed class ShoppingListServiceTests
     public void AddAlertToList_without_suggested_qty_falls_back_to_one()
     {
         using var db = new TempDb();
-        var svc = new ShoppingListService(db.Factory);
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var item = ItemsRepo.CreateItem(db.Conn, "Eggs").Id;
         var alert = MakeAlert(item, "Eggs", store, suggestedQty: null, note: null);
