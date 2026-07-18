@@ -8,9 +8,7 @@ namespace GrocerySense.Core;
 
 public record NormalizedPrice(double NormUnitPrice, string NormUnit, string Note);
 
-// PriceHistoryService results — typed replacements for the Python dict returns.
-public record ItemStats(Item Item, double? AvgUnitPrice, double? MinUnitPrice, double? MaxUnitPrice, int SampleCount);
-
+// PriceHistoryService result — typed replacement for the Python dict return.
 public record DealClassification(
     Item? Item, bool HasHistory, string Classification, double? PercentVsAvg,
     double? AvgUnitPrice, double? MinUnitPrice, double? MaxUnitPrice, int SampleCount, string Message);

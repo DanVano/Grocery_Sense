@@ -135,18 +135,6 @@ public sealed class ConfigStore
         Save(cfg with { Household = cfg.Household with { Members = members, ActiveMemberId = active } });
     }
 
-    // Union of all members' allergy tokens (canonical lowercase). Single member in v1, but the union
-    // shape stays correct if v2 adds members.
-    public IReadOnlySet<string> GetHouseholdAllergies()
-    {
-        var allergies = new HashSet<string>();
-        foreach (var m in Load().Household.Members)
-            if (m.Profile.TryGetValue("allergies", out var v))
-                foreach (var token in CoerceStringList(v))
-                    allergies.Add(token);
-        return allergies;
-    }
-
     // ---------------- internals ----------------
 
     private UserConfig ReadRawConfig()
@@ -251,38 +239,6 @@ public sealed class ConfigStore
         return r is RoleMaster or RoleSecondary ? r : RoleSecondary;
     }
 
-    // Coerce a profile value (List, JsonElement array/string, or comma string) to lowercase tokens.
-    private static IEnumerable<string> CoerceStringList(object? value)
-    {
-        switch (value)
-        {
-            case null:
-                yield break;
-            case string s:
-                foreach (var t in SplitTokens(s)) yield return t;
-                break;
-            case JsonElement je when je.ValueKind == JsonValueKind.String:
-                foreach (var t in SplitTokens(je.GetString() ?? "")) yield return t;
-                break;
-            case JsonElement je when je.ValueKind == JsonValueKind.Array:
-                foreach (var el in je.EnumerateArray())
-                {
-                    var t = (el.ValueKind == JsonValueKind.String ? el.GetString() : el.ToString())?.Trim().ToLowerInvariant();
-                    if (!string.IsNullOrEmpty(t)) yield return t;
-                }
-                break;
-            case System.Collections.IEnumerable seq:
-                foreach (var el in seq)
-                {
-                    var t = el?.ToString()?.Trim().ToLowerInvariant();
-                    if (!string.IsNullOrEmpty(t)) yield return t;
-                }
-                break;
-        }
-    }
-
-    private static IEnumerable<string> SplitTokens(string s) =>
-        s.Split(',').Select(p => p.Trim().ToLowerInvariant()).Where(p => p.Length > 0);
 
     // Container-level copy so a handed-out snapshot can be mutated without touching the cache.
     private static UserConfig Clone(UserConfig c) => c with
