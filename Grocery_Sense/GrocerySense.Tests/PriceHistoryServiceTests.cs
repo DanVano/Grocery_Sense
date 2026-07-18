@@ -9,7 +9,7 @@ public sealed class PriceHistoryServiceTests
     private static int Store(TempDb db, string name = "Loblaws") => StoresRepo.CreateStore(db.Conn, name).Id;
 
     [Fact]
-    public void Record_then_GetItemStats_aggregates()
+    public void Record_then_GetBaselinePrices_aggregates_case_insensitively()
     {
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
@@ -18,12 +18,11 @@ public sealed class PriceHistoryServiceTests
         svc.RecordPriceFromReceipt("Milk", store, 3.00, "each");
         svc.RecordPriceFromReceipt("Milk", store, 5.00, "each");
 
-        var stats = svc.GetItemStats("milk")!; // case-insensitive lookup
-        Assert.Equal(2, stats.SampleCount);
-        Assert.Equal(3.00, stats.MinUnitPrice);
-        Assert.Equal(5.00, stats.MaxUnitPrice);
-        Assert.Equal(4.00, stats.AvgUnitPrice);
-        Assert.Equal(4.00, svc.GetBaselinePrice("Milk"));
+        // Batched baseline (the API MealSuggestionService uses) = trailing-window average, keyed by the
+        // trimmed input; lookup is case-insensitive (recorded "Milk", queried "milk"). Repo-level min/max/count
+        // is covered by PricesRepoTests.
+        var baselines = svc.GetBaselinePrices(new[] { "milk" });
+        Assert.Equal(4.00, baselines["milk"]!.Value);
     }
 
     [Fact]
