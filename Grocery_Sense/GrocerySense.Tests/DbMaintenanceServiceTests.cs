@@ -23,6 +23,33 @@ public sealed class DbMaintenanceServiceTests : IDisposable
     }
 
     [Fact]
+    public void CleanupShareArtifacts_deletes_only_old_known_paths()
+    {
+        var oldBackup = Path.Combine(_dir, "grocery_sense_20260101_000000.db");
+        var freshBackup = Path.Combine(_dir, "grocery_sense_20260718_000000.db");
+        var unrelated = Path.Combine(_dir, "keep.db");
+        var oldExport = Path.Combine(_dir, "export_csv_20260101_000000");
+        File.WriteAllText(oldBackup, "old");
+        File.WriteAllText(freshBackup, "fresh");
+        File.WriteAllText(unrelated, "keep");
+        Directory.CreateDirectory(oldExport);
+        File.WriteAllText(Path.Combine(oldExport, "receipts.csv"), "old");
+        File.SetLastWriteTimeUtc(oldBackup, DateTime.UtcNow.AddDays(-2));
+        File.SetLastWriteTimeUtc(freshBackup, DateTime.UtcNow);
+        File.SetLastWriteTimeUtc(unrelated, DateTime.UtcNow.AddDays(-2));
+        Directory.SetLastWriteTimeUtc(oldExport, DateTime.UtcNow.AddDays(-2));
+
+        var removed = DbMaintenanceService.CleanupShareArtifacts(
+            _dir, DateTime.UtcNow.AddHours(-24));
+
+        Assert.Equal(2, removed);
+        Assert.False(File.Exists(oldBackup));
+        Assert.False(Directory.Exists(oldExport));
+        Assert.True(File.Exists(freshBackup));
+        Assert.True(File.Exists(unrelated));
+    }
+
+    [Fact]
     public void Backup_produces_a_valid_db_copy_with_the_data()
     {
         using var db = new TempDb();

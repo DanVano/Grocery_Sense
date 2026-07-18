@@ -31,6 +31,38 @@ public sealed class DbMaintenanceService
         return destPath;
     }
 
+    // Sweeps stale share artifacts this service writes into the OS cache dir (plaintext DB backups and
+    // CSV/JSON export folders) once they're older than cutoffUtc, so a shared copy doesn't linger in the
+    // clear after the share sheet is done. Narrow by name so it never touches unrelated cache files. Returns
+    // the count removed. Best-effort: a cache dir the OS already evicted just returns 0.
+    public static int CleanupShareArtifacts(string cacheDir, DateTime cutoffUtc)
+    {
+        if (!Directory.Exists(cacheDir)) return 0;
+        var removed = 0;
+
+        foreach (var file in Directory.EnumerateFiles(
+                     cacheDir, "grocery_sense_*.db", SearchOption.TopDirectoryOnly))
+        {
+            if (File.GetLastWriteTimeUtc(file) >= cutoffUtc) continue;
+            File.Delete(file);
+            removed++;
+        }
+
+        foreach (var dir in Directory.EnumerateDirectories(
+                     cacheDir, "export_*", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(dir);
+            if (!name.StartsWith("export_csv_", StringComparison.Ordinal)
+                && !name.StartsWith("export_json_", StringComparison.Ordinal))
+                continue;
+            if (Directory.GetLastWriteTimeUtc(dir) >= cutoffUtc) continue;
+            Directory.Delete(dir, recursive: true);
+            removed++;
+        }
+
+        return removed;
+    }
+
     public IReadOnlyList<string> ExportToCsv(string destDir)
     {
         Directory.CreateDirectory(destDir);

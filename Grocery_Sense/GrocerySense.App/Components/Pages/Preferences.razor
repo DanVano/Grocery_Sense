@@ -31,6 +31,9 @@ else
             <MudTextField @bind-Value="_postal" Label="Postal code" Variant="Variant.Outlined" Margin="Margin.Dense" />
             <MudTextField @bind-Value="_city" Label="City" Variant="Variant.Outlined" Margin="Margin.Dense" />
         </MudStack>
+        <MudText Typo="Typo.caption">
+            Flyer sync sends your full postal code to Flipp's unofficial service to find nearby deals.
+        </MudText>
     </MudPaper>
 
     <MudPaper Class="pa-3 mb-3" Outlined="true">
@@ -149,6 +152,10 @@ else
                       Class="mt-2" InputType="InputType.Password" />
         <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Secondary"
                    OnClick="SaveCredentialsAsync" Disabled="@_busy">Save credentials</MudButton>
+        <MudText Typo="Typo.caption" Class="mt-2">
+            Receipt and flyer files you choose are uploaded to this Azure Document Intelligence endpoint for OCR.
+            Parsed data and OCR JSON stay in app-private storage.
+        </MudText>
     </MudPaper>
 }
 

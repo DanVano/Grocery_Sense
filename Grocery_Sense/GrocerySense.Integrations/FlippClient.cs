@@ -17,6 +17,13 @@ public sealed class FlippClient : IFlyerProvider
     private const string BaseUrl = "https://backflipp.wishabi.com/flipp";
     private const int MaxFlyersPerStore = 2;
 
+    // Resource bounds on the unofficial (untrusted, no-contract) endpoint: cap body size, JSON depth,
+    // items per flyer, and per-field text so a hostile/broken response can't exhaust memory or CPU.
+    private const long MaxResponseBytes = 4L * 1024 * 1024;
+    private const int MaxItemsPerFlyer = 2000;
+    private const int MaxTextChars = 1000;
+    private static readonly TimeSpan MaxResponseReadTime = TimeSpan.FromSeconds(20);
+
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly HttpClient _http;
 
@@ -57,6 +64,8 @@ public sealed class FlippClient : IFlyerProvider
             var items = RootArray(itemsDoc.RootElement, "items")
                 ?? throw new InvalidOperationException(
                     $"Flipp flyer_items response for flyer {flyerId} had an unexpected shape.");
+            if (items.Count > MaxItemsPerFlyer)
+                throw new InvalidOperationException($"Flipp flyer {flyerId} returned too many items.");
 
             foreach (var it in items)
             {
@@ -87,11 +96,18 @@ public sealed class FlippClient : IFlyerProvider
 
     private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken ct)
     {
-        using var resp = await _http.GetAsync(url, ct);
+        using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
-        var stream = await resp.Content.ReadAsStreamAsync(ct);
+        if (resp.Content.Headers.ContentLength is > MaxResponseBytes)
+            throw new InvalidOperationException("Flipp response exceeded 4 MiB.");
+
+        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        readCts.CancelAfter(MaxResponseReadTime);
+        // Enforce the cap even when the server omits Content-Length (chunked): LoadIntoBufferAsync throws if exceeded.
+        await resp.Content.LoadIntoBufferAsync(MaxResponseBytes, readCts.Token);
+        var stream = await resp.Content.ReadAsStreamAsync(readCts.Token);
         await using (stream.ConfigureAwait(false))
-            return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            return await JsonDocument.ParseAsync(stream, new JsonDocumentOptions { MaxDepth = 32 }, readCts.Token);
     }
 
     // Accepts either a bare JSON array or an object wrapping the array under `key`.
@@ -125,10 +141,17 @@ public sealed class FlippClient : IFlyerProvider
         return t.Length >= 10 && DateOnly.TryParseExact(t[..10], "yyyy-MM-dd", out _) ? t[..10] : null;
     }
 
-    private static string? Str(JsonElement e, string key) =>
-        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
-            ? v.GetString()
-            : null;
+    private static string? Str(JsonElement e, string key)
+    {
+        if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty(key, out var v)
+            || v.ValueKind != JsonValueKind.String)
+            return null;
+
+        var text = v.GetString();
+        return text is { Length: > MaxTextChars }
+            ? throw new InvalidOperationException($"Flipp field '{key}' exceeded {MaxTextChars} characters.")
+            : text;
+    }
 
     private static double? Num(JsonElement e, string key)
     {

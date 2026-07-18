@@ -31,6 +31,7 @@
         <MudText Typo="Typo.caption">@(_batchProgress ?? _stage)</MudText>
     }
 </MudStack>
+<MudText Typo="Typo.caption" Class="mb-2">Selected receipt files are uploaded to your configured Azure OCR resource.</MudText>
 <MudSwitch T="bool" @bind-Value="_replaceDuplicates" Label="Replace duplicates" Color="Color.Primary" Class="mb-2" />
 
 @if (_message is not null)
@@ -303,16 +304,17 @@ else
     }
 
     // Picker/camera streams are copied into app-data (source paths can expire on Android). Returns the copy.
+    // Bounded: a hostile/huge picker file is rejected before the OCR client loads it fully into memory.
+    private const long MaxImportBytes = 20L * 1024 * 1024;
+    private static readonly HashSet<string> ReceiptExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff" };
+
     private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
     {
-        var dir = ReceiptsDir();
-        Directory.CreateDirectory(dir);
-        var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
-        var path = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
-        await using var src = await pick.OpenReadAsync();
-        await using var dst = File.Create(path);
-        await src.CopyToAsync(dst, ct);
-        return path;
+        await using var source = await pick.OpenReadAsync();
+        return await BoundedFileCopy.CopyAsync(
+            source, pick.FileName, ReceiptsDir(), ReceiptExtensions,
+            defaultExtension: ".jpg", maxBytes: MaxImportBytes, ct: ct);
     }
 
     // Backfill on-ramp: multi-pick from the gallery, copy all, then import with a per-receipt date confirm.
