@@ -345,6 +345,12 @@ public static class Database
         ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty REAL;
         ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty_note TEXT;
         """,
+
+        // ----- Migration 7: index case-insensitive canonical item lookup (perf) -----
+        // Exact item lookups compare case-insensitively (GetItemByName / GetItemsByNames). The BINARY
+        // idx_items_name can't serve a NOCASE predicate, so those seeks fell back to a scan as the catalog
+        // grew. A NOCASE index lets `canonical_name = ? COLLATE NOCASE` seek instead. Additive index only.
+        "CREATE INDEX idx_items_name_nocase ON items(canonical_name COLLATE NOCASE);",
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>
