@@ -125,6 +125,34 @@ else
     private const double VerdictBelowUsualPct = 5.0;
 
     private IReadOnlyList<StoreDeals>? _dealsByStore;
+
+    // Deals can number in the thousands (perf gate: 5k active); rendering them all builds a huge DOM. Page with
+    // native MudPagination (already a dependency) rather than Virtualize — deal labels/chips wrap to different
+    // heights, which Blazor's fixed-item-height Virtualize can't render correctly.
+    private const int DealPageSize = 100;
+    private int _dealPage = 1;
+
+    private int DealPageCount => Math.Max(1,
+        ((_dealsByStore?.Sum(g => g.Deals.Count) ?? 0) + DealPageSize - 1) / DealPageSize);
+
+    // Flatten every store's deals into one ordered sequence, take the current page, then re-group by store so
+    // store headings still bracket the rows shown on each page.
+    private IReadOnlyList<StoreDeals> PageGroups()
+    {
+        var rows = (_dealsByStore ?? Array.Empty<StoreDeals>())
+            .SelectMany(g => g.Deals.Select(deal => (StoreName: g.StoreName, Deal: deal)))
+            .Skip((_dealPage - 1) * DealPageSize)
+            .Take(DealPageSize)
+            .ToList();
+
+        return rows
+            .GroupBy(x => x.StoreName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new StoreDeals(g.Key, g.Select(x => x.Deal).ToList()))
+            .ToList();
+    }
+
+    private void SelectDealPage(int page) => _dealPage = Math.Clamp(page, 1, DealPageCount);
+
     private int _hiddenHardExcluded;
     private string? _error;
     private bool _syncing;
@@ -207,6 +235,7 @@ else
                 return ((IReadOnlyList<StoreDeals>)grouped, hiddenCount);
             });
             _dealsByStore = groups;
+            _dealPage = 1; // fresh data -> back to the first page
             _hiddenHardExcluded = hidden;
         }
         catch (Exception ex) { _error = ex.Message; }
