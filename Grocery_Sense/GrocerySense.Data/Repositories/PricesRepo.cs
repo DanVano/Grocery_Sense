@@ -225,42 +225,6 @@ public static class PricesRepo
         return r.Read() && !r.IsDBNull(0) ? r.GetString(0) : null;
     }
 
-    // Active flyer unit price for item/store. Priority: flyer_sources validity-window join, then any
-    // 'flyer' row in the last ~3 weeks. ponytail: flyer_sources exists in the v1 schema, so no missing-table guard.
-    public static double? GetActiveFlyerUnitPrice(SqliteConnection conn, int itemId, int storeId,
-        SqliteTransaction? tx = null)
-    {
-        using (var cmd = Db.Command(conn, tx,
-            """
-            SELECT p.unit_price FROM prices p
-            JOIN flyer_sources fs ON fs.id = p.flyer_source_id
-            WHERE p.item_id = $item AND p.store_id = $store AND p.unit_price IS NOT NULL AND p.source = 'flyer'
-              AND date(fs.valid_from) <= date('now') AND date(fs.valid_to) >= date('now')
-            ORDER BY CAST(p.unit_price AS REAL) ASC LIMIT 1
-            """))
-        {
-            cmd.Parameters.AddWithValue("$item", itemId);
-            cmd.Parameters.AddWithValue("$store", storeId);
-            using var r = cmd.ExecuteReader();
-            if (r.Read() && !r.IsDBNull(0)) return r.GetDouble(0);
-        }
-
-        using (var cmd = Db.Command(conn, tx,
-            """
-            SELECT unit_price FROM prices
-            WHERE item_id = $item AND store_id = $store AND unit_price IS NOT NULL AND source = 'flyer'
-              AND date(COALESCE(date, created_at)) >= date('now', '-21 day')
-            ORDER BY CAST(unit_price AS REAL) ASC LIMIT 1
-            """))
-        {
-            cmd.Parameters.AddWithValue("$item", itemId);
-            cmd.Parameters.AddWithValue("$store", storeId);
-            using var r = cmd.ExecuteReader();
-            if (r.Read() && !r.IsDBNull(0)) return r.GetDouble(0);
-        }
-        return null;
-    }
-
     // Likely staples from receipt history: (item_id, line_count, distinct_receipt_count).
     public static IReadOnlyList<(int ItemId, int LineCount, int DistinctReceipts)> ListStapleItemIds(
         SqliteConnection conn, int sinceDays = 90, int minDistinctReceipts = 3, int minLineItems = 4,
@@ -284,18 +248,6 @@ public static class PricesRepo
         var rows = new List<(int, int, int)>();
         while (r.Read()) rows.Add((r.GetInt32(0), r.GetInt32(1), r.GetInt32(2)));
         return rows;
-    }
-
-    // Best-effort current quote: active flyer first, else the most recent store price (any source).
-    public static PriceQuote? GetBestCurrentQuoteForItemStore(SqliteConnection conn, int itemId, int storeId,
-        SqliteTransaction? tx = null)
-    {
-        var flyer = GetActiveFlyerUnitPrice(conn, itemId, storeId, tx);
-        if (flyer is not null) return new PriceQuote(flyer.Value, "flyer");
-
-        var latest = GetMostRecentPrice(conn, itemId, storeId, tx);
-        if (latest is not null) return new PriceQuote(latest.UnitPrice, latest.Source ?? "latest");
-        return null;
     }
 
     // ---------- Batch readers (single round-trip; replace N+1 service loops) ----------
@@ -461,7 +413,10 @@ public static class PricesRepo
         return result;
     }
 
-    // Lowest active flyer price per (item, store). ponytail: flyer_sources exists in v1 — no missing-table guard.
+    // Lowest active flyer price per (item, store). Reads the flyer_deals/flyer_batches family — the one
+    // FlyerSyncService and FlyerIngestService actually populate. The prices/flyer_sources flyer path is
+    // retired (it was never written in production); validity semantics deliberately mirror
+    // FlyersRepo.ListActiveDeals (NULL = open-ended, ISO-string compare) so every flyer surface agrees.
     public static IReadOnlyDictionary<(int ItemId, int StoreId), PriceQuote> GetActiveFlyerPricesBatch(
         SqliteConnection conn, IReadOnlyList<int> itemIds, IReadOnlyList<int> storeIds, SqliteTransaction? tx = null)
     {
@@ -470,19 +425,23 @@ public static class PricesRepo
         var result = new Dictionary<(int, int), PriceQuote>();
         if (items.Count == 0 || stores.Count == 0) return result;
 
+        var onDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
         var storePh = Placeholders(stores.Count, "s");
         foreach (var chunk in items.Chunk(ParamChunk))
         {
             var itemPh = Placeholders(chunk.Length);
             using var cmd = Db.Command(conn, tx,
-                "SELECT p.item_id, p.store_id, " +
-                "       MIN(COALESCE(p.norm_unit_price, CAST(p.unit_price AS REAL))) AS unit_price, " +
-                "       COALESCE(p.norm_unit, p.unit, 'each') AS unit " +
-                "FROM prices p JOIN flyer_sources fs ON fs.id = p.flyer_source_id " +
-                "WHERE p.source = 'flyer' " +
-                $"  AND p.item_id IN ({itemPh}) AND p.store_id IN ({storePh}) AND p.unit_price IS NOT NULL " +
-                "  AND date(fs.valid_from) <= date('now') AND date(fs.valid_to) >= date('now') " +
-                "GROUP BY p.item_id, p.store_id");
+                "SELECT d.item_id, d.store_id, " +
+                "       MIN(COALESCE(CAST(d.norm_unit_price AS REAL), CAST(d.unit_price AS REAL))) AS unit_price, " +
+                "       COALESCE(d.norm_unit, d.unit, 'each') AS unit " +
+                "FROM flyer_deals d JOIN flyer_batches b ON b.id = d.flyer_id " +
+                "WHERE b.status = 'active' " +
+                $"  AND d.item_id IN ({itemPh}) AND d.store_id IN ({storePh}) " +
+                "  AND COALESCE(CAST(d.norm_unit_price AS REAL), CAST(d.unit_price AS REAL)) > 0 " +
+                "  AND (b.valid_from IS NULL OR b.valid_from <= $onDate) " +
+                "  AND (b.valid_to IS NULL OR b.valid_to >= $onDate) " +
+                "GROUP BY d.item_id, d.store_id");
+            cmd.Parameters.AddWithValue("$onDate", onDate);
             BindIn(cmd, chunk);
             BindIn(cmd, stores, "s");
             using var r = cmd.ExecuteReader();

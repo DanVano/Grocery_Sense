@@ -156,15 +156,65 @@ public sealed class PricesRepoTests
         Assert.Equal(2.0, qty);
     }
 
+    // ---- GetActiveFlyerPricesBatch reads flyer_deals/flyer_batches (the populated family) ----
+
+    private static int MakeBatch(TempDb db, int store, string? from, string? to, string status = "active")
+        => new FlyersRepo().CreateFlyerBatch(db.Conn, store, from, to, status: status);
+
+    private static void MakeDeal(TempDb db, int flyerId, int store, int? item, decimal? unitPrice,
+        decimal? normUnitPrice = null, string? normUnit = null)
+        => new FlyersRepo().AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
+            Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
+            Title: "t", Description: null, PriceText: null, DealQty: null, DealTotal: null,
+            UnitPrice: unitPrice, Unit: "each", NormUnitPrice: normUnitPrice, NormUnit: normUnit,
+            NormNote: null, ItemId: item, MappingConfidence: null, Confidence: null, CreatedAt: null) });
+
     [Fact]
-    public void ActiveFlyerUnitPrice_resolves_via_flyer_sources_window()
+    public void ActiveFlyerPricesBatch_returns_min_active_deal_and_skips_inactive_expired_unmapped()
     {
         using var db = new TempDb();
         var (item, store) = Seed(db);
-        var fsid = MakeFlyerSource(db.Conn, store, DaysAgo(2), DaysAgo(-3)); // valid now
-        PricesRepo.AddPricePoint(db.Conn, item, store, 1.99, "each", source: "flyer", date: DaysAgo(1), flyerSourceId: fsid);
 
-        Assert.Equal(1.99, PricesRepo.GetActiveFlyerUnitPrice(db.Conn, item, store));
+        var active = MakeBatch(db, store, DaysAgo(2), DaysAgo(-3));
+        MakeDeal(db, active, store, item, 2.99m);
+        MakeDeal(db, active, store, item, 2.49m);           // cheaper -> wins via MIN
+        MakeDeal(db, active, store, null, 0.99m);           // unmapped: excluded
+        var expired = MakeBatch(db, store, DaysAgo(20), DaysAgo(10));
+        MakeDeal(db, expired, store, item, 0.50m);          // expired window: excluded
+        var archived = MakeBatch(db, store, DaysAgo(2), DaysAgo(-3), status: "archived");
+        MakeDeal(db, archived, store, item, 0.25m);         // inactive batch: excluded
+
+        var map = PricesRepo.GetActiveFlyerPricesBatch(db.Conn, new[] { item }, new[] { store });
+
+        var quote = map[(item, store)];
+        Assert.Equal(2.49, quote.UnitPrice);
+        Assert.Equal("flyer", quote.Source);
+    }
+
+    [Fact]
+    public void ActiveFlyerPricesBatch_null_validity_is_open_ended_and_norm_price_preferred()
+    {
+        using var db = new TempDb();
+        var (item, store) = Seed(db);
+        var batch = MakeBatch(db, store, from: null, to: null); // NULL = open-ended, matches ListActiveDeals
+        MakeDeal(db, batch, store, item, 4.00m, normUnitPrice: 0.40m, normUnit: "per_100g");
+
+        var map = PricesRepo.GetActiveFlyerPricesBatch(db.Conn, new[] { item }, new[] { store });
+
+        var quote = map[(item, store)];
+        Assert.Equal(0.40, quote.UnitPrice);
+        Assert.Equal("per_100g", quote.Unit);
+    }
+
+    [Fact]
+    public void ActiveFlyerPricesBatch_excludes_zero_priced_deals()
+    {
+        using var db = new TempDb();
+        var (item, store) = Seed(db);
+        var batch = MakeBatch(db, store, DaysAgo(1), DaysAgo(-6));
+        MakeDeal(db, batch, store, item, 0m); // "FREE"/parse-failure rows must not become a $0 quote
+
+        Assert.Empty(PricesRepo.GetActiveFlyerPricesBatch(db.Conn, new[] { item }, new[] { store }));
     }
 
     [Fact]
@@ -180,7 +230,7 @@ public sealed class PricesRepoTests
         Assert.Equal(DaysAgo(10), PricesRepo.GetLastSeenAtOrBelow(db.Conn, item, 4.50, store));
     }
 
-    // --- raw helpers for receipt_id / flyer_source FK rows the repo doesn't create ---
+    // --- raw helpers for receipt_id FK rows the repo doesn't create ---
 
     private static int MakeReceipt(SqliteConnection conn, int storeId, string date)
     {
@@ -189,18 +239,6 @@ public sealed class PricesRepoTests
             "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("$s", storeId);
         cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
-
-    private static int MakeFlyerSource(SqliteConnection conn, int storeId, string from, string to)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO flyer_sources (provider, store_id, valid_from, valid_to) VALUES ('test', $s, $f, $t); " +
-            "SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$f", from);
-        cmd.Parameters.AddWithValue("$t", to);
         return (int)(long)cmd.ExecuteScalar()!;
     }
 

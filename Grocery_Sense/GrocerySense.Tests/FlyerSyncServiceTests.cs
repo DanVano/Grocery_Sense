@@ -139,7 +139,8 @@ public sealed class FlyerSyncServiceTests : IDisposable
     }
 
     // Deals are enriched before insert: item mapping + multi-buy effective unit price + norm fields.
-    // Without this a synced deal (item_id NULL) never joins GetActiveFlyerPricesBatch.
+    // GetActiveFlyerPricesBatch reads flyer_deals, so a mapped deal reaches the optimizer/badges/alerts
+    // (the split-brain regression test below proves it); an unmapped one (item_id NULL) never joins.
     [Fact]
     public async Task RunSync_enriches_deals_with_item_mapping_and_effective_unit_price()
     {
@@ -163,6 +164,43 @@ public sealed class FlyerSyncServiceTests : IDisposable
         Assert.Equal(2.50m, deal.UnitPrice); // "2/$5" -> $2.50 effective unit price
         Assert.NotNull(deal.NormUnitPrice);
         Assert.Contains("bundle", deal.NormNote);
+    }
+
+    // Split-brain regression: a synced, mapped deal MUST surface through the same query the
+    // optimizer/watchlist/alerts/badges use. Guards against the flyer data landing in tables no
+    // consumer reads (the original v2 bug: sync wrote flyer_deals while consumers read prices/flyer_sources).
+    [Fact]
+    public async Task RunSync_mapped_deal_reaches_GetActiveFlyerPricesBatch()
+    {
+        using var conn = _factory.Open();
+        var store = StoresRepo.CreateStore(conn, "Mart").Id;
+        var item = ItemsRepo.CreateItem(conn, "Apples").Id;
+        var normalized = new IngredientMappingService(_factory).MapToItem("Apples Apples").NormalizedInput;
+        new ItemAliasesRepo().UpsertAlias(conn, normalized, item, 1.0);
+
+        var provider = new FuncProvider(_ => new[] { Deal("Apples", 2.50) });
+        await Build(provider).RunSyncAsync(force: true);
+
+        var quotes = PricesRepo.GetActiveFlyerPricesBatch(conn, new[] { item }, new[] { store });
+        var quote = quotes[(item, store)];
+        Assert.Equal("flyer", quote.Source);
+        Assert.Equal(2.50, quote.UnitPrice);
+    }
+
+    [Fact]
+    public async Task RunSync_skips_stores_not_marked_shop_here()
+    {
+        using var conn = _factory.Open();
+        var shop = StoresRepo.CreateStore(conn, "My Mart").Id;
+        var skip = StoresRepo.CreateStore(conn, "Far Mart").Id;
+        StoresRepo.SetStoreShopHere(conn, skip, false);
+
+        var provider = new FuncProvider(_ => new[] { Deal("Apples", 2.50) });
+        var result = await Build(provider).RunSyncAsync(force: true);
+
+        Assert.Equal(1, result.StoresSynced);
+        Assert.Single(new FlyersRepo().ListActiveDeals(conn, storeId: shop));
+        Assert.Empty(new FlyersRepo().ListActiveDeals(conn, storeId: skip));
     }
 
     [Fact]

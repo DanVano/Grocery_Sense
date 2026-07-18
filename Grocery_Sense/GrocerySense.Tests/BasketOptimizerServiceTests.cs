@@ -328,6 +328,29 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         Assert.Equal(store, row.PlannedStoreId);
     }
 
+    // Split-brain regression (flyer unification): an active flyer_deals row must win the item's quote.
+    [Fact]
+    public void Active_flyer_deal_prices_the_basket_line()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var store = Store(db, "A");
+        var milk = Listed(db, "milk");
+        Price(db, milk, store, 10.0); // recent non-flyer price
+
+        var flyers = new FlyersRepo();
+        var flyerId = flyers.CreateFlyerBatch(db.Conn, store, Today, Today);
+        flyers.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
+            Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
+            Title: "Milk", Description: null, PriceText: null, DealQty: null, DealTotal: null,
+            UnitPrice: 7.0m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,
+            ItemId: milk, MappingConfidence: null, Confidence: null, CreatedAt: null) });
+
+        var plan = Assert.Single(Assert.Single(svc.Optimize("best_savings").Stores).Items);
+        Assert.Equal("flyer", plan.Source);
+        Assert.Equal(7.0, plan.UnitPrice);
+    }
+
     [Fact]
     public void ApplyOptimizerPlan_does_not_duplicate_hard_excluded_warning()
     {

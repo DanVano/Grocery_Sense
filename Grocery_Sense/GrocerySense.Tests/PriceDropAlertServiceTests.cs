@@ -150,4 +150,35 @@ public sealed class PriceDropAlertServiceTests
         Assert.Equal(1.0, a.SuggestedQty!.Value, 4);
         Assert.Contains("week", a.SuggestedQtyNote);
     }
+
+    // Split-brain regression (flyer unification): a synced flyer_deals row is the "current price" the
+    // engine compares against usual — proves the SyncCompleted -> RefreshEngineAlerts hook has data to see.
+    [Fact]
+    public void Flyer_deal_below_usual_produces_engine_alert()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        foreach (var d in new[] { 40, 30, 20, 10 }) // staple: steady $10 usual, no receipt-side drop
+        {
+            var rid = AddReceipt(db.Conn, store, DaysAgo(d));
+            PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "receipt", date: DaysAgo(d), receiptId: rid);
+        }
+        var flyers = new FlyersRepo();
+        var flyerId = flyers.CreateFlyerBatch(db.Conn, store, DaysAgo(1), DaysAgo(-6));
+        flyers.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
+            Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
+            Title: "Milk", Description: null, PriceText: null, DealQty: null, DealTotal: null,
+            UnitPrice: 7.0m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,
+            ItemId: item, MappingConfidence: null, Confidence: null, CreatedAt: null) });
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.RefreshEngineAlerts());
+
+        // $7 exists only in flyer_deals (receipts are all $10) — the alert firing at 7.0 proves the
+        // engine read the flyer table. Persisted Source is the alert origin ("engine"), not the quote source.
+        var a = Assert.Single(svc.GetAlerts());
+        Assert.Equal(7.0, a.CurrentPrice);
+        Assert.Equal(30.0, a.PctBelowUsual!.Value, 1);
+    }
 }

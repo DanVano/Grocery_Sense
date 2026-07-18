@@ -51,15 +51,6 @@ public sealed class PriceHistoryService
             confidence, source: "receipt", date: dateStr ?? Today(), receiptId: receiptId);
     }
 
-    public int RecordPriceFromFlyer(string itemName, int storeId, double unitPrice, string unit,
-        string? dateStr = null, int? flyerSourceId = null, string? rawName = null, int? confidence = null)
-    {
-        using var conn = _factory.Open();
-        var item = GetOrCreateItem(conn, itemName);
-        return PricesRepo.AddPricePoint(conn, item.Id, storeId, unitPrice, unit, rawName: rawName,
-            confidence: confidence, source: "flyer", date: dateStr ?? Today(), flyerSourceId: flyerSourceId);
-    }
-
     public int RecordManualPrice(string itemName, int storeId, double unitPrice, string unit,
         string? dateStr = null, double? quantity = null, double? totalPrice = null, string? rawName = null)
     {

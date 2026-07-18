@@ -17,9 +17,9 @@ namespace GrocerySense.Core;
 // mobile revokes those).
 //
 // Deals are enriched BEFORE insert (same prep FlyerIngestService.BuildDeal does: multi-buy adjust ->
-// unit guess -> item mapping -> unit normalization) — without item_id + norm prices a synced deal never
-// joins GetActiveFlyerPricesBatch, i.e. never reaches the optimizer/badges/alerts. Flyers never
-// auto-create items: an unmapped title keeps item_id NULL.
+// unit guess -> item mapping -> unit normalization) — PricesRepo.GetActiveFlyerPricesBatch reads
+// flyer_deals directly, so a mapped+normalized deal reaches the optimizer/badges/alerts; an unmapped
+// one only shows on the Deals page. Flyers never auto-create items: an unmapped title keeps item_id NULL.
 public sealed class FlyerSyncService
 {
     public const double SyncIntervalDays = 3.5;
@@ -66,7 +66,9 @@ public sealed class FlyerSyncService
 
         List<Store> stores;
         using (var conn = _factory.Open())
-            stores = StoresRepo.ListStores(conn).ToList();
+            // Only stores the user actually shops at — matches every downstream flyer-price consumer
+            // (optimizer/insights/watchlist) and avoids needless calls to the unofficial Flipp endpoint.
+            stores = StoresRepo.ListStores(conn).Where(s => s.ShopHere && s.IsActive).ToList();
         if (stores.Count == 0)
             return new FlyerSyncResult(0, 0, "no_stores", Array.Empty<string>());
 
