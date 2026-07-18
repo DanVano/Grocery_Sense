@@ -12,6 +12,7 @@
 @inject ShoppingListService Shopping
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject NavigationManager Nav
 
 <MudText Typo="Typo.h5" GutterBottom="true">Deals</MudText>
 
@@ -339,7 +340,13 @@ else
                 Shopping.AddDealToList(deal);
                 return DealLabel(deal);
             });
-            Snackbar.Add($"Added {name} — see Shopping List", Severity.Success);
+            // Actionable snackbar: one tap to the list the deal just landed in — no drawer trip (Phase 1a).
+            Snackbar.Add($"Added {name}", Severity.Success, config =>
+            {
+                config.Action = "View list";
+                config.ActionColor = Color.Primary;
+                config.OnClick = _ => { Nav.NavigateTo("/list"); return Task.CompletedTask; };
+            });
         }
         catch (Exception ex) { Snackbar.Add($"Couldn't add: {ex.Message}", Severity.Error); }
     }
