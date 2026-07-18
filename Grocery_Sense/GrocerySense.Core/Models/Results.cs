@@ -181,6 +181,10 @@ public sealed record PlannedIngredient(
 
 public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
 
+// A kid-pickable recipe with a one-glance deal flag (Family page). OnSaleThisWeek mirrors the
+// "uses ingredients that are on sale this week" line in FormatMealExplanation (DealScore > 0.2).
+public sealed record PickableRecipe(string Name, bool OnSaleThisWeek);
+
 // Household config — ports of config_store.py dataclasses.
 public record HouseholdMember(int Id, string Name, string Role,
     // Polymorphic profile — converted with Utf8JsonReader/Writer (no reflection) so UserConfig source-gen is AOT-safe.

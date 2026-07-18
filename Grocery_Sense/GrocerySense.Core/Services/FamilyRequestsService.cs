@@ -17,15 +17,18 @@ public sealed class FamilyRequestsService
     private readonly PreferencesService _preferences;
     private readonly IngredientMappingService _mapper;
     private readonly SqliteConnectionFactory _factory;
+    private readonly MealSuggestionService? _meals; // null => PickableRecipesRanked falls back alphabetical
 
     public FamilyRequestsService(ConfigStore config, RecipeEngine engine,
-        PreferencesService preferences, IngredientMappingService mapper, SqliteConnectionFactory factory)
+        PreferencesService preferences, IngredientMappingService mapper, SqliteConnectionFactory factory,
+        MealSuggestionService? meals = null)
     {
         _config = config;
         _engine = engine;
         _preferences = preferences;
         _mapper = mapper;
         _factory = factory;
+        _meals = meals;
     }
 
     // Add a recipe's ingredients to the shared list, attributed to the member. Returns the created request
@@ -91,6 +94,24 @@ public sealed class FamilyRequestsService
         _engine.RecipesMatchingProfile(_preferences.GetMealProfile())
             .Select(r => r.Name).Where(n => n.Length > 0)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+
+    // Pickable recipes ranked by the meal-suggestion value score, so kids choose from what's cheap
+    // this week. Both lists filter through the same ProfileFilter, so every pickable name gets a score.
+    // No MealSuggestionService (older tests) -> alphabetical, unflagged — same behavior as before.
+    public IReadOnlyList<PickableRecipe> PickableRecipesRanked()
+    {
+        var names = PickableRecipes();
+        if (_meals is null || names.Count == 0)
+            return names.Select(n => new PickableRecipe(n, false)).ToList();
+
+        var scored = _meals.SuggestMealsForWeek(_preferences.GetMealProfile(), maxRecipes: int.MaxValue);
+        var byName = scored.ToDictionary(s => s.Recipe.Name, StringComparer.OrdinalIgnoreCase);
+        return names
+            .OrderByDescending(n => byName.TryGetValue(n, out var s) ? s.TotalScore : double.MinValue)
+            .Select(n => new PickableRecipe(n,
+                byName.TryGetValue(n, out var s) && s.DealScore > 0.2)) // 0.2 = FormatMealExplanation's on-sale bar
+            .ToList();
+    }
 
     // --- parent review queue ---
 

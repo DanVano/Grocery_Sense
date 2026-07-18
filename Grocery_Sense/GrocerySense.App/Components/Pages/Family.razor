@@ -29,7 +29,7 @@
 </MudPaper>
 
 <MudText Typo="Typo.subtitle1">Pick a meal</MudText>
-<MudText Typo="Typo.caption">Recipes containing a household allergen are hidden.</MudText>
+<MudText Typo="Typo.caption">Best-value picks first; recipes containing a household allergen are hidden.</MudText>
 <div class="mb-3 mt-1">
     @if (_pickable is null)
     {
@@ -37,10 +37,16 @@
     }
     else
     {
-        @foreach (var name in _pickable)
+        @foreach (var p in _pickable)
         {
             <MudButton Size="Size.Small" Variant="Variant.Text" Class="ma-1" Disabled="@_busy"
-                       StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => PickMealAsync(name))">@name</MudButton>
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => PickMealAsync(p.Name))">
+                @p.Name
+                @if (p.OnSaleThisWeek)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ml-1">on sale</MudChip>
+                }
+            </MudButton>
         }
     }
 </div>
@@ -83,7 +89,7 @@ else
 @code {
     private IReadOnlyList<HouseholdMember> _members = Array.Empty<HouseholdMember>();
     private int _activeId;
-    private IReadOnlyList<string>? _pickable;
+    private IReadOnlyList<PickableRecipe>? _pickable;
     private IReadOnlyList<MemberRequestRow>? _unreviewed;
     private string _quickItem = "";
     private bool _busy;
@@ -105,7 +111,8 @@ else
     private async Task ReloadAsync()
     {
         (_pickable, _unreviewed) = await Task.Run(() =>
-            ((IReadOnlyList<string>)Picks.PickableRecipes(), (IReadOnlyList<MemberRequestRow>)Picks.ListUnreviewed()));
+            ((IReadOnlyList<PickableRecipe>)Picks.PickableRecipesRanked(),
+             (IReadOnlyList<MemberRequestRow>)Picks.ListUnreviewed()));
     }
 
     private void OnActiveChanged(int id)

@@ -22,6 +22,31 @@ public sealed class FamilyRequestsServiceTests : IDisposable
         return (svc, config, list);
     }
 
+    // Mirrors Build's construction with a MealSuggestionService appended (deal-ranked picks).
+    private (FamilyRequestsService Svc, ConfigStore Config) BuildWithMeals(TempDb db)
+    {
+        var config = new ConfigStore(_dir);
+        var engine = new RecipeEngine(SampleFixture);
+        var meals = new MealSuggestionService(engine, priceHistory: null, factory: db.Factory);
+        var svc = new FamilyRequestsService(config, engine, new PreferencesService(config),
+            new IngredientMappingService(db.Factory), db.Factory, meals);
+        return (svc, config);
+    }
+
+    private static void SeedActiveFlyerDeal(TempDb db, int storeId, string title, string unitPrice)
+    {
+        using var cmd = db.Conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO flyer_batches (store_id, status, imported_at) VALUES ($s, 'active', datetime('now'));
+            INSERT INTO flyer_deals (flyer_id, store_id, title, unit_price, created_at)
+            VALUES (last_insert_rowid(), $s, $t, $p, datetime('now'));
+            """;
+        cmd.Parameters.AddWithValue("$s", storeId);
+        cmd.Parameters.AddWithValue("$t", title);
+        cmd.Parameters.AddWithValue("$p", unitPrice);
+        cmd.ExecuteNonQuery();
+    }
+
     private void SetMasterAllergies(ConfigStore config, params string[] allergies)
     {
         var cfg = config.Load();
@@ -92,6 +117,42 @@ public sealed class FamilyRequestsServiceTests : IDisposable
 
         Assert.DoesNotContain("Peanut Chicken Noodles", pickable);
         Assert.Contains("Beef Stir Fry", pickable);
+    }
+
+    [Fact]
+    public void Ranked_puts_recipe_with_flyer_deals_first_and_flags_it_on_sale()
+    {
+        using var db = new TempDb();
+        var (svc, _) = BuildWithMeals(db);
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        // Two of Beef Stir Fry's five ingredients on sale -> DealScore 0.4 > 0.2 threshold.
+        SeedActiveFlyerDeal(db, store, "beef", "2.99");
+        SeedActiveFlyerDeal(db, store, "broccoli", "1.49");
+
+        var ranked = svc.PickableRecipesRanked();
+
+        Assert.Equal("Beef Stir Fry", ranked[0].Name);
+        Assert.True(ranked[0].OnSaleThisWeek);
+        Assert.False(ranked.First(p => p.Name == "Quinoa Salad").OnSaleThisWeek);
+    }
+
+    [Fact]
+    public void Ranked_without_meals_service_falls_back_to_alphabetical_unflagged()
+    {
+        using var db = new TempDb();
+        var (svc, _, _) = Build(db); // no MealSuggestionService
+        var ranked = svc.PickableRecipesRanked();
+        Assert.Equal(svc.PickableRecipes(), ranked.Select(p => p.Name).ToList());
+        Assert.All(ranked, p => Assert.False(p.OnSaleThisWeek));
+    }
+
+    [Fact]
+    public void Ranked_still_hides_allergen_recipes()
+    {
+        using var db = new TempDb();
+        var (svc, config) = BuildWithMeals(db);
+        SetMasterAllergies(config, "peanuts");
+        Assert.DoesNotContain("Peanut Chicken Noodles", svc.PickableRecipesRanked().Select(p => p.Name));
     }
 
     [Fact]
