@@ -186,6 +186,21 @@ public sealed record PlannedIngredient(
 
 public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
 
+// One flagged receipt line (TripReconciliationService). Single kind in the MVP: "flyer_below_paid" —
+// the CURRENT flyer quote is below what was paid (check the receipt / register). Paid stays decimal
+// (TEXT-backed); Expected is the double flyer quote it was judged against. ("above_usual" was cut:
+// the receipt's own rows contaminate the usual median and lines carry no unit — can't be honest.)
+public sealed record TripLineFlag(string ItemName, string Kind, decimal Paid, double Expected, string Note);
+
+// Right-after-the-trip diff of one receipt vs the CURRENT shopping list and CURRENTLY-active flyer
+// quotes. Reconcile REFUSES receipts older than RecentTripDays or future-dated (the UI also hides the
+// button). MatchedPlanned/UnplannedCount are DISTINCT items, not line counts. Known limits disclosed
+// in DataNote: unmapped lines never judged; unit-mismatched flyer quotes skipped.
+public sealed record TripReconciliation(
+    int ReceiptId, string StoreName, string PurchaseDate,
+    int MatchedPlanned, int UnplannedCount, decimal UnplannedTotal,
+    IReadOnlyList<TripLineFlag> Flags, IReadOnlyList<string> PlannedNotBought, string? DataNote);
+
 // A weekly plan constrained to an ESTIMATED spending cap (WeeklyPlannerService.BuildWeeklyPlanUnderBudget).
 // Selection is count-first (most meals), then best-effort score swaps. SkippedNoEstimate covers both
 // unpriced recipes and partial estimates below MinKnownRatioForBudget (they'd understate cost);

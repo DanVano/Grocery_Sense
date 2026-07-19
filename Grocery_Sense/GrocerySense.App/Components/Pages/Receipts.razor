@@ -8,6 +8,7 @@
 @inject SqliteConnectionFactory Db
 @inject IDialogService DialogService
 @inject ScanAlertNotificationService ScanAlerts
+@inject TripReconciliationService TripCheck
 
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
@@ -114,6 +115,11 @@ else
                             </tbody>
                         </MudSimpleTable>
                         <MudStack Row="true" Spacing="2" Class="mt-2">
+                            @if (IsRecentReceipt(receipt))
+                            {
+                                <MudButton Variant="Variant.Text" Disabled="@_busy"
+                                           OnClick="@(() => TripCheckAsync(receipt.Id))">Trip check</MudButton>
+                            }
                             <MudButton Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
                                        OnClick="@(() => DeleteReceiptAsync(receipt))">Delete (backup kept)</MudButton>
                             @if (receipt.FilePath is { Length: > 0 } fp && CanDeleteReceiptFile(fp))
@@ -145,6 +151,28 @@ else
     private CancellationTokenSource? _cts;
 
     private bool HasActiveFilter => _filterStoreId is not null || _filterRange is not null;
+
+    // age >= 0 matters: a future-dated receipt would otherwise pass (negative age <= 7). The service
+    // enforces the same window and refuses — this just keeps the button off dishonest rows.
+    private static bool IsRecentReceipt(ReceiptSummary r)
+    {
+        if (!DateOnly.TryParse(r.PurchaseDate, out var d)) return false;
+        var age = DateOnly.FromDateTime(DateTime.UtcNow).DayNumber - d.DayNumber;
+        return age >= 0 && age <= TripReconciliationService.RecentTripDays;
+    }
+
+    private async Task TripCheckAsync(int receiptId)
+    {
+        _busy = true;
+        try
+        {
+            var result = await Task.Run(() => TripCheck.Reconcile(receiptId));
+            var parameters = new DialogParameters { ["Result"] = result };
+            await DialogService.ShowAsync<TripCheckDialog>("Trip check", parameters);
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
 
     protected override async Task OnInitializedAsync()
     {

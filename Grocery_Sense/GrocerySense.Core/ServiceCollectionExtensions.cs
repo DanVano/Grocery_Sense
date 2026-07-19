@@ -59,6 +59,9 @@ public static class ServiceCollectionExtensions
         // DB maintenance (Phase 6): backup + CSV/JSON export.
         services.AddSingleton<DbMaintenanceService>();
 
+        // Post-trip check (food-savings follow-up): recent receipt vs current list/flyers.
+        services.AddSingleton<TripReconciliationService>();
+
         // Single-scan price-alert notification (A7). ScanAlertNotificationService needs an ILocalNotifier —
         // the head binds it (App: #if ANDROID AndroidLocalNotifier #else NoOpLocalNotifier; tests: a fake).
         // PendingNavigationService carries a notification-tap route into Blazor (deep link).

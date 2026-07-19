@@ -1,0 +1,47 @@
+@* Read-only post-trip summary for one receipt. All data comes in via the Result parameter. *@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.subtitle2">@Result.StoreName — @Result.PurchaseDate</MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            @Result.MatchedPlanned planned item(s) bought
+            @(Result.UnplannedCount > 0 ? $" · {Result.UnplannedCount} unplanned ≈ ${Result.UnplannedTotal:0.00}" : "")
+        </MudText>
+
+        @if (Result.Flags.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Color="Color.Warning">Price flags</MudText>
+            <MudList T="string" Dense="true">
+                @foreach (var f in Result.Flags)
+                {
+                    <MudListItem T="string">
+                        <MudText Typo="Typo.body2"><b>@f.ItemName</b>: @f.Note</MudText>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Color="Color.Success">No price flags on this receipt.</MudText>
+        }
+
+        @if (Result.PlannedNotBought.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-2">Planned here but not on the receipt</MudText>
+            <MudText Typo="Typo.body2">@string.Join(", ", Result.PlannedNotBought)</MudText>
+        }
+
+        @if (Result.DataNote is not null)
+        {
+            <MudText Typo="Typo.caption" Class="mt-2">@Result.DataNote</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" OnClick="@(() => MudDialog.Close())">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TripReconciliation Result { get; set; } = default!;
+}
