@@ -106,6 +106,11 @@ public record ShoppingListRow(
     int? ItemId = null,
     string Priority = "normal");   // must_have | normal | wait_for_sale (shopping_list.priority)
 
+// user_recipes row (UserRecipesRepo). List columns are JSON arrays of strings in the DB.
+public record UserRecipeRow(int Id, string Name, int? Servings,
+    IReadOnlyList<string> Ingredients, IReadOnlyList<string> Steps, IReadOnlyList<string> Tags,
+    string? CreatedAt = null);
+
 // Receipt read shapes (ports of the row dicts in receipts_repo.py). Money is decimal (TEXT-backed).
 public record ReceiptSummary(
     int Id, string PurchaseDate, decimal? TotalAmount, decimal? SubtotalAmount, decimal? TaxAmount,

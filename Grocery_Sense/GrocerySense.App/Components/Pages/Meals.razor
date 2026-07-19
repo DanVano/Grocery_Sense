@@ -1,5 +1,7 @@
 @page "/meals"
 @inject WeeklyPlannerService Planner
+@inject UserRecipeService Recipes
+@inject IDialogService DialogService
 
 <MudText Typo="Typo.h5" GutterBottom="true">Meal planning</MudText>
 <MudText Typo="Typo.body2" Class="mb-2">
@@ -93,6 +95,40 @@
     }
 }
 
+<MudDivider Class="my-3" />
+<div class="d-flex align-center">
+    <MudText Typo="Typo.subtitle1">My recipes</MudText>
+    <MudSpacer />
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => EditRecipeAsync(null))" Disabled="@_busy">New recipe</MudButton>
+</div>
+<MudText Typo="Typo.caption" Class="mb-1">
+    Your own recipes join the catalog everywhere — suggestions, weekly plan, and family picks.
+    A recipe with the same name as a catalog one replaces it.
+</MudText>
+@if (_myRecipes is { Count: > 0 })
+{
+    <MudList T="int" Dense="true">
+        @foreach (var r in _myRecipes)
+        {
+            <MudListItem T="int">
+                <div class="d-flex align-center">
+                    <MudText Typo="Typo.body2">@r.Name (@r.Ingredients.Count ingredients)</MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@_busy"
+                               OnClick="@(() => EditRecipeAsync(r))">Edit</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="@_busy"
+                               OnClick="@(() => DeleteRecipeAsync(r))">Delete</MudButton>
+                </div>
+            </MudListItem>
+        }
+    </MudList>
+}
+else if (_myRecipes is not null)
+{
+    <MudText Typo="Typo.body2">None yet — add the meals your family actually cooks.</MudText>
+}
+
 @code {
     private WeeklyPlan? _plan;
     private bool _persisted;
@@ -100,6 +136,52 @@
     private bool _busy;
     private string? _message;
     private Severity _messageSeverity = Severity.Info;
+    private IReadOnlyList<UserRecipeRow>? _myRecipes;
+
+    protected override async Task OnInitializedAsync() => await ReloadRecipesAsync();
+
+    private async Task ReloadRecipesAsync()
+    {
+        try { _myRecipes = await Task.Run(() => Recipes.List()); }
+        catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    private async Task EditRecipeAsync(UserRecipeRow? existing)
+    {
+        var parameters = new DialogParameters { ["Existing"] = existing };
+        var dialog = await DialogService.ShowAsync<RecipeEditDialog>(
+            existing is null ? "New recipe" : "Edit recipe", parameters);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not UserRecipeRow row) return;
+
+        _busy = true;
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (existing is null) Recipes.Add(row.Name, row.Servings, row.Ingredients, row.Steps, row.Tags);
+                else Recipes.Update(existing.Id, row.Name, row.Servings, row.Ingredients, row.Steps, row.Tags);
+            });
+            await ReloadRecipesAsync();
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteRecipeAsync(UserRecipeRow r)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync("Delete recipe",
+            $"Delete \"{r.Name}\"? Suggestions and picks stop offering it.", yesText: "Delete", cancelText: "Cancel");
+        if (confirm != true) return;
+        _busy = true;
+        try
+        {
+            await Task.Run(() => Recipes.Delete(r.Id));
+            await ReloadRecipesAsync();
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
 
     private async Task SuggestAsync()
     {

@@ -19,12 +19,30 @@ public sealed record Recipe(
 public sealed class RecipeEngine
 {
     private readonly string? _recipesPath; // null => embedded resource
+    private readonly Func<IReadOnlyList<Recipe>>? _extraRecipes; // user recipes, merged at load
     private IReadOnlyList<Recipe>? _cache;
     private long _cacheStamp;
 
-    public RecipeEngine(string? recipesPath = null) => _recipesPath = recipesPath;
+    public RecipeEngine(string? recipesPath = null, Func<IReadOnlyList<Recipe>>? extraRecipes = null)
+    {
+        _recipesPath = recipesPath;
+        _extraRecipes = extraRecipes;
+    }
 
     public IReadOnlyList<Recipe> LoadAllRecipes(bool forceReload = false)
+    {
+        var catalog = LoadCatalog(forceReload);
+        var extras = _extraRecipes?.Invoke() ?? Array.Empty<Recipe>();
+        if (extras.Count == 0) return catalog;
+
+        // User recipes come first and shadow same-name catalog recipes (case-insensitive): name lookup
+        // finds the user version, and stable sorts keep user recipes ahead on score ties.
+        // ponytail: extras re-read per call — the table is tiny; cache only if profiling says so.
+        var shadowed = extras.Select(e => e.Name.Trim().ToLowerInvariant()).ToHashSet();
+        return extras.Concat(catalog.Where(c => !shadowed.Contains(c.Name.Trim().ToLowerInvariant()))).ToList();
+    }
+
+    private IReadOnlyList<Recipe> LoadCatalog(bool forceReload)
     {
         // Embedded source is immutable at runtime -> load once. A file source is mtime-invalidated so a
         // runtime edit is picked up without forceReload (mirrors Python).

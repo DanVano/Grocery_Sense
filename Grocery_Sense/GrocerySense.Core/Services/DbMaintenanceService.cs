@@ -13,7 +13,7 @@ namespace GrocerySense.Core;
 public sealed class DbMaintenanceService
 {
     // Human-meaningful tables (skip dedupe/raw-json/internal). Names are a fixed whitelist, never user input.
-    private static readonly string[] ExportTables = { "receipts", "prices", "items", "shopping_list", "stores" };
+    private static readonly string[] ExportTables = { "receipts", "prices", "items", "shopping_list", "stores", "user_recipes" };
 
     private readonly SqliteConnectionFactory _factory;
 

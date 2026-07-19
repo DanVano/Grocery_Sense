@@ -23,6 +23,18 @@ public sealed class DbMaintenanceServiceTests : IDisposable
     }
 
     [Fact]
+    public void Export_includes_user_recipes()
+    {
+        using var db = new TempDb();
+        UserRecipesRepo.Add(db.Conn, "Dad's Chili", 4,
+            new[] { "beef" }, Array.Empty<string>(), Array.Empty<string>());
+
+        var files = new DbMaintenanceService(db.Factory).ExportToCsv(_dir);
+
+        Assert.Contains(files, f => Path.GetFileName(f).StartsWith("user_recipes"));
+    }
+
+    [Fact]
     public void Backup_produces_a_valid_db_copy_with_the_data()
     {
         using var db = new TempDb();

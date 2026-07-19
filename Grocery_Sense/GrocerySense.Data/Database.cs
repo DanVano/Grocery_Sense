@@ -345,6 +345,22 @@ public static class Database
         ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty REAL;
         ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty_note TEXT;
         """,
+
+        // ----- Migration 7: user-entered recipes (custom family recipes, food-savings follow-up) -----
+        // Merged into the RecipeEngine catalog at load; user recipes shadow same-name catalog recipes.
+        // List columns are JSON arrays of strings (decoded defensively, junk -> []). No item_id column,
+        // so ItemsAdminRepo.ItemIdTables / the FK-sweep test are deliberately untouched.
+        """
+        CREATE TABLE user_recipes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            servings    INTEGER,
+            ingredients TEXT NOT NULL DEFAULT '[]',
+            steps       TEXT NOT NULL DEFAULT '[]',
+            tags        TEXT NOT NULL DEFAULT '[]',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

@@ -1,0 +1,49 @@
+@* Add/edit a custom family recipe. Ingredients/steps are one per line; tags comma-separated.
+   Returns a UserRecipeRow (Id = 0 for a new recipe); Cancel returns nothing. *@
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Recipe name" Immediate="true" />
+        <MudNumericField T="int?" @bind-Value="_servings" Label="Servings (optional)" Min="1" Class="mt-2" />
+        <MudTextField @bind-Value="_ingredients" Label="Ingredients (one per line)" Lines="6" Class="mt-2" />
+        <MudTextField @bind-Value="_steps" Label="Steps (one per line, optional)" Lines="4" Class="mt-2" />
+        <MudTextField @bind-Value="_tags" Label="Tags (comma-separated, optional)" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_ingredients))"
+                   OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public UserRecipeRow? Existing { get; set; }
+
+    private string _name = "";
+    private int? _servings;
+    private string _ingredients = "";
+    private string _steps = "";
+    private string _tags = "";
+
+    protected override void OnInitialized()
+    {
+        if (Existing is null) return;
+        _name = Existing.Name;
+        _servings = Existing.Servings;
+        _ingredients = string.Join("\n", Existing.Ingredients);
+        _steps = string.Join("\n", Existing.Steps);
+        _tags = string.Join(", ", Existing.Tags);
+    }
+
+    private static IReadOnlyList<string> Lines(string s) =>
+        s.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+    private void Save() => MudDialog.Close(DialogResult.Ok(new UserRecipeRow(
+        Existing?.Id ?? 0, _name.Trim(), _servings, Lines(_ingredients), Lines(_steps),
+        _tags.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList())));
+
+    private void Cancel() => MudDialog.Cancel();
+}

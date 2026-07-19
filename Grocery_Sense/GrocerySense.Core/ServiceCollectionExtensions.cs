@@ -40,9 +40,12 @@ public static class ServiceCollectionExtensions
         });
         services.AddSingleton<BudgetService>();
 
-        // Meal planning (Phase 4). RecipeEngine loads the embedded recipes.json (no path). MealSuggestion
-        // resolves the household meal profile when a caller doesn't pass one.
-        services.AddSingleton(_ => new RecipeEngine());
+        // Meal planning (Phase 4). RecipeEngine loads the embedded recipes.json (no path) and merges the
+        // user's own recipes (they shadow same-name catalog entries). MealSuggestion resolves the household
+        // meal profile when a caller doesn't pass one.
+        services.AddSingleton<UserRecipeService>();
+        services.AddSingleton(sp => new RecipeEngine(
+            extraRecipes: () => sp.GetRequiredService<UserRecipeService>().ListAsRecipes()));
         services.AddSingleton(sp => new MealSuggestionService(
             sp.GetRequiredService<RecipeEngine>(),
             sp.GetRequiredService<PriceHistoryService>(),
