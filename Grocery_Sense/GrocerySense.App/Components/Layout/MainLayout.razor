@@ -19,12 +19,11 @@
         <MudText Typo="Typo.h6" Class="ml-2">Grocery Sense</MudText>
     </MudAppBar>
 
+    @* Drawer is now the "More" overflow: the long-tail destinations. The five daily ones
+       (Home, Deals, List, Receipts) live in the bottom bar; this holds the rest. *@
     <MudDrawer @bind-Open="_drawerOpen" Elevation="1" ClipMode="DrawerClipMode.Always">
         <MudNavMenu>
-            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
-            <MudNavLink Href="/receipts" Icon="@Icons.Material.Filled.ReceiptLong">Receipts</MudNavLink>
             <MudNavLink Href="/items" Icon="@Icons.Material.Filled.Category">Items</MudNavLink>
-            <MudNavLink Href="/list" Icon="@Icons.Material.Filled.Checklist">Shopping List</MudNavLink>
             <MudNavLink Href="/stores" Icon="@Icons.Material.Filled.Storefront">Stores</MudNavLink>
             <MudNavLink Href="/plan" Icon="@Icons.Material.Filled.Route">Plan</MudNavLink>
             <MudNavLink Href="/meals" Icon="@Icons.Material.Filled.Restaurant">Meals</MudNavLink>
@@ -37,7 +36,6 @@
                     }
                 </div>
             </MudNavLink>
-            <MudNavLink Href="/deals" Icon="@Icons.Material.Filled.LocalOffer">Deals</MudNavLink>
             <MudNavLink Href="/compare" Icon="@Icons.Material.Filled.Balance">Compare</MudNavLink>
             <MudNavLink Href="/budget" Icon="@Icons.Material.Filled.Savings">Budget</MudNavLink>
             <MudNavLink Href="/savings" Icon="@Icons.Material.Filled.TrendingDown">Savings</MudNavLink>
@@ -45,22 +43,49 @@
         </MudNavMenu>
     </MudDrawer>
 
-    <MudMainContent Class="pa-4">
-        @if (Startup.Status == StartupStatus.Ready)
-        {
-            @Body
-        }
-        else if (Startup.Status == StartupStatus.Error)
-        {
-            <MudAlert Severity="Severity.Error">Database failed to initialize: @Startup.Error</MudAlert>
-        }
-        else
-        {
-            <div class="d-flex justify-center pa-8">
-                <MudProgressCircular Indeterminate="true" aria-label="Loading" />
-            </div>
-        }
+    <MudMainContent>
+        @* pa-4 for the sides; extra bottom padding (inline !important to beat pa-4's) so the last
+           row clears the fixed bottom bar, plus the Android gesture-bar safe-area inset. *@
+        <div class="pa-4" style="padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;">
+            @if (Startup.Status == StartupStatus.Ready)
+            {
+                @Body
+            }
+            else if (Startup.Status == StartupStatus.Error)
+            {
+                <MudAlert Severity="Severity.Error">Database failed to initialize: @Startup.Error</MudAlert>
+            }
+            else
+            {
+                <div class="d-flex justify-center pa-8">
+                    <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+                </div>
+            }
+        </div>
     </MudMainContent>
+
+    @* Bottom navigation (Phase 2a): daily destinations one tap away. Trip-prep order — Deals is the
+       headline. Long tail sits behind More (the drawer). Only rendered once the shell is Ready so it
+       never floats over the loading/error state. *@
+    @if (Startup.Status == StartupStatus.Ready)
+    {
+        <MudAppBar Bottom="true" Dense="true" Elevation="8"
+                   Style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+            <div class="d-flex align-center" style="width:100%; gap:2px;">
+                @NavItem("/", Icons.Material.Filled.Home, "Home")
+                @NavItem("/deals", Icons.Material.Filled.LocalOffer, "Deals")
+                @NavItem("/list", Icons.Material.Filled.Checklist, "List")
+                @NavItem("/receipts", Icons.Material.Filled.ReceiptLong, "Receipts")
+                <MudButton OnClick="ToggleDrawer" Variant="Variant.Text" Color="Color.Inherit"
+                           Style="min-width:0; flex:1;" aria-label="More destinations">
+                    <div class="d-flex flex-column align-center" style="line-height:1.1;">
+                        <MudIcon Icon="@Icons.Material.Filled.Menu" Size="Size.Medium" />
+                        <MudText Typo="Typo.caption">More</MudText>
+                    </div>
+                </MudButton>
+            </div>
+        </MudAppBar>
+    }
 </MudLayout>
 
 @code {
@@ -68,6 +93,32 @@
     private int _familyCount;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    // A bottom-bar destination: icon over label, tinted primary when it's the current route.
+    // Href navigation fires LocationChanged, which restyles the active item (see OnLocationChanged).
+    private RenderFragment NavItem(string href, string icon, string label) =>
+        @<MudButton Href="@href" Variant="Variant.Text"
+                    Color="@(IsActive(href) ? Color.Primary : Color.Inherit)"
+                    Style="min-width:0; flex:1;">
+            <div class="d-flex flex-column align-center" style="line-height:1.1;">
+                <MudIcon Icon="@icon" Size="Size.Medium" />
+                <MudText Typo="Typo.caption">@label</MudText>
+            </div>
+        </MudButton>;
+
+    // Active when the current relative path equals the target ("" == Home). Prefix match would light
+    // up siblings, so this is an exact compare.
+    private bool IsActive(string href)
+    {
+        var target = href.Trim('/');
+        var cur = Nav.ToBaseRelativePath(Nav.Uri);
+        var q = cur.IndexOf('?');
+        if (q >= 0) cur = cur[..q];
+        cur = cur.TrimEnd('/');
+        return target.Length == 0
+            ? cur.Length == 0
+            : cur.Equals(target, StringComparison.OrdinalIgnoreCase);
+    }
 
     protected override void OnInitialized()
     {
