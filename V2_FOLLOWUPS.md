@@ -67,6 +67,12 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 - **Food-savings recs** (all nine, committed): Shop Mode store groups + Buy/Stock-up/Wait badges on the
   shopping list, multi-buy verdict chips on Deals, **live Flipp sync** (first real network path in the
   app — test on device data/Wi-Fi), pantry hints + budget check on Plan, the comparator page, swap chips.
+- **Family food-savings follow-ups (6 features, `feat/family-food-features`):** ranked kid picks + on-sale
+  chips (Family), restock draft (Shopping List), new-spend sort + week-budget cap + My-recipes CRUD
+  (Meals, incl. RecipeEditDialog), Trip check dialog on recent receipts (Receipts). All service logic
+  unit-tested on TempDb; none of the new UI has been driven on a device. Trip check is the
+  "right-after-the-trip" MVP — the historically-accurate version (list snapshot, date-valid flyers,
+  usual-excluding-receipt, unit normalization) is future work.
 
 ---
 
