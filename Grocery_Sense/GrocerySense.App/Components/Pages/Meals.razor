@@ -15,6 +15,8 @@
         <MudSelectItem T="string" Value="@("score")">Best value</MudSelectItem>
         <MudSelectItem T="string" Value="@("new_spend")">Lowest new spend</MudSelectItem>
     </MudSelect>
+    <MudNumericField T="double?" @bind-Value="_weekBudget" Label="Week budget $ (optional)"
+                     Min="0" Style="max-width:170px" />
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restaurant"
                OnClick="SuggestAsync" Disabled="@_busy">Suggest meals</MudButton>
     @if (_plan is not null && !_persisted)
@@ -183,14 +185,36 @@ else if (_myRecipes is not null)
         finally { _busy = false; }
     }
 
+    private double? _weekBudget;
+    private BudgetedWeeklyPlan? _budgeted;
+
     private async Task SuggestAsync()
     {
         _busy = true;
         _message = null;
+        _budgeted = null;
         try
         {
             var n = _numRecipes;
-            _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true));
+            var cap = _weekBudget;
+            if (cap is > 0)
+            {
+                _budgeted = await Task.Run(() => Planner.BuildWeeklyPlanUnderBudget(cap.Value, numRecipes: n));
+                _plan = _budgeted.Plan;
+                _messageSeverity = Severity.Info;
+                _message = _plan.Suggestions.Count == 0
+                    ? (_budgeted.SkippedNoEstimate > 0 && _budgeted.SkippedOverBudget == 0
+                        ? "No recipes have usable price estimates yet — scan receipts or sync flyers first."
+                        : $"Nothing fits under ${cap.Value:0}. Cheapest estimates exceeded the budget.")
+                    : $"{_plan.Suggestions.Count} meal(s), estimated ≈ ${_budgeted.EstimatedTotal:0.00} of ${cap.Value:0}"
+                      + (_budgeted.SkippedOverBudget > 0 ? $" · {_budgeted.SkippedOverBudget} over budget" : "")
+                      + (_budgeted.SkippedNoEstimate > 0 ? $" · {_budgeted.SkippedNoEstimate} without usable estimates (excluded)" : "")
+                      + (_budgeted.AvgCostKnownRatio < 1.0 ? " · estimates are partial — treat as a target, not a guarantee" : "");
+            }
+            else
+            {
+                _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true));
+            }
             _persisted = false; // a fresh suggestion can be added again
         }
         catch (Exception ex) { Fail(ex.Message); }

@@ -186,6 +186,14 @@ public sealed record PlannedIngredient(
 
 public sealed record WeeklyPlan(IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<PlannedIngredient> PlannedIngredients);
 
+// A weekly plan constrained to an ESTIMATED spending cap (WeeklyPlannerService.BuildWeeklyPlanUnderBudget).
+// Selection is count-first (most meals), then best-effort score swaps. SkippedNoEstimate covers both
+// unpriced recipes and partial estimates below MinKnownRatioForBudget (they'd understate cost);
+// SkippedOverBudget = priced but didn't fit. AvgCostKnownRatio < 1 => even the qualifying estimates are
+// partial — the UI must say "estimated".
+public sealed record BudgetedWeeklyPlan(WeeklyPlan Plan, double BudgetCap, double EstimatedTotal,
+    int SkippedOverBudget, int SkippedNoEstimate, double AvgCostKnownRatio);
+
 // A kid-pickable recipe with a one-glance deal flag (Family page). OnSaleThisWeek mirrors the
 // "uses ingredients that are on sale this week" line in FormatMealExplanation (DealScore > 0.2).
 public sealed record PickableRecipe(string Name, bool OnSaleThisWeek);

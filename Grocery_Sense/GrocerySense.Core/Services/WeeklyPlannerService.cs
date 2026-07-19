@@ -29,8 +29,15 @@ public sealed class WeeklyPlannerService
             targetIngredients: targetIngredients, maxRecipes: numRecipes,
             recentlyUsedRecipeIds: recentlyUsedRecipeIds);
 
-        var planned = AggregateIngredients(suggestions);
+        var plan = FinishPlan(suggestions, mapIngredients);
+        if (persistToShoppingList) PersistToShoppingList(plan, plannedStoreId, addedBy);
+        return plan;
+    }
 
+    // Aggregate + (optionally) map/annotate — shared by the plain and budget-capped builders.
+    private WeeklyPlan FinishPlan(IReadOnlyList<SuggestedMeal> suggestions, bool mapIngredients)
+    {
+        var planned = AggregateIngredients(suggestions);
         if (mapIngredients)
         {
             _mapper.InvalidateChoices(); // pick up items added since the last build
@@ -45,10 +52,69 @@ public sealed class WeeklyPlannerService
             _mapper.FlushLearnedAliases();
             planned = AnnotateLikelyHave(planned);
         }
+        return new WeeklyPlan(suggestions, planned);
+    }
 
-        var plan = new WeeklyPlan(suggestions, planned);
-        if (persistToShoppingList) PersistToShoppingList(plan, plannedStoreId, addedBy);
-        return plan;
+    // Below this fraction of priced ingredients, a cost estimate understates the real total badly enough
+    // to make a budget promise dishonest — such recipes count as unpriced for budgeting.
+    internal const double MinKnownRatioForBudget = 0.5;
+
+    // "N dinners around $cap": count-first selection over cost estimates. Recipes with no (or too-partial)
+    // estimate are excluded and counted — a budget plan must never include a meal it can't price.
+    public BudgetedWeeklyPlan BuildWeeklyPlanUnderBudget(double budgetCap, int numRecipes = 6,
+        IReadOnlySet<int>? recentlyUsedRecipeIds = null, bool mapIngredients = true)
+    {
+        var candidates = _meals.SuggestMealsForWeek(
+            maxRecipes: int.MaxValue, recentlyUsedRecipeIds: recentlyUsedRecipeIds);
+        var (picked, over, noCost, total) = SelectUnderBudget(candidates, budgetCap, numRecipes);
+        var plan = FinishPlan(picked, mapIngredients);
+        var avgKnown = picked.Count > 0 ? picked.Average(p => p.CostKnownRatio) : 0.0;
+        return new BudgetedWeeklyPlan(plan, budgetCap, total, over, noCost, avgKnown);
+    }
+
+    // Count-first selection (internal for direct test coverage).
+    // Pass 1: cheapest-first greedy — optimal for meal count under a sum cap (guaranteed).
+    // Pass 2: swap in higher-score unpicked meals where the cap still holds (count preserved). BEST-EFFORT
+    // heuristic only — a single swap can miss a better multi-item combination; bounded knapsack DP is the
+    // upgrade if a proven score optimum ever matters.
+    internal static (List<SuggestedMeal> Picked, int SkippedOverBudget, int SkippedNoEstimate, double Total)
+        SelectUnderBudget(IReadOnlyList<SuggestedMeal> candidates, double budgetCap, int maxRecipes)
+    {
+        var usable = new List<SuggestedMeal>();
+        var noEstimate = 0;
+        foreach (var s in candidates)
+        {
+            if (s.CostTotal is double && s.CostKnownRatio >= MinKnownRatioForBudget) usable.Add(s);
+            else noEstimate++;
+        }
+
+        var picked = new List<SuggestedMeal>();
+        var total = 0.0;
+        foreach (var s in usable.OrderBy(s => s.CostTotal!.Value).ThenByDescending(s => s.TotalScore))
+        {
+            if (picked.Count >= maxRecipes) break;
+            if (total + s.CostTotal!.Value > budgetCap) continue;
+            picked.Add(s);
+            total += s.CostTotal.Value;
+        }
+
+        foreach (var candidate in usable.Except(picked).OrderByDescending(s => s.TotalScore).ToList())
+        {
+            foreach (var worst in picked.Where(p => p.TotalScore < candidate.TotalScore)
+                         .OrderBy(p => p.TotalScore).ToList())
+            {
+                var newTotal = total - worst.CostTotal!.Value + candidate.CostTotal!.Value;
+                if (newTotal > budgetCap) continue;
+                picked[picked.IndexOf(worst)] = candidate;
+                total = newTotal;
+                break;
+            }
+        }
+
+        // Leftovers count as "over budget" only when the BUDGET stopped us — if the maxRecipes cap was
+        // reached, the remaining affordable recipes were not rejected by price.
+        var overBudget = picked.Count < maxRecipes ? usable.Count - picked.Count : 0;
+        return (picked.OrderByDescending(p => p.TotalScore).ToList(), overBudget, noEstimate, total);
     }
 
     // Public so the UI can persist the exact plan the user reviewed, rather than rebuilding it at click time
