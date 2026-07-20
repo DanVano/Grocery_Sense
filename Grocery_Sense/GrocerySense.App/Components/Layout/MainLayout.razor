@@ -6,6 +6,8 @@
 @inject FamilyRequestsService Family
 @inject NavigationManager Nav
 @inject PendingNavigationService PendingNav
+@inject QuickScanService QuickScan
+@inject ISnackbar Snackbar
 
 <MudThemeProvider />
 <MudPopoverProvider />
@@ -64,6 +66,24 @@
         </div>
     </MudMainContent>
 
+    @* Global Scan FAB (Phase 2c): receipt capture is one tap from every screen, not buried in the
+       Receipts page. Turns into a spinner while the OCR round-trip runs. *@
+    @if (Startup.Status == StartupStatus.Ready)
+    {
+        <div style="position:fixed; right:16px; z-index:1300;
+                    bottom: calc(88px + env(safe-area-inset-bottom, 0px));">
+            @if (_scanning)
+            {
+                <MudProgressCircular Color="Color.Secondary" Indeterminate="true" aria-label="Reading receipt" />
+            }
+            else
+            {
+                <MudFab Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PhotoCamera"
+                        OnClick="ScanReceiptAsync" aria-label="Scan a receipt" />
+            }
+        </div>
+    }
+
     @* Bottom navigation (Phase 2a): daily destinations one tap away. Trip-prep order — Deals is the
        headline. Long tail sits behind More (the drawer). Only rendered once the shell is Ready so it
        never floats over the loading/error state. *@
@@ -91,8 +111,45 @@
 @code {
     private bool _drawerOpen;
     private int _familyCount;
+    private bool _scanning;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    // Global one-tap capture. Every outcome is reported: a failure says so verbatim, a duplicate says
+    // it was already imported, and a success links through to the receipt. Silence is only correct
+    // when the user backed out of the camera themselves.
+    private async Task ScanReceiptAsync()
+    {
+        _scanning = true;
+        StateHasChanged();
+        try
+        {
+            var result = await QuickScan.CaptureAndIngestAsync();
+
+            if (result.Error is { } error)
+            {
+                Snackbar.Add($"Scan failed: {error}", Severity.Error);
+                return;
+            }
+            if (!result.Captured) return; // user backed out of the camera
+
+            if (result.WasDuplicate)
+            {
+                Snackbar.Add($"Already imported as receipt #{result.ReceiptId}.", Severity.Info);
+                return;
+            }
+
+            var message = $"Receipt #{result.ReceiptId} imported"
+                + (result.AlertsOpened > 0 ? $" · {result.AlertsOpened} new price alert(s)" : "");
+            Snackbar.Add(message, Severity.Success, config =>
+            {
+                config.Action = "View";
+                config.ActionColor = Color.Primary;
+                config.OnClick = _ => { Nav.NavigateTo("/receipts"); return Task.CompletedTask; };
+            });
+        }
+        finally { _scanning = false; }
+    }
 
     // A bottom-bar destination: icon over label, tinted primary when it's the current route.
     // Href navigation fires LocationChanged, which restyles the active item (see OnLocationChanged).
