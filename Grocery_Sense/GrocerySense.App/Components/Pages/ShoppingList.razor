@@ -1,9 +1,11 @@
 @page "/list"
+@using GrocerySense.App.Services
 @using GrocerySense.Core
 @using GrocerySense.Domain
 @inject ShoppingListService Shopping
 @inject ShoppingInsightsService Insights
 @inject BasketOptimizerService Optimizer
+@inject ShopModeState ShopState
 
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.h5">Shopping List</MudText>
@@ -242,7 +244,11 @@ else
     private string _planMode = "best_savings";
     private BasketOptimizationResult? _planPreview;
 
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    protected override Task OnInitializedAsync()
+    {
+        _shopMode = ShopState.Enabled; // survive a tab-away/return (Phase 2b)
+        return ReloadAsync();
+    }
 
     private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -265,6 +271,7 @@ else
     private async Task ToggleShopModeAsync(bool on)
     {
         _shopMode = on;
+        ShopState.Enabled = on;
         await ReloadAsync();
     }
 
@@ -336,6 +343,7 @@ else
             if (!result.Ok) { _error = result.Error; return; }
             _planPreview = null;
             _shopMode = true;
+            ShopState.Enabled = true;
             await ReloadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
