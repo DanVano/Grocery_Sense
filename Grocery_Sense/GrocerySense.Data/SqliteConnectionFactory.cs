@@ -42,14 +42,6 @@ public sealed class SqliteConnectionFactory
         return conn;
     }
 
-    /// <summary>Runs the migration ledger once at app startup (creates tables, applies pending steps).</summary>
-    public Task InitializeAsync(CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        Database.Initialize(this);
-        return Task.CompletedTask;
-    }
-
     private void EnsureIntegrityChecked(SqliteConnection conn)
     {
         var key = Path.GetFullPath(_dbPath);
@@ -76,11 +68,5 @@ public sealed class SqliteConnectionFactory
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
-    }
-
-    /// <summary>Test hook (mirrors Python's reset_integrity_cache) — clears the per-path guard.</summary>
-    public static void ResetIntegrityCache()
-    {
-        lock (_gate) { _integrityChecked.Clear(); }
     }
 }
