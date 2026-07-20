@@ -1,4 +1,5 @@
 @page "/receipts"
+@using GrocerySense.App.Services
 @using GrocerySense.Core
 @using GrocerySense.Data
 @using GrocerySense.Data.Repositories
@@ -303,19 +304,10 @@ else
         }
     }
 
-    // Picker/camera streams are copied into app-data (source paths can expire on Android). Returns the copy.
-    // Bounded: a hostile/huge picker file is rejected before the OCR client loads it fully into memory.
-    private const long MaxImportBytes = 20L * 1024 * 1024;
-    private static readonly HashSet<string> ReceiptExtensions = new(StringComparer.OrdinalIgnoreCase)
-        { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff" };
-
-    private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
-    {
-        await using var source = await pick.OpenReadAsync();
-        return await BoundedFileCopy.CopyAsync(
-            source, pick.FileName, ReceiptsDir(), ReceiptExtensions,
-            defaultExtension: ".jpg", maxBytes: MaxImportBytes, ct: ct);
-    }
+    // Bounded copy of a picker/camera stream into app-data. The ceiling, allowlist and destination live
+    // in ReceiptFilePolicy so this page and the global Scan FAB cannot drift apart.
+    private static Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct) =>
+        ReceiptFilePolicy.CopyPickAsync(pick, ct);
 
     // Backfill on-ramp: multi-pick from the gallery, copy all, then import with a per-receipt date confirm.
     // Alerts are not scanned here — correctly-dated old receipts fall outside the recent-scan window.
@@ -474,7 +466,7 @@ else
         return Task.CompletedTask;
     }
 
-    private static string ReceiptsDir() => Path.Combine(FileSystem.AppDataDirectory, "receipts");
+    private static string ReceiptsDir() => ReceiptFilePolicy.ReceiptsDir();
 
     private static bool CanDeleteReceiptFile(string path) =>
         PathSafety.IsUnderDirectory(ReceiptsDir(), path) && File.Exists(path);

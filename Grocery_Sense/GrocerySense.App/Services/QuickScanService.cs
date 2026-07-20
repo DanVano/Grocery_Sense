@@ -3,19 +3,10 @@ using GrocerySense.Core;
 namespace GrocerySense.App.Services;
 
 // One-tap receipt capture behind the global Scan FAB: camera → bounded copy → ingest → price-alert
-// scan. Mirrors the Receipts page's single-scan path deliberately, including the BoundedFileCopy
-// ceiling and extension allowlist — the FAB must not become a laxer way in than the page.
-//
-// ponytail: Receipts.razor still declares its own copy of MaxImportBytes/ReceiptExtensions. Drift
-// between the two would be a security gap rather than mere duplication, so unify them (point that
-// file at these constants) once it is not being edited concurrently.
+// scan. Copies through ReceiptFilePolicy, the same path the Receipts page uses, so the FAB cannot
+// become a laxer way in than the page.
 public sealed class QuickScanService
 {
-    public const long MaxImportBytes = 20L * 1024 * 1024;
-
-    private static readonly HashSet<string> ReceiptExtensions = new(StringComparer.OrdinalIgnoreCase)
-        { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff" };
-
     private readonly ReceiptIngestionService _ingest;
     private readonly ScanAlertNotificationService _scanAlerts;
 
@@ -43,10 +34,7 @@ public sealed class QuickScanService
         string? copyPath = null;
         try
         {
-            await using (var source = await pick.OpenReadAsync())
-                copyPath = await BoundedFileCopy.CopyAsync(
-                    source, pick.FileName, ReceiptsDir(), ReceiptExtensions,
-                    defaultExtension: ".jpg", maxBytes: MaxImportBytes, ct: ct);
+            copyPath = await ReceiptFilePolicy.CopyPickAsync(pick, ct);
 
             // replaceDuplicates: false — the quick path never silently overwrites an existing receipt.
             var outcome = await _ingest.IngestReceiptFileAsync(copyPath, false, ct);
@@ -74,11 +62,9 @@ public sealed class QuickScanService
         }
     }
 
-    private static string ReceiptsDir() => Path.Combine(FileSystem.AppDataDirectory, "receipts");
-
     private static void TryDelete(string? path)
     {
-        if (path is null || !PathSafety.IsUnderDirectory(ReceiptsDir(), path)) return;
+        if (path is null || !PathSafety.IsUnderDirectory(ReceiptFilePolicy.ReceiptsDir(), path)) return;
         try { File.Delete(path); } catch { /* best-effort cleanup of an unreferenced copy */ }
     }
 }
