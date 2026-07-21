@@ -29,7 +29,7 @@ and deleted 2026-07-11; `SECURITY_REVIEW_FUTURE_WORK.md` stays live (standing v3
 
 | Item | Why blocked | What it needs |
 |---|---|---|
-| **Android build** | This machine has only **JDK 8**; **API 36 platform absent** | `winget install Microsoft.OpenJDK.17`, then elevated `sdkmanager … "platforms;android-36" "build-tools;36.0.0"` (SDK is under `C:\Program Files (x86)\Android\android-sdk`), then `dotnet build … -f net10.0-android`. Commands in `V2_PLAN.md` Phase 0. **Confirmed 2026-07-19:** that SDK dir holds `android-34` + `android-35` only. `dotnet build -t:InstallAndroidDependencies -f net10.0-android -p:AndroidSdkDirectory="C:\Program Files (x86)\Android\android-sdk" -p:AcceptAndroidSDKLicenses=True` downloads the platform fine but dies `UnauthorizedAccessException` writing `platforms\android-36` — **Program Files needs elevation; run that command from an admin shell.** Until it lands, nothing under `Platforms/Android/` can be compiled at all, only the Windows head. |
+| **Android build** | ~~JDK / API 36~~ **RESOLVED 2026-07-21 — the Android head now builds** | JDK 17 (`C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot`) + API 36 platform are installed; `InstallAndroidDependencies` was run from an admin shell (the download works unelevated but the `Program Files` write needs admin). Build the head with: `JAVA_HOME` set to that JDK, `dotnet build GrocerySense.App -f net10.0-android -p:AndroidSdkDirectory="C:\Program Files (x86)\Android\android-sdk" -p:JavaSdkDirectory="C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"` → **Build succeeded, 0 errors** (7 pre-existing CS8602 nullable warnings in `AndroidLocalNotifier.cs`). Compiling is now a real verification target; **on-device run still is not** (needs a signed APK on a device/emulator — keystore row below). |
 | **Release keystore** | Signing key = a secret the user must own | `keytool -genkeypair -v -keystore grocerysense-release.keystore -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000`. **Back it up off-machine.** Lose it → testers uninstall/reinstall and lose local data. |
 | **Signed v2 APK + on-device smoke** | Needs the two above | `dotnet publish -f net10.0-android -c Release`; smoke every route (§2 list); sideload to the ring (manual reinstall). |
 | **Azure OCR budget cap** | External portal | Set the cap + check per-page cost **before** the ~50-receipt backfill scan. |
@@ -67,17 +67,22 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 - **Food-savings recs** (all nine, committed): Shop Mode store groups + Buy/Stock-up/Wait badges on the
   shopping list, multi-buy verdict chips on Deals, **live Flipp sync** (first real network path in the
   app — test on device data/Wi-Fi), pantry hints + budget check on Plan, the comparator page, swap chips.
-- **Android workflow shell (`V3_Mobile_Development`, 2026-07-19) — compile-verified ONLY, never seen
-  running.** Six commits (`8236ca5` deal→list snackbar action · `018a5a6` List-centred "Plan trip"
+- **Android workflow shell (`V3_Mobile_Development`, 2026-07-19→21) — compiles on BOTH heads, never seen
+  running.** Ten commits: `8236ca5` deal→list snackbar action · `018a5a6` List-centred "Plan trip"
   preview/confirm → Shop Mode · `4b04008` bottom nav + drawer demoted to More · `041d070` Shop Mode
-  persisted across navigation · `91e8141` global Scan FAB · `5313894` actionable Home cards). Windows
-  head builds 0/0 and 484 tests pass, but **no test in this repo exercises Razor**, so all of this is
-  unproven UI. Verify on device: bottom-bar **safe-area / gesture-bar inset** and keyboard overlap; the
-  FAB's position above the bar; active-route tinting; the Plan-trip preview→confirm→Shop-Mode hand-off;
-  Shop Mode surviving a tab-away; Home's resume card against a genuinely half-finished shop; and the
-  Scan FAB's camera → bounded-copy → ingest path (**the only capture path not yet run against a real
-  camera**). Note the shell has **no hardware-Back handling yet** (designed, not built — blocked on §1),
-  so Android Back currently backgrounds the app from every screen.
+  persisted across navigation · `91e8141` global Scan FAB · `5313894` actionable Home cards · `b04cd6a`
+  `ReceiptFilePolicy` (one owner for the 20 MiB ceiling + allowlist, both capture paths funnel through
+  it) · `e21d160` hardware Back walks WebView history · `9b2a804` Android receipt share target. Windows
+  **and Android** heads build 0-error; 488 tests pass — but **no test exercises Razor or the Android
+  platform layer**, so all UI + intent behaviour is still unproven at runtime. Verify on device:
+  bottom-bar **safe-area / gesture-bar inset** + keyboard overlap; FAB position above the bar;
+  active-route tinting; Plan-trip preview→confirm→Shop-Mode; Shop Mode surviving a tab-away; Home's
+  resume card against a real half-finished shop; the Scan FAB camera→ingest path; **hardware Back**
+  (walks in-app history, exits at root — and the known gap: a MudBlazor dialog/drawer creates no history
+  entry, so Back navigates the page behind it instead of closing the overlay first — closing overlays on
+  Back needs a managed open-overlay bridge, deferred); and the **share target** (does the intent filter
+  appear in the sheet, cold vs warm delivery, content-URI read grants, the confirm banner, oversize/bad
+  shares landing as disclosed rejects).
 
 ---
 
