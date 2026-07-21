@@ -1,6 +1,7 @@
 using GrocerySense.App.Services;
 using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
+using GrocerySense.Data;
 using GrocerySense.Integrations;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,7 +20,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IReceiptOcrClient, AppReceiptOcrClient>();
         services.AddSingleton<IFlyerProvider, FlippClient>();
         services.AddSingleton<IFlyerLayoutClient, AppFlyerLayoutClient>();
-        services.AddSingleton<Services.AppStartup>();
+        services.AddSingleton<AppStartup>();
         services.AddSingleton<Services.ShopModeState>();
         services.AddSingleton<Services.QuickScanService>();
 

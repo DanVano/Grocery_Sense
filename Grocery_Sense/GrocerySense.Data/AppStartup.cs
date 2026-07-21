@@ -1,12 +1,13 @@
-using GrocerySense.Data;
-
-namespace GrocerySense.App.Services;
+namespace GrocerySense.Data;
 
 public enum StartupStatus { Loading, Ready, Error }
 
 // Startup state machine (PORTING.md Phase 8 mobile requirements): DB migrations run off the UI
 // thread; the layout renders loading/ready/error off this state instead of blocking the first frame.
 // Errors surface verbatim — a broken DB must be visible, not silently retried.
+//
+// Lives in Data (not the MAUI App head) because it depends only on SqliteConnectionFactory + Database
+// — no MAUI — which keeps the state machine unit-testable (AppStartupTests) off-device.
 public sealed class AppStartup
 {
     private readonly SqliteConnectionFactory _factory;

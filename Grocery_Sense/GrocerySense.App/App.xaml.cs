@@ -1,5 +1,5 @@
-using GrocerySense.App.Services;
 using GrocerySense.Core;
+using GrocerySense.Data;
 using Microsoft.Extensions.Logging;
 
 namespace GrocerySense.App;
