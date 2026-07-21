@@ -255,6 +255,13 @@ public static class PricesRepo
     }
 
     // Likely staples from receipt history: (item_id, line_count, distinct_receipt_count).
+    // This is the one prices read with no item_id bound, so the date window is the only selective predicate.
+    // INDEXED BY forces the seek onto idx_prices_coalesced_date (migration 9): without stats SQLite guesses a
+    // >= range hits 25% of rows and instead full-scans the item-ordered idx_prices_item_coalesced (free GROUP
+    // BY order), so the cost tracked total history. Forcing the date index makes it track the window instead.
+    // ponytail: this pessimizes the all-recent-data case (window ≈ whole table -> a scan would've been cheaper
+    // than seek+sort), but that case is small and fast anyway; the win is the large-history case. Drop the
+    // INDEXED BY if a periodic ANALYZE/PRAGMA optimize ever runs — real stats let the planner choose correctly.
     public static IReadOnlyList<(int ItemId, int LineCount, int DistinctReceipts)> ListStapleItemIds(
         SqliteConnection conn, int sinceDays = 90, int minDistinctReceipts = 3, int minLineItems = 4,
         SqliteTransaction? tx = null)
@@ -262,7 +269,7 @@ public static class PricesRepo
         using var cmd = Db.Command(conn, tx,
             """
             SELECT item_id, COUNT(*) AS line_count, COUNT(DISTINCT receipt_id) AS receipt_count
-            FROM prices
+            FROM prices INDEXED BY idx_prices_coalesced_date
             WHERE item_id IS NOT NULL AND unit_price IS NOT NULL
               AND (source = 'receipt' OR receipt_id IS NOT NULL)
               AND date(COALESCE(date, created_at)) >= date('now', $since)
