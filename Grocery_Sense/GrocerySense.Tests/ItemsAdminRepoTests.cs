@@ -180,6 +180,31 @@ public sealed class ItemsAdminRepoTests
         Assert.Equal(1, Convert.ToInt32(ExecScalar(db.Conn, $"SELECT COUNT(*) FROM watchlist WHERE item_id = {target}")));
     }
 
+    // Schema-drift guard: EVERY table with an item_id column in the live schema must be covered by the
+    // merge repointing (ItemsAdminRepo.ItemIdTables) or the watchlist special-case. A new item_id table
+    // added to neither silently orphans its rows on MergeItems — this fails the moment such a table lands.
+    [Fact]
+    public void ItemIdTables_covers_every_item_id_column_in_the_live_schema()
+    {
+        using var db = new TempDb();
+        var inSchema = new HashSet<string>(StringComparer.Ordinal);
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "SELECT m.name FROM sqlite_master m JOIN pragma_table_info(m.name) p " +
+                "WHERE m.type = 'table' AND p.name = 'item_id'";
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) inSchema.Add(r.GetString(0));
+        }
+
+        // Source of truth = the production list (repointed on merge) + the watchlist special-case.
+        var known = new HashSet<string>(ItemsAdminRepo.ItemIdTables, StringComparer.Ordinal) { "watchlist" };
+
+        Assert.True(known.SetEquals(inSchema),
+            $"item_id table drift — schema=[{string.Join(", ", inSchema.OrderBy(x => x))}] " +
+            $"known=[{string.Join(", ", known.OrderBy(x => x))}]");
+    }
+
     [Fact]
     public void Merge_is_atomic_a_rollback_reverts_every_table()
     {

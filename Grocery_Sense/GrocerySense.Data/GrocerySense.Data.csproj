@@ -11,5 +11,10 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- ItemsAdminRepo.ItemIdTables is internal but the schema-drift guard test asserts against it directly. -->
+    <InternalsVisibleTo Include="GrocerySense.Tests" />
+  </ItemGroup>
+
 </Project>
 
