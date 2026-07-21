@@ -11,7 +11,10 @@ public sealed class PendingNavigationService
     // intent extra. Restricting to known in-app paths stops that from forcing navigation to an unintended
     // page or (via NavigateTo on an absolute URL) opening attacker content externally. Add a route here — the
     // one place it gets security-reviewed — when a new deep link is introduced.
-    private static readonly HashSet<string> AllowedRoutes = new(StringComparer.Ordinal) { "/savings" };
+    // "/receipts" is here for the Android share target (Phase 5) — after a shared receipt is copied in, the
+    // activity routes here so the Receipts page can confirm + ingest it. Both entries are inert in-app pages,
+    // so a hostile app forcing navigation to either achieves nothing beyond opening a screen.
+    private static readonly HashSet<string> AllowedRoutes = new(StringComparer.Ordinal) { "/savings", "/receipts" };
 
     private readonly object _sync = new();
     private string? _pendingRoute;

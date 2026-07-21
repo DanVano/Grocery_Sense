@@ -184,7 +184,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
         var svc = Build(db, CannedLayout());
 
         var result = await svc.IngestAssetsAsync(storeId, "2026-06-20", "2026-06-27",
-            new[] { WriteAsset("flyer-bytes") }, _rawDir);
+            new[] { WriteAsset("flyer-bytes") });
 
         Assert.True(result.FlyerId > 0);
         Assert.Equal(1, result.AssetsCount);
@@ -193,8 +193,8 @@ public sealed class FlyerIngestServiceTests : IDisposable
 
         var repo = new FlyersRepo();
         Assert.Equal(5, repo.ListDealsForFlyer(db.Conn, result.FlyerId).Count);
-        // raw JSON dropped to disk so a reprocess doesn't re-pay Azure.
-        Assert.NotEmpty(Directory.GetFiles(_rawDir, "*.json"));
+        // Raw JSON is persisted to SQLite only (RawJsonCount above) — no plaintext copy on disk.
+        Assert.Empty(Directory.GetFiles(_rawDir, "*.json"));
     }
 
     // Split-brain regression (flyer unification): a manually ingested, mapped deal must surface through
@@ -212,7 +212,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
         new ItemAliasesRepo().UpsertAlias(db.Conn, normalized, item, 1.0);
         var svc = Build(db, CannedLayout());
 
-        await svc.IngestAssetsAsync(storeId, null, null, new[] { WriteAsset("flyer-bytes") }, _rawDir);
+        await svc.IngestAssetsAsync(storeId, null, null, new[] { WriteAsset("flyer-bytes") });
 
         var quotes = PricesRepo.GetActiveFlyerPricesBatch(db.Conn, new[] { item }, new[] { storeId });
         var quote = quotes[(item, storeId)];
@@ -226,7 +226,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
         using var db = new TempDb();
         var svc = Build(db, CannedLayout());
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            svc.IngestAssetsAsync(null, null, null, new[] { WriteAsset("x") }, _rawDir));
+            svc.IngestAssetsAsync(null, null, null, new[] { WriteAsset("x") }));
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
         var svc = Build(db, CannedLayout());
 
         var result = await svc.IngestAssetsAsync(storeId, null, null,
-            new[] { Path.Combine(_rawDir, "does-not-exist.png") }, _rawDir);
+            new[] { Path.Combine(_rawDir, "does-not-exist.png") });
 
         Assert.True(result.FlyerId > 0);
         Assert.Equal(0, result.AssetsCount);

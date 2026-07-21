@@ -1,4 +1,128 @@
 @page "/"
+@using GrocerySense.App.Services
+@using GrocerySense.Core
+@using GrocerySense.Data
+@using GrocerySense.Data.Repositories
+@inject ShoppingListService Shopping
+@inject PriceDropAlertService Alerts
+@inject FamilyRequestsService Family
+@inject SqliteConnectionFactory Db
+@inject ShopModeState ShopState
+@inject NavigationManager Nav
 
 <MudText Typo="Typo.h5" GutterBottom="true">Grocery Sense</MudText>
-<MudText Typo="Typo.body1">Track receipts, plan store trips, and catch deals.</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Class="mb-2" Severity="Severity.Error">@_error</MudAlert>
+}
+
+@if (_loading)
+{
+    <div class="d-flex justify-center pa-8">
+        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
+    </div>
+}
+else
+{
+    @* Resume first: an unfinished shop outranks anything else on this screen. Checked-off rows are
+       persisted, so a half-done trip survives the app being closed. *@
+    @if (_pickedUp > 0)
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">Shopping in progress</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">@_pickedUp of @_listTotal picked up.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.ShoppingCartCheckout"
+                       OnClick="ResumeShopping">Resume shopping</MudButton>
+        </MudPaper>
+    }
+
+    <MudPaper Class="pa-3 mb-2" Outlined="true">
+        <MudText Typo="Typo.subtitle1">Deals</MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            @(_dealCount > 0
+                ? $"{_dealCount} active deal(s) across your stores."
+                : "No active deals — sync flyers to pull them in.")
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.LocalOffer" Href="/deals">Browse deals</MudButton>
+    </MudPaper>
+
+    @if (_alertCount > 0)
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">@_alertCount price alert(s)</MudText>
+            @if (_topAlert is { Length: > 0 } top)
+            {
+                <MudText Typo="Typo.body2" Class="mb-2">Latest: @top</MudText>
+            }
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.TrendingDown" Href="/savings">See savings</MudButton>
+        </MudPaper>
+    }
+
+    @if (_familyCount > 0)
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">@_familyCount family request(s)</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Waiting for your review.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Groups" Href="/family">Review</MudButton>
+        </MudPaper>
+    }
+
+    @if (_pickedUp == 0 && _listTotal > 0)
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">Shopping list</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">@_listTotal item(s) ready to plan.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Checklist" Href="/list">Open list</MudButton>
+        </MudPaper>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private int _pickedUp;
+    private int _listTotal;
+    private int _dealCount;
+    private int _alertCount;
+    private string? _topAlert;
+    private int _familyCount;
+
+    // Every figure here is a cheap read of already-persisted state — Home must not recompute the
+    // deal/alert engines on the landing screen. Alerts are read, never refreshed, for the same reason.
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                var items = Shopping.GetActiveItems(includeCheckedOff: true);
+                _listTotal = items.Count;
+                _pickedUp = items.Count(i => i.IsCheckedOff);
+
+                var alerts = Alerts.GetAlerts(limit: 50);
+                _alertCount = alerts.Count;
+                _topAlert = alerts.Count > 0 ? alerts[0].ItemName : null;
+
+                _familyCount = Family.UnreviewedCount();
+
+                using var conn = Db.Open();
+                _dealCount = new FlyersRepo().ListActiveDeals(conn).Count;
+            });
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    // Drop straight back into the store-grouped shopping view the user left.
+    private void ResumeShopping()
+    {
+        ShopState.Enabled = true;
+        Nav.NavigateTo("/list");
+    }
+}

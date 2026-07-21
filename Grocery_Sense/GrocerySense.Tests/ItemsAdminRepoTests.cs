@@ -66,6 +66,56 @@ public sealed class ItemsAdminRepoTests
         return cmd.ExecuteScalar()!;
     }
 
+    // Task 3 guard: the search must return only matching items with exact price stats, even when the DB
+    // holds far more price history for unrelated items (the bounded query must not fold their rows in).
+    [Fact]
+    public void SearchItems_returns_only_matches_with_price_stats_ignoring_unrelated_history()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+
+        var milk = ItemsRepo.CreateItem(db.Conn, "milk").Id;
+        var milk2 = ItemsRepo.CreateItem(db.Conn, "2% milk").Id;
+
+        // 300 unrelated items, each with price history the search must never aggregate.
+        for (var i = 0; i < 300; i++)
+        {
+            var id = ItemsRepo.CreateItem(db.Conn, $"widget {i:D3}").Id;
+            Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, source, date, unit_price, unit) " +
+                          $"VALUES ({id}, {store}, 'receipt', '2026-05-01', '1.00', 'each')");
+        }
+
+        // milk: 2 points, latest 2026-06-15. 2% milk: 1 point, latest 2026-06-10.
+        Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, source, date, unit_price, unit) VALUES ({milk}, {store}, 'receipt', '2026-06-01', '4.99', 'each')");
+        Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, source, date, unit_price, unit) VALUES ({milk}, {store}, 'receipt', '2026-06-15', '4.49', 'each')");
+        Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, source, date, unit_price, unit) VALUES ({milk2}, {store}, 'receipt', '2026-06-10', '5.49', 'each')");
+
+        var rows = ItemsAdminRepo.SearchItems(db.Conn, "milk", 50);
+
+        Assert.Equal(2, rows.Count);
+        var mRow = rows.Single(r => r.CanonicalName == "milk");
+        var m2Row = rows.Single(r => r.CanonicalName == "2% milk");
+        Assert.Equal(2, mRow.PricePoints);
+        Assert.Equal("2026-06-15", mRow.LastPriceDate);
+        Assert.Equal(1, m2Row.PricePoints);
+        Assert.Equal("2026-06-10", m2Row.LastPriceDate);
+    }
+
+    // Empty search still returns items (bounded by limit), with zero stats for items that have no prices.
+    [Fact]
+    public void SearchItems_empty_query_returns_items_with_zero_stats_when_no_prices()
+    {
+        using var db = new TempDb();
+        ItemsRepo.CreateItem(db.Conn, "milk");
+        ItemsRepo.CreateItem(db.Conn, "bread");
+
+        var rows = ItemsAdminRepo.SearchItems(db.Conn, "", 50);
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal(0, r.PricePoints));
+        Assert.All(rows, r => Assert.Null(r.LastPriceDate));
+    }
+
     [Fact]
     public void Merge_repoints_every_item_id_table_and_leaves_no_orphan()
     {

@@ -346,10 +346,18 @@ public static class Database
         ALTER TABLE price_drop_alerts ADD COLUMN suggested_qty_note TEXT;
         """,
 
-        // ----- Migration 7: user-entered recipes (custom family recipes, food-savings follow-up) -----
+        // ----- Migration 7: index case-insensitive canonical item lookup (perf) -----
+        // Exact item lookups compare case-insensitively (GetItemByName / GetItemsByNames). The BINARY
+        // idx_items_name can't serve a NOCASE predicate, so those seeks fell back to a scan as the catalog
+        // grew. A NOCASE index lets `canonical_name = ? COLLATE NOCASE` seek instead. Additive index only.
+        "CREATE INDEX idx_items_name_nocase ON items(canonical_name COLLATE NOCASE);",
+
+        // ----- Migration 8: user-entered recipes (custom family recipes, food-savings follow-up) -----
         // Merged into the RecipeEngine catalog at load; user recipes shadow same-name catalog recipes.
         // List columns are JSON arrays of strings (decoded defensively, junk -> []). No item_id column,
         // so ItemsAdminRepo.ItemIdTables / the FK-sweep test are deliberately untouched.
+        // Renumbered from 7->8 during the origin/main merge (2026-07-21): origin/main's perf-index
+        // migration claimed 7 first (already on origin/main); this table keeps its rows, just a new number.
         """
         CREATE TABLE user_recipes (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -20,6 +20,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFlyerProvider, FlippClient>();
         services.AddSingleton<IFlyerLayoutClient, AppFlyerLayoutClient>();
         services.AddSingleton<Services.AppStartup>();
+        services.AddSingleton<Services.ShopModeState>();
+        services.AddSingleton<Services.QuickScanService>();
 
         // ILocalNotifier binding for ScanAlertNotificationService (A7) — the repo's first platform conditional.
         // Android posts a real notification; other heads no-op to false (in-app line still shows).

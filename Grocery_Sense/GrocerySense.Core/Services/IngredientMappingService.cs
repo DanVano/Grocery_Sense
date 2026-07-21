@@ -15,9 +15,10 @@ namespace GrocerySense.Core;
 // Scoring note (per PORTING.md): FuzzySharp returns 0-100; Python thresholds are 0.78/0.90. We divide the
 // score by 100 and compare against the fractional thresholds — the conversion is documented at the call site.
 //
-// Composes ItemAliasesRepo and opens its own connections via the factory (mirrors Python's connection_scope),
-// so MapToItem keeps the stub's no-conn signature. Singleton with a per-run candidate cache + buffered learns;
-// a coarse lock guards that mutable state. ponytail: single-user v1 ingest is sequential, so one lock is fine.
+// Composes ItemAliasesRepo. Standalone callers use the factory overload (opens one connection); bulk callers
+// (receipt/flyer/list ingest) pass their existing connection/transaction so a many-line loop no longer opens
+// one connection per line. Singleton with a per-run candidate cache + buffered learns; a coarse lock guards
+// that mutable state. ponytail: single-user v1 ingest is sequential, so one lock is fine.
 public sealed class IngredientMappingService
 {
     private const double AcceptThreshold = 0.78;
@@ -53,7 +54,17 @@ public sealed class IngredientMappingService
 
     public IngredientMappingService(SqliteConnectionFactory factory) => _factory = factory;
 
+    // Standalone overload: opens one connection through the factory and delegates. Connection-open touches no
+    // shared state, so it stays outside the lock; the mutable candidate cache/learns are guarded inside.
     public MappingResult MapToItem(string rawText)
+    {
+        using var conn = _factory.Open();
+        return MapToItem(conn, rawText);
+    }
+
+    // Bulk overload: reuse the caller's connection (and transaction, when the caller is mid-write) so an ingest
+    // loop maps every line on one connection instead of opening one per line.
+    public MappingResult MapToItem(SqliteConnection conn, string rawText, SqliteTransaction? tx = null)
     {
         lock (_sync)
         {
@@ -62,17 +73,15 @@ public sealed class IngredientMappingService
             if (normalized.Length == 0 && rawKey.Length == 0)
                 return new MappingResult(null, null, 0.0, "none", normalized);
 
-            using var conn = _factory.Open();
-
             // 1) Exact alias cache hit. Try the normalized key first, then the raw lowercased text: manual
             // corrections (CorrectLineMapping) and receipt auto-learns store the alias as raw punctuated text,
             // which the normalize pipeline strips (% / stopwords / abbrevs) — so a normalized-only lookup would
             // never find them. Whichever key hit is the one we mark as seen.
             var matchedKey = normalized;
-            var alias = normalized.Length > 0 ? _aliases.GetByAlias(conn, normalized) : null;
+            var alias = normalized.Length > 0 ? _aliases.GetByAlias(conn, normalized, tx) : null;
             if (alias is null && rawKey.Length > 0 && rawKey != normalized)
             {
-                alias = _aliases.GetByAlias(conn, rawKey);
+                alias = _aliases.GetByAlias(conn, rawKey, tx);
                 matchedKey = rawKey;
             }
             if (alias is not null)
@@ -85,7 +94,7 @@ public sealed class IngredientMappingService
                 return new MappingResult(null, null, 0.0, "none", normalized);
 
             // 2) Fuzzy match against canonical item names.
-            var (choices, names) = GetChoices(conn);
+            var (choices, names) = GetChoices(conn, tx);
             if (choices.Count == 0)
                 return new MappingResult(null, null, 0.0, "none", normalized);
 
@@ -160,11 +169,12 @@ public sealed class IngredientMappingService
     private static string RemoveStopwords(string text) =>
         string.Join(" ", text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(t => !Stopwords.Contains(t)));
 
-    private (List<(int Id, string Name)> Choices, List<string> Names) GetChoices(SqliteConnection conn)
+    private (List<(int Id, string Name)> Choices, List<string> Names) GetChoices(SqliteConnection conn,
+        SqliteTransaction? tx = null)
     {
         if (_choices is null)
         {
-            _choices = ItemsRepo.ListAllItemNames(conn).Select(x => (x.Id, x.CanonicalName)).ToList();
+            _choices = ItemsRepo.ListAllItemNames(conn, tx).Select(x => (x.Id, x.CanonicalName)).ToList();
             // Score against lowercased names: the input side is already lowercased by NormalizePipeline, and
             // FuzzySharp's TokenSortScorer is case-sensitive — without this "milk" vs "Milk" scores 0.75 and
             // misses the 0.78 accept threshold. Python's rapidfuzz default_process lowercases both sides.

@@ -14,10 +14,10 @@ stock-up qty (migration 6) + multi-buy verdict chips · `688c403` **real Flipp p
 backflipp) + deal enrichment · `e676b4f` pantry likely-have hints + budget trip check · `d0ac9f0`
 unit-price comparator page + cheaper same-category swaps (with coverage guard).
 
-**The active execution plan is `V3_Phase0_plan.md`** (master: Android bring-up → backfill →
-inflation feature → iOS; merges the platform plan, the backfill grill protocol, and
-`INFLATION_ADJUSTMENT_PLAN.md`). `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md` = the git-closeout detail it
-starts with (push/merge/tag baseline).
+**The active open-work tracker is `OPEN_ITEMS_0721.md`** (Android release plumbing → backfill →
+tuning → iOS → security/perf residual → deferred v3). It supersedes §1/§2 below. The old execution
+plans it condensed — `V3_Phase0_plan.md` (Android/inflation/iOS master), `INFLATION_ADJUSTMENT_PLAN.md`,
+`V3_PRE_PHASE0_BACKEND_CLOSEOUT.md` (git closeout, done) — were executed and deleted 2026-07-21.
 
 Per-phase detail: `V2_PLAN.md` (plan + status) · `IMPLEMENTATION_NOTES.md` (decisions). Resolved
 review records (July code-review findings, the executed SyncCompleted plan) were verified implemented
@@ -29,15 +29,14 @@ and deleted 2026-07-11; `SECURITY_REVIEW_FUTURE_WORK.md` stays live (standing v3
 
 | Item | Why blocked | What it needs |
 |---|---|---|
-| **Android build** | This machine has only **JDK 8** | `winget install Microsoft.OpenJDK.17`, then elevated `sdkmanager … "platforms;android-36" "build-tools;36.0.0"` (SDK is under `C:\Program Files (x86)\Android\android-sdk`), then `dotnet build … -f net10.0-android`. Commands in `V2_PLAN.md` Phase 0. |
+| **Android build** | ~~JDK / API 36~~ **RESOLVED 2026-07-21 — the Android head now builds** | JDK 17 (`C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot`) + API 36 platform are installed; `InstallAndroidDependencies` was run from an admin shell (the download works unelevated but the `Program Files` write needs admin). Build the head with: `JAVA_HOME` set to that JDK, `dotnet build GrocerySense.App -f net10.0-android -p:AndroidSdkDirectory="C:\Program Files (x86)\Android\android-sdk" -p:JavaSdkDirectory="C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"` → **Build succeeded, 0 errors** (7 pre-existing CS8602 nullable warnings in `AndroidLocalNotifier.cs`). Compiling is now a real verification target; **on-device run still is not** (needs a signed APK on a device/emulator — keystore row below). |
 | **Release keystore** | Signing key = a secret the user must own | `keytool -genkeypair -v -keystore grocerysense-release.keystore -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000`. **Back it up off-machine.** Lose it → testers uninstall/reinstall and lose local data. |
 | **Signed v2 APK + on-device smoke** | Needs the two above | `dotnet publish -f net10.0-android -c Release`; smoke every route (§2 list); sideload to the ring (manual reinstall). |
 | **Azure OCR budget cap** | External portal | Set the cap + check per-page cost **before** the ~50-receipt backfill scan. |
 | **iOS head** | **Needs a Mac build host (Xcode) + Apple Developer account — impossible on this PC alone** | Was parked in the v3 gate (§5). Pulling it forward means Mac hardware (or a cloud Mac / CI) *first*; the shared C#/Blazor code is platform-neutral, so the work is toolchain + head config + device smoke, not a rewrite. |
 | **Phase 3 tuning** | No corpus exists | Requires the physical backfill first (below). Then: measure + adjust fuzzy (0.78/0.90), optimizer (3 / 10% / $5), alert (15% / 5% / staple) thresholds; record verdicts in `IMPLEMENTATION_NOTES.md`. |
 
-Also outstanding: **push the 19 local commits**, then merge `V2_Features_Implementation_Phase2` → `main`
-and tag the v2 code baseline (steps in `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`).
+Git closeout is **DONE** — the branch was pushed and merged to `main` (PR #1); the v2 baseline is in.
 
 **The linchpin is the physical paper backfill** — corpus reality (counted 2026-07-11): **50 receipts
 spanning the last 12 months**, most crumpled, oldest fading (do it soon). Session protocol grilled
@@ -67,12 +66,22 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 - **Food-savings recs** (all nine, committed): Shop Mode store groups + Buy/Stock-up/Wait badges on the
   shopping list, multi-buy verdict chips on Deals, **live Flipp sync** (first real network path in the
   app — test on device data/Wi-Fi), pantry hints + budget check on Plan, the comparator page, swap chips.
-- **Family food-savings follow-ups (6 features, `feat/family-food-features`):** ranked kid picks + on-sale
-  chips (Family), restock draft (Shopping List), new-spend sort + week-budget cap + My-recipes CRUD
-  (Meals, incl. RecipeEditDialog), Trip check dialog on recent receipts (Receipts). All service logic
-  unit-tested on TempDb; none of the new UI has been driven on a device. Trip check is the
-  "right-after-the-trip" MVP — the historically-accurate version (list snapshot, date-valid flyers,
-  usual-excluding-receipt, unit normalization) is future work.
+- **Android workflow shell (`V3_Mobile_Development`, 2026-07-19→21) — compiles on BOTH heads, never seen
+  running.** Ten commits: `8236ca5` deal→list snackbar action · `018a5a6` List-centred "Plan trip"
+  preview/confirm → Shop Mode · `4b04008` bottom nav + drawer demoted to More · `041d070` Shop Mode
+  persisted across navigation · `91e8141` global Scan FAB · `5313894` actionable Home cards · `b04cd6a`
+  `ReceiptFilePolicy` (one owner for the 20 MiB ceiling + allowlist, both capture paths funnel through
+  it) · `e21d160` hardware Back walks WebView history · `9b2a804` Android receipt share target. Windows
+  **and Android** heads build 0-error; 488 tests pass — but **no test exercises Razor or the Android
+  platform layer**, so all UI + intent behaviour is still unproven at runtime. Verify on device:
+  bottom-bar **safe-area / gesture-bar inset** + keyboard overlap; FAB position above the bar;
+  active-route tinting; Plan-trip preview→confirm→Shop-Mode; Shop Mode surviving a tab-away; Home's
+  resume card against a real half-finished shop; the Scan FAB camera→ingest path; **hardware Back**
+  (walks in-app history, exits at root — and the known gap: a MudBlazor dialog/drawer creates no history
+  entry, so Back navigates the page behind it instead of closing the overlay first — closing overlays on
+  Back needs a managed open-overlay bridge, deferred); and the **share target** (does the intent filter
+  appear in the sheet, cold vs warm delivery, content-URI read grants, the confirm banner, oversize/bad
+  shares landing as disclosed rejects).
 
 ---
 
@@ -106,6 +115,16 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 - **Backfill Prepare writes items/aliases before the date confirm.** If the user cancels at the confirm
   dialog, any items/aliases the mapper created during Prepare persist (harmless, matches v1 single-scan
   behavior) — only the receipt/price rows are gated on Commit.
+- **Sync-on-resume is ALREADY BUILT — do not re-propose or rebuild it.** `App.CreateWindow` wires
+  `window.Resumed → FlyerSyncScheduler.CheckOnResumeAsync`, which is single-flighted (semaphore, second
+  caller gets `"busy"`) and throttled by `FlyerSyncService.NeedsSync()` to **at most twice a week
+  (every 3.5 days)**, with the last-sync timestamp persisted atomically beside the DB and clock-skew
+  treated as overdue. The documented ceiling: **deals can be up to 3.5 days stale** between manual
+  syncs. This caught out a 2026-07-19 mobile-workflow analysis that proposed building resume-sync from
+  scratch with a 12–24h TTL — the feature existed, and the shipped interval is deliberately *more*
+  conservative (locked 2026-06-24, mobile background-execution limits). Tightening it is a product
+  decision, not a tuning knob. A metered/cellular guard was considered and **rejected as YAGNI**: at
+  twice a week the data cost is negligible.
 
 ---
 
@@ -178,7 +197,7 @@ Out of v2 by decision (grill 2026-07-02), roughly in likely-value order:
   (see `reference-python/FUTURE_FEATURES.md`).
 - **Per-member preference profiles** (merge/consensus/star machinery) — v2 is names-only; the Python
   multi-member `preferences_service` surface stays deferred.
-- **Custom user-entered recipes** — v2 ships the fixed 62-recipe catalog only.
+- **~~Custom user-entered recipes~~ — DONE** (`b80860b`, migration 7 `user_recipes`, My-recipes CRUD on `/meals`); no longer deferred.
 - **Cut entirely:** `list_audit_service`, `demo_seed_service`, `deals_service` provider-search path,
   `planning_service` cost-view (superseded by the redesigned optimizer), `distance_km`/`gas_cost_per_km`.
 

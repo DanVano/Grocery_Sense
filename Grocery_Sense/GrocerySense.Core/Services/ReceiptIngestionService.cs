@@ -261,7 +261,7 @@ public sealed class ReceiptIngestionService
 
                 var lineConf15 = ConfidenceTo15(Average(descConf, qtyConf, upConf, ltConf, discConf));
 
-                var mapping = _mapper.MapToItem(description);
+                var mapping = _mapper.MapToItem(conn, description);
                 var (itemId, mapConf15) = UpsertItemFromMapping(conn, description, mapping);
                 if (mapping.ItemId is null) _mapper.InvalidateChoices(); // a new item exists; later lines can match it
 

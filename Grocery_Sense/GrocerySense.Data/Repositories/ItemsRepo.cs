@@ -68,9 +68,10 @@ public static class ItemsRepo
         var name = (canonicalName ?? "").Trim();
         if (name.Length == 0) return null;
 
+        // COLLATE NOCASE (not lower()) so the seek uses idx_items_name_nocase; bind the trimmed name as-is.
         using var cmd = Db.Command(conn, tx,
-            $"SELECT {SelectCols} FROM items WHERE lower(canonical_name) = $name LIMIT 1");
-        cmd.Parameters.AddWithValue("$name", name.ToLowerInvariant());
+            $"SELECT {SelectCols} FROM items WHERE canonical_name = $name COLLATE NOCASE LIMIT 1");
+        cmd.Parameters.AddWithValue("$name", name);
         using var r = cmd.ExecuteReader();
         return r.Read() ? Map(r) : null;
     }
@@ -132,8 +133,10 @@ public static class ItemsRepo
         foreach (var chunk in cleaned.Chunk(ParamChunk))
         {
             var ph = chunk.Select((_, i) => $"$p{i}").ToList();
+            // COLLATE NOCASE so each IN probe can seek idx_items_name_nocase; `cleaned` is already lowercased,
+            // which NOCASE matches against any stored casing (result keying below stays lowercased to match callers).
             using var cmd = Db.Command(conn, tx,
-                $"SELECT {SelectCols} FROM items WHERE lower(canonical_name) IN ({string.Join(",", ph)})");
+                $"SELECT {SelectCols} FROM items WHERE canonical_name COLLATE NOCASE IN ({string.Join(",", ph)})");
             for (var i = 0; i < chunk.Length; i++) cmd.Parameters.AddWithValue(ph[i], chunk[i]);
             using var r = cmd.ExecuteReader();
             while (r.Read()) { var item = Map(r); result[item.CanonicalName.Trim().ToLowerInvariant()] = item; }

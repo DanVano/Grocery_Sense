@@ -1,4 +1,5 @@
 @page "/receipts"
+@using GrocerySense.App.Services
 @using GrocerySense.Core
 @using GrocerySense.Data
 @using GrocerySense.Data.Repositories
@@ -9,6 +10,7 @@
 @inject IDialogService DialogService
 @inject ScanAlertNotificationService ScanAlerts
 @inject TripReconciliationService TripCheck
+@inject PendingSharedReceiptsService PendingShared
 
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
@@ -32,11 +34,36 @@
         <MudText Typo="Typo.caption">@(_batchProgress ?? _stage)</MudText>
     }
 </MudStack>
+<MudText Typo="Typo.caption" Class="mb-2">Selected receipt files are uploaded to your configured Azure OCR resource.</MudText>
 <MudSwitch T="bool" @bind-Value="_replaceDuplicates" Label="Replace duplicates" Color="Color.Primary" Class="mb-2" />
 
 @if (_message is not null)
 {
     <MudAlert Class="mb-2" Severity="@_messageSeverity" Dense="true">@_message</MudAlert>
+}
+
+@* Android share target (Phase 5): receipt image(s) shared into the app land here for confirmation —
+   never ingested without an explicit Import. Rejected shares (oversize/bad type) are disclosed, not hidden. *@
+@if (_sharedPaths.Count > 0 || _sharedErrors.Count > 0)
+{
+    <MudPaper Class="pa-3 mb-2" Outlined="true">
+        @if (_sharedPaths.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle1">@_sharedPaths.Count receipt@(_sharedPaths.Count == 1 ? "" : "s") shared into Grocery Sense</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Import now?</MudText>
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                           OnClick="ImportSharedAsync" Disabled="@_busy">Import</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="DiscardShared" Disabled="@_busy">Discard</MudButton>
+            </MudStack>
+        }
+        @if (_sharedErrors.Count > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                @_sharedErrors.Count shared item@(_sharedErrors.Count == 1 ? " was" : "s were") rejected: @string.Join("; ", _sharedErrors)
+            </MudAlert>
+        }
+    </MudPaper>
 }
 
 @if (_anyReceiptsExist || HasActiveFilter)
@@ -149,6 +176,8 @@ else
     private string? _message;
     private Severity _messageSeverity = Severity.Info;
     private CancellationTokenSource? _cts;
+    private List<string> _sharedPaths = [];
+    private List<string> _sharedErrors = [];
 
     private bool HasActiveFilter => _filterStoreId is not null || _filterRange is not null;
 
@@ -176,6 +205,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        PendingShared.Changed += OnSharedChanged; // warm share while this page is already open
+        DrainShared();                            // cold share: MainActivity set it before we navigated here
         try
         {
             // includeArchived: old receipts may reference a store the user has since archived.
@@ -187,6 +218,16 @@ else
         }
         catch (Exception ex) { Fail(ex.Message); }
         await ReloadAsync();
+    }
+
+    private void OnSharedChanged() => _ = InvokeAsync(() => { DrainShared(); StateHasChanged(); });
+
+    private void DrainShared()
+    {
+        if (!PendingShared.HasPending) return;
+        var (paths, errors) = PendingShared.Take();
+        _sharedPaths = [.. paths];
+        _sharedErrors = [.. errors];
     }
 
     private async Task ReloadAsync()
@@ -330,18 +371,10 @@ else
         }
     }
 
-    // Picker/camera streams are copied into app-data (source paths can expire on Android). Returns the copy.
-    private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
-    {
-        var dir = ReceiptsDir();
-        Directory.CreateDirectory(dir);
-        var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
-        var path = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
-        await using var src = await pick.OpenReadAsync();
-        await using var dst = File.Create(path);
-        await src.CopyToAsync(dst, ct);
-        return path;
-    }
+    // Bounded copy of a picker/camera stream into app-data. The ceiling, allowlist and destination live
+    // in ReceiptFilePolicy so this page and the global Scan FAB cannot drift apart.
+    private static Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct) =>
+        ReceiptFilePolicy.CopyPickAsync(pick, ct);
 
     // Backfill on-ramp: multi-pick from the gallery, copy all, then import with a per-receipt date confirm.
     // Alerts are not scanned here — correctly-dated old receipts fall outside the recent-scan window.
@@ -500,7 +533,7 @@ else
         return Task.CompletedTask;
     }
 
-    private static string ReceiptsDir() => Path.Combine(FileSystem.AppDataDirectory, "receipts");
+    private static string ReceiptsDir() => ReceiptFilePolicy.ReceiptsDir();
 
     private static bool CanDeleteReceiptFile(string path) =>
         PathSafety.IsUnderDirectory(ReceiptsDir(), path) && File.Exists(path);
@@ -513,6 +546,67 @@ else
         catch { return false; }
     }
 
+    // Import the shared receipt(s) the user just confirmed. Each already lives in the receipts dir (copied
+    // by the share handler through the bounded policy); this is the single-scan ingest path per file, so a
+    // shared receipt gets the same duplicate handling and price-alert scan as one taken in-app.
+    private async Task ImportSharedAsync()
+    {
+        var paths = _sharedPaths;
+        var rejected = _sharedErrors.Count;
+        _sharedPaths = [];
+        _sharedErrors = [];
+        _busy = true;
+        _message = null;
+        _cts = new CancellationTokenSource();
+        int imported = 0, duplicates = 0, failed = 0, alerts = 0;
+        try
+        {
+            foreach (var path in paths)
+            {
+                _cts.Token.ThrowIfCancellationRequested();
+                _stage = "Reading receipt (OCR + parsing)…";
+                StateHasChanged();
+                var outcome = await Ingest.IngestReceiptFileAsync(path, _replaceDuplicates, _cts.Token);
+                if (outcome.Error is not null) { failed++; TryDeleteReceiptFile(path); }
+                else if (outcome.WasDuplicate) { duplicates++; TryDeleteReceiptFile(path); }
+                else
+                {
+                    imported++;
+                    if (outcome.ReceiptId is { } rid)
+                        alerts += (await ScanAlerts.AfterSingleScanAsync(rid, _cts.Token)).Opened;
+                }
+            }
+            _messageSeverity = failed > 0 ? Severity.Warning : Severity.Success;
+            _message = $"Shared import — {imported} imported, {duplicates} duplicate(s), {failed} failed"
+                + (rejected > 0 ? $", {rejected} rejected on share" : "")
+                + (alerts > 0 ? $" · {alerts} new price alert(s) — see Savings" : "") + ".";
+            await ReloadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Drop the copies for receipts not yet imported when the user cancels mid-batch.
+            foreach (var path in paths.Skip(imported + duplicates + failed)) TryDeleteReceiptFile(path);
+            _messageSeverity = Severity.Info;
+            _message = "Shared import cancelled.";
+        }
+        catch (Exception ex) { Fail($"Shared import failed: {ex.Message}"); }
+        finally
+        {
+            _busy = false;
+            _stage = "";
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    // Discard the shared copies without importing — delete the files so nothing is hoarded.
+    private void DiscardShared()
+    {
+        foreach (var path in _sharedPaths) TryDeleteReceiptFile(path);
+        _sharedPaths = [];
+        _sharedErrors = [];
+    }
+
     private void Fail(string message)
     {
         _messageSeverity = Severity.Error;
@@ -521,5 +615,9 @@ else
 
     private void CancelIngest() => _cts?.Cancel();
 
-    public void Dispose() => _cts?.Cancel();
+    public void Dispose()
+    {
+        PendingShared.Changed -= OnSharedChanged;
+        _cts?.Cancel();
+    }
 }
