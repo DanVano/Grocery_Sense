@@ -26,8 +26,13 @@ public static class ReceiptFilePolicy
     public static async Task<string> CopyPickAsync(FileResult pick, CancellationToken ct = default)
     {
         await using var source = await pick.OpenReadAsync();
-        return await BoundedFileCopy.CopyAsync(
-            source, pick.FileName, ReceiptsDir(), Extensions,
-            defaultExtension: DefaultExtension, maxBytes: MaxImportBytes, ct: ct);
+        return await CopyStreamAsync(source, pick.FileName, ct);
     }
+
+    // Bounded copy from a raw stream — the entry the Android share target uses for a shared content:// URI,
+    // so shared receipts get the exact same ceiling and allowlist as picked ones.
+    public static Task<string> CopyStreamAsync(Stream source, string sourceFileName, CancellationToken ct = default) =>
+        BoundedFileCopy.CopyAsync(
+            source, sourceFileName, ReceiptsDir(), Extensions,
+            defaultExtension: DefaultExtension, maxBytes: MaxImportBytes, ct: ct);
 }

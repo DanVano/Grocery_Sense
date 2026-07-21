@@ -60,6 +60,8 @@ public static class ServiceCollectionExtensions
         // PendingNavigationService carries a notification-tap route into Blazor (deep link).
         services.AddSingleton<ScanAlertNotificationService>();
         services.AddSingleton<PendingNavigationService>();
+        // PendingSharedReceiptsService carries receipt image(s) shared into the app (ACTION_SEND) into Blazor.
+        services.AddSingleton<PendingSharedReceiptsService>();
 
         return services;
     }
