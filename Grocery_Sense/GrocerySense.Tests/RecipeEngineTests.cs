@@ -158,6 +158,19 @@ public sealed class RecipeEngineTests : IDisposable
         Assert.Empty(Sample().FilterByIngredientsAndProfile(new[] { "beef" },
             new MealProfile { Restrictions = ["no_beef"] }));
 
+    // no_meat / no_fish are umbrella diet flags, NOT single-ingredient bans (ProfileFilter carve-out) —
+    // they must not hard-drop a recipe just because an ingredient literally contains "fish"/"meat"
+    // (e.g. "fish sauce"). Enforced softly via meat-preference scoring, not the hard profile filter.
+    [Fact]
+    public void No_fish_umbrella_flag_does_not_hard_block_fish_ingredient()
+    {
+        var eng = new RecipeEngine(WriteJson(
+            """[{"id":1,"name":"Fish Sauce Noodles","ingredients":["fish sauce","rice"]}]"""));
+        var names = eng.FilterByIngredientsAndProfile(new[] { "rice" },
+            new MealProfile { Restrictions = ["no_fish"] }).Select(r => r.Name).ToHashSet();
+        Assert.Contains("Fish Sauce Noodles", names);
+    }
+
     // ---- soft bonuses ----
 
     [Fact]
