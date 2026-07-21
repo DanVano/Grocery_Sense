@@ -117,7 +117,7 @@ public sealed class ScanAlertNotificationServiceTests
         var result = await Svc(db, new FakeLocalNotifier()).AfterSingleScanAsync(scanEggsRid);
 
         Assert.Equal(1, result.Opened); // ONLY the scanned receipt's egg drop (a global scan would open 2)
-        var open = new PriceDropAlertService(db.Factory).GetOpenAlerts();
+        var open = new PriceDropAlertService(db.Factory).GetAlerts(0);
         Assert.Equal("Eggs", Assert.Single(open).ItemName);
     }
 

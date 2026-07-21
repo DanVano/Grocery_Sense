@@ -62,27 +62,7 @@ public sealed class PriceHistoryService
 
     // ---------- stats & comparison ----------
 
-    public ItemStats? GetItemStats(string itemName, int windowDays = 180)
-    {
-        using var conn = _factory.Open();
-        var item = ItemsRepo.GetItemByName(conn, itemName.Trim());
-        if (item is null) return null;
-        var stats = PricesRepo.GetPriceStatsForItem(conn, item.Id, sinceDays: windowDays);
-        if (stats.Count == 0) return null;
-        return new ItemStats(item, stats.AvgPrice, stats.MinPrice, stats.MaxPrice, stats.Count);
-    }
-
-    // Baseline = trailing-window average unit price, or null with no usable history.
-    public double? GetBaselinePrice(string itemName, int windowDays = 90)
-    {
-        using var conn = _factory.Open();
-        var item = ItemsRepo.GetItemByName(conn, itemName.Trim());
-        if (item is null) return null;
-        var stats = PricesRepo.GetPriceStatsForItem(conn, item.Id, sinceDays: windowDays);
-        return stats.Count == 0 ? null : stats.AvgPrice;
-    }
-
-    // Batched GetBaselinePrice: {trimmed_input_name -> avg_or_null}. Case-insensitive; dedupes by lower key.
+    // Batched trailing-window baseline: {trimmed_input_name -> avg_or_null}. Case-insensitive; dedupes by lower key.
     public IReadOnlyDictionary<string, double?> GetBaselinePrices(IReadOnlyList<string> itemNames, int windowDays = 90)
     {
         var keyForLower = new Dictionary<string, string>();

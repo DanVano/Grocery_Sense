@@ -86,7 +86,7 @@ public sealed class PriceDropAlertServiceTests
 
         Assert.Equal(1, svc.ScanRecentReceipts(21));
 
-        var a = Assert.Single(svc.GetOpenAlerts());
+        var a = Assert.Single(svc.GetAlerts(0));
         Assert.Equal("below_usual", a.AlertKind);
         Assert.Equal("receipt", a.Source);
         Assert.Equal(7.0, a.CurrentPrice, 4);
@@ -102,7 +102,7 @@ public sealed class PriceDropAlertServiceTests
         Assert.Equal(1, svc.ScanRecentReceipts(21));
         Assert.Equal(0, svc.ScanRecentReceipts(21));
 
-        Assert.Single(svc.GetOpenAlerts());
+        Assert.Single(svc.GetAlerts(0));
     }
 
     [Fact]

@@ -180,6 +180,31 @@ public sealed class ShoppingInsightsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Swap_only_considers_same_category_candidates_ignoring_cheaper_unrelated_items()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var brand = ItemsRepo.CreateItem(db.Conn, "Quick Oats Brand", category: "cereal").Id;
+        var cheapCereal = ItemsRepo.CreateItem(db.Conn, "Store Brand Oats", category: "cereal").Id;
+        PricesRepo.AddPricePoint(db.Conn, brand, store, 10.0, "each", source: "manual", date: DaysAgo(0));
+        PricesRepo.AddPricePoint(db.Conn, cheapCereal, store, 6.0, "each", source: "manual", date: DaysAgo(0));
+
+        // Hundreds of far-cheaper items in an unrelated category, priced at the same store. None may swap in.
+        for (var i = 0; i < 200; i++)
+        {
+            var id = ItemsRepo.CreateItem(db.Conn, $"produce {i:D3}", category: "produce").Id;
+            PricesRepo.AddPricePoint(db.Conn, id, store, 0.50, "each", source: "manual", date: DaysAgo(0));
+        }
+
+        ShoppingListRepo.AddItem(db.Conn, "Quick Oats Brand", plannedStoreId: store, itemId: brand);
+
+        var svc = Svc(db);
+        var swap = Assert.Single(svc.BuildSwapSuggestions(svc.BuildShopModeView()).Suggestions);
+        Assert.Equal("Store Brand Oats", swap.SwapToName);   // same-category swap wins
+        Assert.Equal(6.0, swap.SwapPrice, 4);                // never the $0.50 unrelated-category items
+    }
+
+    [Fact]
     public void Swap_low_category_coverage_discloses_instead_of_guessing()
     {
         using var db = new TempDb();

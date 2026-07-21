@@ -6,31 +6,14 @@ namespace GrocerySense.Core;
 // weights = the profile's. No member-name starring, no strong-soft consensus (both need >=2 members -> v2).
 // Built by PreferencesService.ComputeEffectivePreferences(). Forward-compatible: the v2 master member fills
 // the same fields.
-public sealed class EffectivePreferences
+public sealed record EffectivePreferences(
+    IReadOnlySet<string> HardExcludes,
+    IReadOnlySet<string> SoftExcludes,
+    IReadOnlySet<string> ExcludedProteinsHard,
+    IReadOnlyDictionary<string, double> ProteinWeights,
+    IReadOnlySet<string> CuisinesPreferred,
+    IReadOnlySet<string> OilsAllowed) // OilsAllowed empty => unrestricted
 {
-    public IReadOnlySet<string> HardExcludes { get; }
-    public IReadOnlySet<string> SoftExcludes { get; }
-    public IReadOnlySet<string> ExcludedProteinsHard { get; }
-    public IReadOnlyDictionary<string, double> ProteinWeights { get; }
-    public IReadOnlySet<string> CuisinesPreferred { get; }
-    public IReadOnlySet<string> OilsAllowed { get; } // empty => unrestricted
-
-    public EffectivePreferences(
-        IReadOnlySet<string> hardExcludes,
-        IReadOnlySet<string> softExcludes,
-        IReadOnlySet<string> excludedProteinsHard,
-        IReadOnlyDictionary<string, double> proteinWeights,
-        IReadOnlySet<string> cuisinesPreferred,
-        IReadOnlySet<string> oilsAllowed)
-    {
-        HardExcludes = hardExcludes;
-        SoftExcludes = softExcludes;
-        ExcludedProteinsHard = excludedProteinsHard;
-        ProteinWeights = proteinWeights;
-        CuisinesPreferred = cuisinesPreferred;
-        OilsAllowed = oilsAllowed;
-    }
-
     public bool IsHardExcluded(string ingredient) => Has(HardExcludes, ingredient);
     public bool IsSoftExcluded(string ingredient) => Has(SoftExcludes, ingredient);
     public bool IsProteinHardExcluded(string protein) => Has(ExcludedProteinsHard, protein);

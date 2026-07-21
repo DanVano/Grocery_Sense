@@ -1,8 +1,11 @@
 @page "/list"
+@using GrocerySense.App.Services
 @using GrocerySense.Core
 @using GrocerySense.Domain
 @inject ShoppingListService Shopping
 @inject ShoppingInsightsService Insights
+@inject BasketOptimizerService Optimizer
+@inject ShopModeState ShopState
 
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.h5">Shopping List</MudText>
@@ -19,6 +22,66 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newItems))">Add</MudButton>
     </MudStack>
+
+    @* Plan trip: optimize → preview → confirm → drop into Shop Mode, all on the List page.
+       No hop to /plan for the core trip-prep flow (Phase 1b). The /plan page stays for the
+       power path (History plan, budget-defer view). *@
+    <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center" Class="mt-3">
+        <MudRadioGroup T="string" @bind-Value="_planMode">
+            <MudRadio T="string" Value="@("best_savings")" Color="Color.Primary" Dense="true">Best savings</MudRadio>
+            <MudRadio T="string" Value="@("fewest_stops")" Color="Color.Primary" Dense="true">Fewest stops</MudRadio>
+        </MudRadioGroup>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Route"
+                   OnClick="PlanTripAsync" Disabled="@_busy">Plan trip</MudButton>
+        @if (_busy && _planPreview is null)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Planning" />
+        }
+    </MudStack>
+
+    @if (_planPreview is { } preview)
+    {
+        <MudPaper Class="pa-3 mt-2" Outlined="true">
+            @foreach (var w in preview.Warnings)
+            {
+                <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">@w</MudAlert>
+            }
+            @if (preview.Stores.Count == 0)
+            {
+                <MudText Typo="Typo.body2">Nothing to optimize — add list items and stores first.</MudText>
+                <MudButton Class="mt-2" Variant="Variant.Text" OnClick="CancelPlan">Dismiss</MudButton>
+            }
+            else
+            {
+                <MudStack Row="true" Spacing="2" Class="mb-2">
+                    <MudChip T="string" Color="Color.Primary">Basket est. $@F2(preview.BasketTotalEstimated)</MudChip>
+                    @if (preview.SaveVsUsualAvg is double su)
+                    {
+                        <MudChip T="string" Color="Color.Success">vs usual $@F2(su)</MudChip>
+                    }
+                    @if (preview.SaveVsLowest is double sl)
+                    {
+                        <MudChip T="string" Color="Color.Default">vs 6-mo low $@F2(sl)</MudChip>
+                    }
+                </MudStack>
+                @foreach (var store in preview.Stores)
+                {
+                    <MudPaper Class="pa-2 mb-2" Outlined="true">
+                        <MudText Typo="Typo.subtitle2">
+                            @store.StoreName — $@F2(store.TotalEstimated)
+                            @(store.UnknownCount > 0 ? $" ({store.UnknownCount} unpriced)" : "")
+                        </MudText>
+                        <MudText Typo="Typo.caption">@string.Join(", ", store.Items.Select(i => i.Name))</MudText>
+                    </MudPaper>
+                }
+                <MudStack Row="true" Spacing="2" Class="mt-1">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ShoppingCartCheckout"
+                               OnClick="ConfirmPlanAsync" Disabled="@_busy">Confirm — start shopping</MudButton>
+                    <MudButton Variant="Variant.Text" OnClick="CancelPlan" Disabled="@_busy">Cancel</MudButton>
+                </MudStack>
+            }
+        </MudPaper>
+    }
 }
 
 @if (_error is not null)
@@ -178,8 +241,14 @@ else
     private string _newItems = "";
     private bool _busy;
     private string? _error;
+    private string _planMode = "best_savings";
+    private BasketOptimizationResult? _planPreview;
 
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    protected override Task OnInitializedAsync()
+    {
+        _shopMode = ShopState.Enabled; // survive a tab-away/return (Phase 2b)
+        return ReloadAsync();
+    }
 
     private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -202,6 +271,7 @@ else
     private async Task ToggleShopModeAsync(bool on)
     {
         _shopMode = on;
+        ShopState.Enabled = on;
         await ReloadAsync();
     }
 
@@ -244,6 +314,43 @@ else
     private Task DeferAsync(int rowId) => RunAsync(() => Shopping.SetItemPriority(rowId, "wait_for_sale"));
 
     private Task ClearCheckedAsync() => RunAsync(Shopping.ClearAllCheckedOff);
+
+    // Plan trip (Phase 1b): run the optimizer and hold the result as a preview — nothing is written until
+    // the user confirms. Reuses the same service the /plan page drives.
+    private async Task PlanTripAsync()
+    {
+        _busy = true;
+        try
+        {
+            _error = null;
+            _planPreview = await Task.Run(() => Optimizer.Optimize(_planMode));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // Confirm: write the previewed plan back to the active list, then drop straight into Shop Mode —
+    // that store-grouped shopping view is the whole point of the flow. A failed apply keeps the preview
+    // dismissed and surfaces the reason; we never silently pretend it worked.
+    private async Task ConfirmPlanAsync()
+    {
+        if (_planPreview is not { } preview) return;
+        _busy = true;
+        try
+        {
+            _error = null;
+            var result = await Task.Run(() => Shopping.ApplyOptimizerPlanToActiveList(preview, _planMode));
+            if (!result.Ok) { _error = result.Error; return; }
+            _planPreview = null;
+            _shopMode = true;
+            ShopState.Enabled = true;
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void CancelPlan() => _planPreview = null;
 
     // All writes funnel through here: off the UI thread, then reload; errors surface in the alert.
     private async Task RunAsync(Action work)

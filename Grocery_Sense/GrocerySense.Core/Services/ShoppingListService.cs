@@ -31,7 +31,7 @@ public sealed class ShoppingListService
                 var name = raw.Trim();
                 if (name.Length == 0) continue;
                 var rowId = ShoppingListRepo.AddItem(conn, name, addedBy: addedBy, addedByMemberId: memberId,
-                    itemId: _mapper.MapToItem(name).ItemId);
+                    itemId: _mapper.MapToItem(conn, name).ItemId);
                 if (plannedStoreId is not null) ShoppingListRepo.SetPlannedStoreId(conn, rowId, plannedStoreId);
                 if (ShoppingListRepo.GetItem(conn, rowId) is { } match) created.Add(match);
             }
@@ -50,12 +50,14 @@ public sealed class ShoppingListService
         string? notes = null, string? addedBy = null, int? addedByMemberId = null, int? itemId = null)
     {
         // No explicit item link -> try to map the name (match-only; unknowns stay NULL and the optimizer
-        // discloses them instead of silently dropping the row).
-        itemId ??= _mapper.MapToItem(name).ItemId;
+        // discloses them instead of silently dropping the row). Map on the same connection as the insert.
         int rowId;
         using (var conn = _factory.Open())
+        {
+            itemId ??= _mapper.MapToItem(conn, name).ItemId;
             rowId = ShoppingListRepo.AddItem(conn, name, quantity ?? 1.0, unit ?? "", category: "", notes: notes ?? "",
                 addedBy: addedBy, addedByMemberId: addedByMemberId, plannedStoreId: plannedStoreId, itemId: itemId);
+        }
         _mapper.FlushLearnedAliases();
         return rowId;
     }

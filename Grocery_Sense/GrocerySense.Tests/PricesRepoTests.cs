@@ -58,6 +58,30 @@ public sealed class PricesRepoTests
     }
 
     [Fact]
+    public void GetPricesForItemsBatch_returns_requested_items_oldest_first_and_excludes_others()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var a = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        var b = ItemsRepo.CreateItem(db.Conn, "Bread").Id;
+        var noHistory = ItemsRepo.CreateItem(db.Conn, "Salt").Id;
+        var other = ItemsRepo.CreateItem(db.Conn, "Eggs").Id;
+
+        PricesRepo.AddPricePoint(db.Conn, a, store, 4.99, "each", source: "receipt", date: DaysAgo(10));
+        PricesRepo.AddPricePoint(db.Conn, a, store, 4.49, "each", source: "receipt", date: DaysAgo(2));
+        PricesRepo.AddPricePoint(db.Conn, b, store, 2.50, "each", source: "receipt", date: DaysAgo(5));
+        PricesRepo.AddPricePoint(db.Conn, other, store, 3.00, "each", source: "receipt", date: DaysAgo(1));
+
+        var map = PricesRepo.GetPricesForItemsBatch(db.Conn, new[] { a, b, noHistory });
+
+        Assert.Equal(new[] { a, b, noHistory }.OrderBy(x => x), map.Keys.OrderBy(x => x));
+        Assert.False(map.ContainsKey(other));                    // unrelated item never fetched
+        Assert.Equal(new[] { DaysAgo(10), DaysAgo(2) }, map[a].Select(p => p.Date).ToArray()); // oldest-first
+        Assert.Single(map[b]);
+        Assert.Empty(map[noHistory]);                            // requested but priceless -> empty, not missing
+    }
+
+    [Fact]
     public void PriceStats_min_max_avg_are_numeric()
     {
         using var db = new TempDb();

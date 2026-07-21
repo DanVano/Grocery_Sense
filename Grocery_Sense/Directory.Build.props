@@ -1,0 +1,10 @@
+<Project>
+  <!-- Repository-wide NuGet audit gate. .NET 10 audits direct+transitive deps by default but only warns;
+       promote high (NU1903) and critical (NU1904) advisories to build errors so a future CVE fails the
+       build instead of scrolling past. Low/moderate (NU1901/NU1902) stay warnings. -->
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+</Project>

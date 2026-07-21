@@ -3,6 +3,10 @@
 > **⚠️ HISTORICAL (v1 audit, 2026-06-26).** The "Done?" column was never updated, and many "Defer (v2)" rows
 > were later **built in v2** (items-admin, member_requests, meal planning, family picks, db-maintenance).
 > Use as the Port/Replace/Defer ledger for any remaining deferred port — not as current state.
+> The converse also holds: the **current C# surface deliberately omits several ported-but-unused Python-parity
+> APIs**, removed 2026-07-18 (commits `7510789`, `5a509ee`) — e.g. `stats_for_item_by_store`,
+> `describe_item_history`, `get_item_stats`, singular `get_baseline_price`, `get_household_allergies`. See
+> `IMPLEMENTATION_NOTES.md` (Phase 3). Rows below are the historical port ledger, not the live contract.
 
 Every public Python API tracked as **Port** (bring as-is), **Replace** (behavior/shape changes in C#), or
 **Defer** (v2 — leave unported). Source: `reference-python/ARCHITECTURE.md` Public I/O Inventory, with

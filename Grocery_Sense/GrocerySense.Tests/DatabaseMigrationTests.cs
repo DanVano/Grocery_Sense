@@ -76,6 +76,22 @@ public sealed class DatabaseMigrationTests : IDisposable
         Assert.Equal("normal", read.ExecuteScalar() as string);
     }
 
+    [Fact]
+    public void Item_name_nocase_index_serves_exact_lookup()
+    {
+        var factory = NewFactory();
+        Database.Initialize(factory);
+        using var conn = factory.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "EXPLAIN QUERY PLAN SELECT id FROM items WHERE canonical_name = $name COLLATE NOCASE";
+        cmd.Parameters.AddWithValue("$name", "milk");
+        using var reader = cmd.ExecuteReader();
+        var details = new List<string>();
+        while (reader.Read()) details.Add(reader.GetString(3));
+        Assert.Contains(details, d => d.Contains("idx_items_name_nocase", StringComparison.Ordinal));
+    }
+
     private static int ReadVersion(Microsoft.Data.Sqlite.SqliteConnection conn)
     {
         using var cmd = conn.CreateCommand();

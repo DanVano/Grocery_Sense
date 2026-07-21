@@ -36,15 +36,27 @@ public static class ItemsAdminRepo
         // Escape LIKE metacharacters so a query like "2% milk" doesn't become a wildcard that over-matches the
         // merge picker (picking the wrong item destructively merges price history).
         var where = q.Length > 0 ? @"WHERE i.canonical_name LIKE $q ESCAPE '\'" : "";
+        // Pick the (bounded) matching items FIRST, then aggregate prices only for those ids. The old shape
+        // GROUP BY'd the entire prices table before applying the LIMIT, so search cost grew with total price
+        // history rather than with the handful of rows actually returned.
         using var cmd = Db.Command(conn, tx, $"""
-            SELECT i.id, COALESCE(i.canonical_name, ''), COALESCE(i.is_tracked, 0), i.default_unit,
+            WITH selected AS (
+                SELECT i.id, i.canonical_name, i.is_tracked, i.default_unit
+                FROM items i
+                {where}
+                ORDER BY COALESCE(i.is_tracked, 0) DESC, i.canonical_name ASC
+                LIMIT $limit
+            ),
+            price_stats AS (
+                SELECT p.item_id, COUNT(1) AS price_points, MAX(p.date) AS last_price_date
+                FROM prices p JOIN selected s ON s.id = p.item_id
+                GROUP BY p.item_id
+            )
+            SELECT s.id, COALESCE(s.canonical_name, ''), COALESCE(s.is_tracked, 0), s.default_unit,
                    COALESCE(ps.price_points, 0), ps.last_price_date
-            FROM items i
-            LEFT JOIN (SELECT item_id, COUNT(1) AS price_points, MAX(date) AS last_price_date
-                       FROM prices GROUP BY item_id) ps ON ps.item_id = i.id
-            {where}
-            ORDER BY COALESCE(i.is_tracked, 0) DESC, i.canonical_name ASC
-            LIMIT $limit
+            FROM selected s
+            LEFT JOIN price_stats ps ON ps.item_id = s.id
+            ORDER BY COALESCE(s.is_tracked, 0) DESC, s.canonical_name ASC
             """);
         if (q.Length > 0) cmd.Parameters.AddWithValue("$q", $"%{EscapeLike(q)}%");
         cmd.Parameters.AddWithValue("$limit", limit);

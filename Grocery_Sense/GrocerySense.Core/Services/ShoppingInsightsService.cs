@@ -92,8 +92,21 @@ public sealed class ShoppingInsightsService
                 $"Not enough category data for swap suggestions ({categorized}/{mapped.Count} list items " +
                 "categorized) — set categories on the Items page.");
 
-        // Candidate pool: every categorized item, priced at each planned store the list touches.
-        var candidateIds = allItems.Where(i => !string.IsNullOrWhiteSpace(i.Category)).Select(i => i.Id).ToList();
+        // Candidate pool: only items in a category some LISTED item belongs to. A swap can only ever come from
+        // the same category, so pricing every categorized item in the catalog was wasted SQL + memory. Pre-group
+        // by category once so each row scans just its own bucket instead of the whole catalog (was O(rows x all)).
+        var relevantCategories = mapped
+            .Select(i => byId.GetValueOrDefault(i.Row.ItemId!.Value)?.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var candidatesByCategory = allItems
+            .Where(i => i.Category is { Length: > 0 } c && relevantCategories.Contains(c))
+            .GroupBy(i => i.Category!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        var candidateIds = candidatesByCategory.Values.SelectMany(v => v).Select(i => i.Id).ToList();
         var storeIds = groups.Where(g => g.StoreId is not null).Select(g => g.StoreId!.Value).Distinct().ToList();
         if (candidateIds.Count == 0 || storeIds.Count == 0)
             return new SwapResult(Array.Empty<SwapSuggestion>(), null);
@@ -110,9 +123,10 @@ public sealed class ShoppingInsightsService
                 || string.IsNullOrWhiteSpace(item.Category)) continue;
 
             SwapSuggestion? best = null;
-            foreach (var cand in allItems)
+            if (!candidatesByCategory.TryGetValue(item.Category, out var categoryCandidates)) continue;
+            foreach (var cand in categoryCandidates)
             {
-                if (cand.Id == item.Id || cand.Category != item.Category) continue;
+                if (cand.Id == item.Id) continue; // same category by construction; only self needs skipping
                 double? price = flyer.TryGetValue((cand.Id, storeId), out var fq) ? fq.UnitPrice
                     : recent.TryGetValue((cand.Id, storeId), out var pp) && pp.UnitPrice > 0 ? pp.UnitPrice
                     : null;

@@ -13,8 +13,8 @@ namespace GrocerySense.Core;
 // Port of reference-python/.../services/flyer_ingest_service.py — manual flyer asset ingest.
 // Mirrors ReceiptIngestionService: Azure layout + extraction + item-mapping/unit-norm prep happen
 // pre-transaction (the mapper/unit-norm open their own connections), then batch/asset/raw-json/deal
-// rows are written in ONE transaction with rollback. The raw-JSON files dropped on disk are a
-// reprocess cache; a rolled-back DB write leaves only those harmless files behind.
+// rows are written in ONE transaction with rollback. Raw JSON is persisted only to SQLite
+// (flyer_raw_json) — no plaintext copy is written to disk (data minimization; nothing reprocessed it).
 //
 // ponytail: reuses the injected IngredientMappingService (accept 0.78); Python flyer ingest used 0.75 —
 // a 3-point divergence, same trade-off ReceiptIngestionService documents. Flyer deals keep item_id NULL
@@ -42,11 +42,10 @@ public sealed class FlyerIngestService
     }
 
     public async Task<FlyerIngestResult> IngestAssetsAsync(int? storeId, string? validFrom, string? validTo,
-        IReadOnlyList<string> filePaths, string rawJsonDir, string sourceType = "manual_upload",
+        IReadOnlyList<string> filePaths, string sourceType = "manual_upload",
         string? sourceRef = null, string? note = null, bool tryItemMapping = true, CancellationToken ct = default)
     {
         if (storeId is null) throw new ArgumentException("storeId is required for flyer ingest.", nameof(storeId));
-        Directory.CreateDirectory(rawJsonDir);
 
         // --- Phase A (pre-transaction): Azure layout + extraction + mapping/unit-norm prep. ---
         var staged = new List<StagedAsset>();
@@ -61,12 +60,10 @@ public sealed class FlyerIngestService
                 var assetType = GuessAssetType(fp);
                 var sha = Sha256(bytes);
 
-                var (operationId, analyze) = await _layout.AnalyzeLayoutFileAsync(fp, ct);
+                var (_, analyze) = await _layout.AnalyzeLayoutFileAsync(fp, ct);
 
-                // Persist the raw JSON so a reprocess doesn't re-pay Azure (keyed by operation id).
+                // Raw JSON is persisted only to SQLite (flyer_raw_json) in Phase B — no plaintext disk copy.
                 var rawJsonStr = RawJson.ToJsonString(analyze);
-                var safeStem = Trunc(Regex.Replace(Path.GetFileNameWithoutExtension(fp), @"[^a-zA-Z0-9_\-]+", "_"), 80);
-                File.WriteAllText(Path.Combine(rawJsonDir, $"{safeStem}__{operationId}.json"), rawJsonStr);
                 var rawSha = Sha256(Encoding.UTF8.GetBytes(rawJsonStr));
 
                 var deals = new List<FlyerDeal>();
@@ -129,7 +126,7 @@ public sealed class FlyerIngestService
 
         if (tryItemMapping)
         {
-            var m = _mapper.MapToItem(combined);
+            var m = _mapper.MapToItem(conn, combined);
             if (m.ItemId is not null)
             {
                 itemId = m.ItemId;

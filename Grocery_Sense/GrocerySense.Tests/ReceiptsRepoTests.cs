@@ -146,6 +146,63 @@ public sealed class ReceiptsRepoTests
         Assert.Equal(new[] { r1 }, Ids(ReceiptsRepo.ListRecentReceipts(db.Conn, limit: 1, offset: 1, storeId: a)));
     }
 
+    [Fact]
+    public void ListRecentReceipts_counts_lines_per_page_and_ignores_off_page_lines()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Store").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+
+        // Three receipts; each with a different line count. Paging must count only the returned receipt's lines.
+        var r1 = InsertReceipt(db.Conn, store, "2026-01-01", 1.00m, null, null);
+        var r2 = InsertReceipt(db.Conn, store, "2026-02-01", 2.00m, null, null);
+        var r3 = InsertReceipt(db.Conn, store, "2026-03-01", 3.00m, null, null);
+        InsertLineItem(db.Conn, r1, 0, item, "a", 1, 1m, 1m);
+        for (var i = 0; i < 3; i++) InsertLineItem(db.Conn, r2, i, item, $"b{i}", 1, 1m, 1m);
+        for (var i = 0; i < 2; i++) InsertLineItem(db.Conn, r3, i, item, $"c{i}", 1, 1m, 1m);
+
+        // Page 1 (limit 2, id DESC): r3 (2 lines), r2 (3 lines).
+        var page1 = ReceiptsRepo.ListRecentReceipts(db.Conn, limit: 2, offset: 0);
+        Assert.Equal(new[] { r3, r2 }, Ids(page1));
+        Assert.Equal(2, page1.Single(x => x.Id == r3).ItemCount);
+        Assert.Equal(3, page1.Single(x => x.Id == r2).ItemCount);
+
+        // Page 2: r1 (1 line). A receipt with no lines would report 0.
+        var page2 = ReceiptsRepo.ListRecentReceipts(db.Conn, limit: 2, offset: 2);
+        Assert.Equal(new[] { r1 }, Ids(page2));
+        Assert.Equal(1, page2.Single().ItemCount);
+    }
+
+    [Fact]
+    public void GetMonthSpend_uses_month_range_across_boundaries()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Store").Id;
+
+        // Leap February: Feb 29 must fall inside 2024-02, and the Mar 1 receipt must not.
+        InsertReceipt(db.Conn, store, "2024-02-29", 10.00m, null, null);
+        InsertReceipt(db.Conn, store, "2024-03-01", 99.00m, null, null);
+        var feb = ReceiptsRepo.GetMonthSpend(db.Conn, "2024-02");
+        Assert.Equal(10.00m, feb.Total);
+        Assert.Equal(1, feb.ReceiptCount);
+
+        // December -> January rollover: Dec captures Dec 31 but not the next Jan 1.
+        InsertReceipt(db.Conn, store, "2026-12-31", 20.00m, null, null);
+        InsertReceipt(db.Conn, store, "2027-01-01", 88.00m, null, null);
+        var dec = ReceiptsRepo.GetMonthSpend(db.Conn, "2026-12");
+        Assert.Equal(20.00m, dec.Total);
+        Assert.Equal(1, dec.ReceiptCount);
+    }
+
+    [Fact]
+    public void GetMonthSpend_rejects_malformed_year_month()
+    {
+        using var db = new TempDb();
+        Assert.Throws<ArgumentException>(() => ReceiptsRepo.GetMonthSpend(db.Conn, "2026-13"));
+        Assert.Throws<ArgumentException>(() => ReceiptsRepo.GetMonthSpend(db.Conn, "nope"));
+        Assert.Throws<ArgumentException>(() => ReceiptsRepo.GetMonthSpend(db.Conn, ""));
+    }
+
     private static int[] Ids(IEnumerable<ReceiptSummary> rows) => rows.Select(r => r.Id).ToArray();
 
     // ---- SQL insert helpers (receipts_repo has no create methods — ingestion writes these) ----

@@ -12,6 +12,7 @@
 @inject ShoppingListService Shopping
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject NavigationManager Nav
 
 <MudText Typo="Typo.h5" GutterBottom="true">Deals</MudText>
 
@@ -29,6 +30,9 @@
         <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Working" />
     }
 </MudStack>
+<MudText Typo="Typo.caption" Class="mb-2">
+    Flyer sync sends your postal code to Flipp's unofficial service; imported flyer files are uploaded to your configured Azure OCR resource.
+</MudText>
 
 @if (_syncMessage is not null)
 {
@@ -59,7 +63,12 @@ else
             @_hiddenHardExcluded deal(s) hidden by household hard-excludes.
         </MudText>
     }
-    @foreach (var group in _dealsByStore)
+    @if (DealPageCount > 1)
+    {
+        <MudPagination Count="@DealPageCount" Selected="@_dealPage" SelectedChanged="SelectDealPage"
+                       ShowFirstButton="true" ShowLastButton="true" Class="mb-2" />
+    }
+    @foreach (var group in PageGroups())
     {
         <MudPaper Class="pa-3 mb-2" Outlined="true">
             <MudText Typo="Typo.subtitle1">@group.StoreName</MudText>
@@ -101,6 +110,11 @@ else
             </MudList>
         </MudPaper>
     }
+    @if (DealPageCount > 1)
+    {
+        <MudPagination Count="@DealPageCount" Selected="@_dealPage" SelectedChanged="SelectDealPage"
+                       ShowFirstButton="true" ShowLastButton="true" Class="mt-2" />
+    }
 }
 
 @code {
@@ -111,6 +125,34 @@ else
     private const double VerdictBelowUsualPct = 5.0;
 
     private IReadOnlyList<StoreDeals>? _dealsByStore;
+
+    // Deals can number in the thousands (perf gate: 5k active); rendering them all builds a huge DOM. Page with
+    // native MudPagination (already a dependency) rather than Virtualize — deal labels/chips wrap to different
+    // heights, which Blazor's fixed-item-height Virtualize can't render correctly.
+    private const int DealPageSize = 100;
+    private int _dealPage = 1;
+
+    private int DealPageCount => Math.Max(1,
+        ((_dealsByStore?.Sum(g => g.Deals.Count) ?? 0) + DealPageSize - 1) / DealPageSize);
+
+    // Flatten every store's deals into one ordered sequence, take the current page, then re-group by store so
+    // store headings still bracket the rows shown on each page.
+    private IReadOnlyList<StoreDeals> PageGroups()
+    {
+        var rows = (_dealsByStore ?? Array.Empty<StoreDeals>())
+            .SelectMany(g => g.Deals.Select(deal => (StoreName: g.StoreName, Deal: deal)))
+            .Skip((_dealPage - 1) * DealPageSize)
+            .Take(DealPageSize)
+            .ToList();
+
+        return rows
+            .GroupBy(x => x.StoreName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new StoreDeals(g.Key, g.Select(x => x.Deal).ToList()))
+            .ToList();
+    }
+
+    private void SelectDealPage(int page) => _dealPage = Math.Clamp(page, 1, DealPageCount);
+
     private int _hiddenHardExcluded;
     private string? _error;
     private bool _syncing;
@@ -193,6 +235,7 @@ else
                 return ((IReadOnlyList<StoreDeals>)grouped, hiddenCount);
             });
             _dealsByStore = groups;
+            _dealPage = 1; // fresh data -> back to the first page
             _hiddenHardExcluded = hidden;
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -256,6 +299,7 @@ else
         _syncMessage = null;
         _syncCts = new CancellationTokenSource();
         var copied = new List<string>();
+        var imported = false;
         try
         {
             var picks = await FilePicker.Default.PickMultipleAsync(new PickOptions
@@ -288,9 +332,9 @@ else
             foreach (var pick in picked)
                 copied.Add(await CopyPickToAppDataAsync(pick, ct));
 
-            var rawJsonDir = Path.Combine(FileSystem.AppDataDirectory, "flyer_raw_json");
             var result = await FlyerIngest.IngestAssetsAsync(choice.StoreId, choice.ValidFrom, choice.ValidTo,
-                copied, rawJsonDir, sourceType: "manual_upload", ct: ct);
+                copied, sourceType: "manual_upload", ct: ct);
+            imported = true; // copies are now referenced by flyer_assets; don't delete them in finally
 
             _syncSeverity = Severity.Success;
             _syncMessage = $"Imported {result.DealsCount} deal(s) from {result.AssetsCount} page(s).";
@@ -308,6 +352,9 @@ else
         }
         finally
         {
+            if (!imported)
+                foreach (var path in copied)
+                    TryDeleteFlyerFile(path);
             _importing = false;
             _syncCts?.Dispose();
             _syncCts = null;
@@ -315,16 +362,26 @@ else
     }
 
     // Picker streams are copied into app-data before ingest (mirrors Receipts.razor — source paths expire).
+    // Bounded: a hostile/huge picker file is rejected before the layout OCR client loads it fully into memory.
+    private const long MaxImportBytes = 20L * 1024 * 1024;
+    private static readonly HashSet<string> FlyerExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff", ".pdf" };
+
+    private static string FlyersDir() => Path.Combine(FileSystem.AppDataDirectory, "flyers");
+
     private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
     {
-        var dir = Path.Combine(FileSystem.AppDataDirectory, "flyers");
-        Directory.CreateDirectory(dir);
-        var ext = Path.GetExtension(pick.FileName) is { Length: > 0 } e ? e : ".jpg";
-        var path = Path.Combine(dir, $"{Guid.NewGuid():N}{ext}");
-        await using var src = await pick.OpenReadAsync();
-        await using var dst = File.Create(path);
-        await src.CopyToAsync(dst, ct);
-        return path;
+        await using var source = await pick.OpenReadAsync();
+        return await BoundedFileCopy.CopyAsync(
+            source, pick.FileName, FlyersDir(), FlyerExtensions,
+            defaultExtension: ".jpg", maxBytes: MaxImportBytes, ct: ct);
+    }
+
+    // Deletes a copied flyer asset (only inside FlyersDir) when an import fails before the DB references it.
+    private static void TryDeleteFlyerFile(string path)
+    {
+        if (!PathSafety.IsUnderDirectory(FlyersDir(), path)) return;
+        try { File.Delete(path); } catch { /* best-effort cleanup */ }
     }
 
     // Add a deal to the active shopping list. Mapped deals land under their store with price intel; unmapped
@@ -339,7 +396,13 @@ else
                 Shopping.AddDealToList(deal);
                 return DealLabel(deal);
             });
-            Snackbar.Add($"Added {name} — see Shopping List", Severity.Success);
+            // Actionable snackbar: one tap to the list the deal just landed in — no drawer trip (Phase 1a).
+            Snackbar.Add($"Added {name}", Severity.Success, config =>
+            {
+                config.Action = "View list";
+                config.ActionColor = Color.Primary;
+                config.OnClick = _ => { Nav.NavigateTo("/list"); return Task.CompletedTask; };
+            });
         }
         catch (Exception ex) { Snackbar.Add($"Couldn't add: {ex.Message}", Severity.Error); }
     }

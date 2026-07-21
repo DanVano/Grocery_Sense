@@ -31,7 +31,9 @@ public sealed class ConfigStoreTests : IDisposable
 
         ((List<string>)cfg.Household.Members[0].Profile["allergies"]!).Add("peanuts");
 
-        Assert.DoesNotContain("peanuts", store.GetHouseholdAllergies());
+        // A handed-out snapshot must not mutate the cache — a fresh Load has the unmodified profile.
+        var reloaded = store.Load();
+        Assert.DoesNotContain("peanuts", (List<string>)reloaded.Household.Members[0].Profile["allergies"]!);
     }
 
     [Fact]
@@ -79,19 +81,6 @@ public sealed class ConfigStoreTests : IDisposable
         store.Save(store.Load() with { MonthlyBudget = -5 });
         var cfg = New().Load();
         Assert.Null(cfg.MonthlyBudget);
-    }
-
-    [Fact]
-    public void GetHouseholdAllergies_unions_lowercased_tokens()
-    {
-        var store = New();
-        var cfg = store.Load();
-        cfg.Household.Members[0].Profile["allergies"] = new List<string> { "Peanuts", " Shellfish " };
-        store.Save(cfg);
-
-        var allergies = New().GetHouseholdAllergies();
-        Assert.Contains("peanuts", allergies);
-        Assert.Contains("shellfish", allergies);
     }
 
     [Fact]

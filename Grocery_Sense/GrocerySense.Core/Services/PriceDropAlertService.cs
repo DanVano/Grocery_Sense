@@ -64,8 +64,6 @@ public sealed class PriceDropAlertService
         return alerts;
     }
 
-    public IReadOnlyList<PriceDropAlert> GetOpenAlerts() => GetAlerts(0);
-
     public void DismissAlert(int alertId)
     {
         using var conn = _factory.Open();

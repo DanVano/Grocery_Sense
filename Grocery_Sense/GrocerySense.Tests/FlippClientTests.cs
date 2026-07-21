@@ -121,6 +121,29 @@ public sealed class FlippClientTests
         Assert.Contains("Preferences", ex.Message);
     }
 
+    [Fact]
+    public async Task Oversized_response_is_rejected()
+    {
+        var (client, _) = Build(_ => Json(new string('x', 4 * 1024 * 1024 + 1)));
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => client.FetchFlyersForStoreAsync("Mart", "M5V"));
+    }
+
+    [Fact]
+    public async Task Excessive_flyer_item_count_is_rejected()
+    {
+        var items = "[" + string.Join(",", Enumerable.Range(0, 2001)
+            .Select(i => $"{{\"name\":\"Item {i}\",\"current_price\":1}}")) + "]";
+        var (client, _) = Build(request => request.RequestUri!.AbsolutePath.EndsWith("/flyer_items")
+            ? Json(items)
+            : Json("""[{"id":7,"merchant":"Mart"}]"""));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => client.FetchFlyersForStoreAsync("Mart", "M5V"));
+        Assert.Contains("too many items", error.Message);
+    }
+
     [Theory]
     [InlineData("No Frills Ontario", "No Frills", true)]
     [InlineData("NoFrills", "No Frills", true)]

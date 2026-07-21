@@ -147,7 +147,7 @@ public sealed class FlyerSyncService
         var normUnit = observedUnit;
         var normNote = $"flyer;{adj.DealNote}";
 
-        var m = _mapper.MapToItem(combined);
+        var m = _mapper.MapToItem(conn, combined, tx);
         if (m.ItemId is not null)
         {
             itemId = m.ItemId;
