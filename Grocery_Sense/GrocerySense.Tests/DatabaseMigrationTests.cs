@@ -92,6 +92,40 @@ public sealed class DatabaseMigrationTests : IDisposable
         Assert.Contains(details, d => d.Contains("idx_items_name_nocase", StringComparison.Ordinal));
     }
 
+    // The staple scan is the one prices query with no item_id bound (ListStapleItemIds). Migration 9's
+    // idx_prices_coalesced_date must let its date-range predicate SEARCH the index instead of SCANning the
+    // whole table — otherwise the cost tracks total price history, not the ~90-day window.
+    [Fact]
+    public void Coalesced_date_index_serves_staple_scan()
+    {
+        var factory = NewFactory();
+        Database.Initialize(factory);
+        using var conn = factory.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            EXPLAIN QUERY PLAN
+            SELECT item_id, COUNT(*) AS line_count, COUNT(DISTINCT receipt_id) AS receipt_count
+            FROM prices INDEXED BY idx_prices_coalesced_date
+            WHERE item_id IS NOT NULL AND unit_price IS NOT NULL
+              AND (source = 'receipt' OR receipt_id IS NOT NULL)
+              AND date(COALESCE(date, created_at)) >= date('now', $since)
+            GROUP BY item_id
+            HAVING line_count >= $minLines OR receipt_count >= $minReceipts
+            ORDER BY receipt_count DESC, line_count DESC
+            """;
+        cmd.Parameters.AddWithValue("$since", "-90 day");
+        cmd.Parameters.AddWithValue("$minLines", 4);
+        cmd.Parameters.AddWithValue("$minReceipts", 3);
+        using var reader = cmd.ExecuteReader();
+        var details = new List<string>();
+        while (reader.Read()) details.Add(reader.GetString(3));
+
+        // Must SEARCH the coalesced-date index, and must NOT fall back to scanning the prices table.
+        Assert.Contains(details, d => d.Contains("idx_prices_coalesced_date", StringComparison.Ordinal));
+        Assert.DoesNotContain(details, d => d.Contains("SCAN prices", StringComparison.Ordinal));
+    }
+
     private static int ReadVersion(Microsoft.Data.Sqlite.SqliteConnection conn)
     {
         using var cmd = conn.CreateCommand();
