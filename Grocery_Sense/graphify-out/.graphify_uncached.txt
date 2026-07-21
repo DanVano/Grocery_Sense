@@ -1,6 +1,0 @@
-C:\Users\skftw\Desktop\Coding\Grocery_Sense_Main\Grocery_Sense\CLAUDE.md
-C:\Users\skftw\Desktop\Coding\Grocery_Sense_Main\Grocery_Sense\GrocerySense.App\Resources\Raw\AboutAssets.txt
-C:\Users\skftw\Desktop\Coding\Grocery_Sense_Main\Grocery_Sense\GrocerySense.App\wwwroot\index.html
-C:\Users\skftw\Desktop\Coding\Grocery_Sense_Main\Grocery_Sense\brainstorms\2026-07-09-family-food-savings.md
-C:\Users\skftw\Desktop\Coding\Grocery_Sense_Main\Grocery_Sense\brainstorms\2026-07-11-receipt-backfill-session-grill.md
-C:\Users\skftw\Desktop\Coding\Grocery_Sense_Main\Grocery_Sense\brainstorms\2026-07-11-v3-mobile-development-grill.md

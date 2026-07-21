@@ -2,7 +2,7 @@
 
 Purpose: port map for a future .NET MAUI Blazor Hybrid app. This file documents the current Python/Tkinter prototype, its module I/O, data model, app flow, and port recommendations.
 
-Source checked: `src/Grocery_Sense`, `tests`, `CLAUDE.md`, `module_breakdown.md`, `FUTURE_FEATURES.md`, `graphify-out/GRAPH_REPORT.md`, and `C:\Users\skftw\.claude\plans\please-do-a-full-greedy-graham.md`.
+Source checked: `src/Grocery_Sense`, `tests`, `CLAUDE.md`, `module_breakdown.md`, `FUTURE_FEATURES.md`, and `C:\Users\skftw\.claude\plans\please-do-a-full-greedy-graham.md`.
 
 ## Product Shape
 
