@@ -369,6 +369,15 @@ public static class Database
             created_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
         """,
+
+        // ----- Migration 9: index the coalesced-date expression for the staple scan (perf) -----
+        // ListStapleItemIds is the one prices query with no item_id bound — it filters on
+        // date(COALESCE(date, created_at)) >= cutoff and GROUPs by item_id. The existing
+        // idx_prices_item_coalesced leads with item_id, so it can't serve a date-only range; that scan
+        // read the whole prices table to keep a ~90-day slice. This bare functional index (same expression,
+        // no item_id prefix) lets the range seek instead, so the cost tracks the window, not total history.
+        // Additive index only; no data change.
+        "CREATE INDEX idx_prices_coalesced_date ON prices(date(COALESCE(date, created_at)));",
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>
