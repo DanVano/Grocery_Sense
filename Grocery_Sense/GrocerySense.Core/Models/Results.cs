@@ -120,10 +120,16 @@ public record WatchlistHit(
     int WatchId, int ItemId, string ItemName, double? TargetPrice, double BestPrice, int StoreId,
     string StoreName, string Source, double? UsualPrice, double? PctBelowUsual, string HitReason);
 
-// Outcome of a receipt ingest. DuplicateReason is "file_hash" | "signature" when WasDuplicate.
+// Outcome of a receipt ingest. DuplicateReason is "file_hash" | "signature" when WasDuplicate. Ingest
+// failures THROW (the receipt never commits) — there is no error field to carry a failed outcome.
 public record IngestOutcome(
-    int? ReceiptId, bool WasDuplicate, string? OperationId, string? Error,
+    int? ReceiptId, bool WasDuplicate, string? OperationId,
     string? DuplicateReason = null, bool ReplacedExisting = false);
+
+// The single-scan workflow's result: the ingest outcome plus the price-alert pass. AlertError is set when the
+// receipt imported but the post-commit alert scan threw — the receipt stays imported and its image is kept;
+// only the alert enrichment failed. Ingest failures throw (the receipt never committed) and are not modeled here.
+public sealed record ScanIngestOutcome(IngestOutcome Ingest, int AlertsOpened, string? AlertError = null);
 
 // The result of PrepareReceiptFileAsync: either a decided duplicate (Duplicate != null, before the user is
 // asked anything) or a ready-to-commit receipt (Ingest != null) awaiting a confirmed purchase date. OcrDate

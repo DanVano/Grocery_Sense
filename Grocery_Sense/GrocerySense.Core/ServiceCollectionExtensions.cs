@@ -66,6 +66,8 @@ public static class ServiceCollectionExtensions
         // the head binds it (App: #if ANDROID AndroidLocalNotifier #else NoOpLocalNotifier; tests: a fake).
         // PendingNavigationService carries a notification-tap route into Blazor (deep link).
         services.AddSingleton<ScanAlertNotificationService>();
+        // Single-scan workflow (ingest + alert pass) shared by every scan entry point (FAB / page / share).
+        services.AddSingleton<ScanIngestService>();
         services.AddSingleton<PendingNavigationService>();
         // PendingSharedReceiptsService carries receipt image(s) shared into the app (ACTION_SEND) into Blazor.
         services.AddSingleton<PendingSharedReceiptsService>();

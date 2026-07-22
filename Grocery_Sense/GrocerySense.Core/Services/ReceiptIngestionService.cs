@@ -65,7 +65,7 @@ public sealed class ReceiptIngestionService
             if (existing is not null)
             {
                 if (!replaceExisting)
-                    return Decided(new IngestOutcome(existing, true, null, null, "file_hash"), fallbackDate);
+                    return Decided(new IngestOutcome(existing, true, null, "file_hash"), fallbackDate);
                 ReceiptsRepo.DeleteReceiptWithBackup(conn, existing.Value);
                 replaced = true;
             }
@@ -84,7 +84,7 @@ public sealed class ReceiptIngestionService
             if (existingSig is not null)
             {
                 if (!replaceExisting)
-                    return Decided(new IngestOutcome(existingSig, true, operationId, null, "signature"),
+                    return Decided(new IngestOutcome(existingSig, true, operationId, "signature"),
                         fallbackDate, operationId, replaced);
                 ReceiptsRepo.DeleteReceiptWithBackup(conn, existingSig.Value);
                 replaced = true;
@@ -119,15 +119,15 @@ public sealed class ReceiptIngestionService
         {
             var receiptId = ReceiptsRepo.IngestReceipt(conn, ingest, tx);
             tx.Commit();
-            return new IngestOutcome(receiptId, false, operationId, null, null, prepared.ReplacedExisting);
+            return new IngestOutcome(receiptId, false, operationId, null, prepared.ReplacedExisting);
         }
         catch (SqliteException e) when (e.SqliteErrorCode == 19)
         {
             tx.Rollback();
             if (ingest.FileHash is { } fh && ReceiptsRepo.FindReceiptIdByFileHash(conn, fh) is { } byHash)
-                return new IngestOutcome(byHash, true, operationId, null, "file_hash");
+                return new IngestOutcome(byHash, true, operationId, "file_hash");
             if (ingest.Signature is { } sig && ReceiptsRepo.FindReceiptIdBySignature(conn, sig) is { } bySig)
-                return new IngestOutcome(bySig, true, operationId, null, "signature");
+                return new IngestOutcome(bySig, true, operationId, "signature");
             throw;
         }
     }

@@ -139,6 +139,19 @@
                 return;
             }
 
+            // Imported, but the post-commit alert pass failed: the receipt (and image) stand — say so honestly,
+            // not "scan failed". Still link through to the receipt.
+            if (result.AlertError is not null)
+            {
+                Snackbar.Add($"Receipt #{result.ReceiptId} imported — price-alert refresh failed.", Severity.Warning, config =>
+                {
+                    config.Action = "View";
+                    config.ActionColor = Color.Primary;
+                    config.OnClick = _ => { Nav.NavigateTo("/receipts"); return Task.CompletedTask; };
+                });
+                return;
+            }
+
             var message = $"Receipt #{result.ReceiptId} imported"
                 + (result.AlertsOpened > 0 ? $" · {result.AlertsOpened} new price alert(s)" : "");
             Snackbar.Add(message, Severity.Success, config =>
