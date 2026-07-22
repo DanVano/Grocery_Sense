@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
 
@@ -25,8 +26,10 @@ public static class ItemsAdminRepo
     // active watches. Any new item_id table MUST be added here (or to the watchlist special-case).
     // internal (not private) so a Tests schema-drift guard can assert this list plus watchlist covers
     // EVERY item_id-bearing table in the live schema — a new one added to neither orphans its rows on merge.
-    internal static readonly string[] ItemIdTables =
-        { "prices", "receipt_line_items", "shopping_list", "flyer_deals", "price_drop_alerts", "item_aliases" };
+    // ImmutableArray (not string[]): now that it's exposed beyond this class, readonly alone guards only the
+    // reference — array elements would still be reassignable. The names feed interpolated UPDATE SQL, so pin them.
+    internal static readonly ImmutableArray<string> ItemIdTables =
+        ["prices", "receipt_line_items", "shopping_list", "flyer_deals", "price_drop_alerts", "item_aliases"];
 
     private static readonly ItemAliasesRepo Aliases = new();
 
