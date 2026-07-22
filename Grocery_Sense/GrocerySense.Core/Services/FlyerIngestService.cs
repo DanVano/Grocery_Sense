@@ -1,12 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
+using static GrocerySense.Core.RawJson; // AsDict/AsList/GetProp/Str/ToDouble — the shared Azure-JSON navigation
 
 namespace GrocerySense.Core;
 
@@ -239,50 +239,11 @@ public sealed class FlyerIngestService
     private static string GuessAssetType(string path) =>
         Path.GetExtension(path).TrimStart('.').ToLowerInvariant() == "pdf" ? "pdf" : "image";
 
-    // ---------------- helpers (sha, money cast, JSON nav for dict + JsonElement) ----------------
+    // ---------------- helpers (sha, money cast) — JSON navigation is shared via RawJson ----------------
 
     private static string Sha256(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
     private static decimal? Dec(double? v) => v is { } x ? (decimal)x : null;
 
     private static string Trunc(string s, int max) => s.Length <= max ? s : s[..max];
-
-    private static IReadOnlyDictionary<string, object?>? AsDict(object? o) => o switch
-    {
-        IReadOnlyDictionary<string, object?> d => d,
-        JsonElement je when je.ValueKind == JsonValueKind.Object =>
-            je.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value),
-        _ => null,
-    };
-
-    private static IReadOnlyList<object?>? AsList(object? o) => o switch
-    {
-        IReadOnlyList<object?> l => l,
-        JsonElement je when je.ValueKind == JsonValueKind.Array => je.EnumerateArray().Select(x => (object?)x).ToList(),
-        string => null, // a string is enumerable but is never a JSON array here
-        System.Collections.IEnumerable seq => seq.Cast<object?>().ToList(),
-        _ => null,
-    };
-
-    private static object? GetProp(object? o, string key) => AsDict(o)?.GetValueOrDefault(key);
-
-    private static string Str(object? o) => o switch
-    {
-        null => "",
-        string s => s,
-        JsonElement je => je.ValueKind == JsonValueKind.String ? je.GetString() ?? "" : je.ToString(),
-        _ => o.ToString() ?? "",
-    };
-
-    private static double? ToDouble(object? o) => o switch
-    {
-        null => null,
-        double d => d,
-        float f => f,
-        int i => i,
-        long l => l,
-        JsonElement je when je.ValueKind == JsonValueKind.Number => je.GetDouble(),
-        _ => double.TryParse(o.ToString(), System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var p) ? p : null,
-    };
 }

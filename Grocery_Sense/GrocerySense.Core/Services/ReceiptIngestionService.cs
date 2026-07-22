@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Security.Cryptography;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using FuzzySharp;
 using FuzzySharp.SimilarityRatio;
@@ -10,6 +9,7 @@ using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
+using static GrocerySense.Core.RawJson; // AsDict/AsList/GetProp/Str/ToDouble — the shared Azure-JSON navigation
 
 namespace GrocerySense.Core;
 
@@ -378,52 +378,6 @@ public sealed class ReceiptIngestionService
         if (AsDict(v) is { } d && d.ContainsKey("amount")) return SafeFloat(d["amount"]);
         return SafeFloat(v);
     }
-
-    private static IReadOnlyDictionary<string, object?>? AsDict(object? o)
-    {
-        switch (o)
-        {
-            case IReadOnlyDictionary<string, object?> d: return d;
-            case JsonElement je when je.ValueKind == JsonValueKind.Object:
-                var m = new Dictionary<string, object?>();
-                foreach (var p in je.EnumerateObject()) m[p.Name] = p.Value;
-                return m;
-            default: return null;
-        }
-    }
-
-    private static IReadOnlyList<object?>? AsList(object? o)
-    {
-        switch (o)
-        {
-            case JsonElement je when je.ValueKind == JsonValueKind.Array:
-                return je.EnumerateArray().Select(x => (object?)x).ToList();
-            default: return null;
-        }
-    }
-
-    private static object? GetProp(object? o, string key) => AsDict(o)?.GetValueOrDefault(key);
-
-    private static string Str(object? o) => o switch
-    {
-        null => "",
-        string s => s,
-        JsonElement je => je.ValueKind == JsonValueKind.String ? je.GetString() ?? "" : je.ToString(),
-        _ => o.ToString() ?? "",
-    };
-
-    private static double? ToDouble(object? o) => o switch
-    {
-        null => null,
-        double d => d,
-        float f => f,
-        int i => i,
-        long l => l,
-        JsonElement je when je.ValueKind == JsonValueKind.Number => je.GetDouble(),
-        JsonElement je when je.ValueKind == JsonValueKind.String =>
-            double.TryParse(je.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var p) ? p : null,
-        _ => double.TryParse(o.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var p) ? p : null,
-    };
 
     private static double? SafeFloat(object? o)
     {
