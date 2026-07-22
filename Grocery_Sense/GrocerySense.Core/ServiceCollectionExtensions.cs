@@ -70,6 +70,10 @@ public static class ServiceCollectionExtensions
         // PendingSharedReceiptsService carries receipt image(s) shared into the app (ACTION_SEND) into Blazor.
         services.AddSingleton<PendingSharedReceiptsService>();
 
+        // Item Manager destructive mutations (merge / line-correction) with the transaction boundary owned in
+        // Core rather than a Razor @code block.
+        services.AddSingleton<ItemManagerService>();
+
         return services;
     }
 }

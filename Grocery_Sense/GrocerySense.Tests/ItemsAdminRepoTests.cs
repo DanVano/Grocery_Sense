@@ -252,8 +252,8 @@ public sealed class ItemsAdminRepoTests
 
         using (var tx = db.Conn.BeginTransaction())
         {
-            ItemsAdminRepo.CorrectLineMapping(db.Conn, tx, lineId, receipt, "margerine tub",
-                oldItemId: wrong, newItemId: right);
+            // receipt_id / description / old item_id are now loaded from the line row by id.
+            ItemsAdminRepo.CorrectLineMapping(db.Conn, tx, lineId, right);
             tx.Commit();
         }
 

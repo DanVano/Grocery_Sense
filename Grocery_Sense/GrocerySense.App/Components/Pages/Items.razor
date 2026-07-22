@@ -1,7 +1,7 @@
 @page "/items"
 @inject SqliteConnectionFactory Db
 @inject IDialogService DialogService
-@inject IngredientMappingService Mapper
+@inject ItemManagerService ItemManager
 
 <MudText Typo="Typo.h5" GutterBottom="true">Items</MudText>
 <MudText Typo="Typo.body2" Class="mb-2">
@@ -181,16 +181,9 @@ else
         _busy = true;
         try
         {
-            await Task.Run(() =>
-            {
-                using var conn = Db.Open();
-                using var tx = conn.BeginTransaction();
-                ItemsAdminRepo.MergeItems(conn, tx, targetId, source.Id);
-                tx.Commit();
-            });
-            // The merge deleted the source item id. Drop the mapper's cached fuzzy-choice list so a later scan
-            // this session can't fuzzy-match the now-deleted id and abort the ingest with an FK failure.
-            Mapper.InvalidateChoices();
+            // ItemManager owns the transaction and drops the mapper's cached fuzzy-choice list after the merge
+            // (the source item id is gone; a later scan must not fuzzy-match it and abort ingest on an FK fail).
+            await Task.Run(() => ItemManager.MergeItems(targetId, source.Id));
             _messageSeverity = Severity.Success;
             _message = $"Merged \"{source.CanonicalName}\" into \"{targetName}\".";
             await SearchAsync();

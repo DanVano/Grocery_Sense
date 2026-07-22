@@ -11,6 +11,7 @@
 @inject ScanAlertNotificationService ScanAlerts
 @inject TripReconciliationService TripCheck
 @inject PendingSharedReceiptsService PendingShared
+@inject ItemManagerService ItemManager
 
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
@@ -481,13 +482,9 @@ else
         _busy = true;
         try
         {
-            await Task.Run(() =>
-            {
-                using var conn = Db.Open();
-                using var tx = conn.BeginTransaction();
-                ItemsAdminRepo.CorrectLineMapping(conn, tx, line.Id, receiptId, line.Description, line.ItemId, newItemId);
-                tx.Commit();
-            });
+            // ItemManager owns the transaction; the repo loads receipt_id / description / old item_id from the
+            // line row itself, so the corrected item id is all it needs.
+            await Task.Run(() => ItemManager.CorrectLineMapping(line.Id, newItemId));
             _messageSeverity = Severity.Success;
             _message = $"\"{line.Description}\" now maps to the chosen item.";
             _lines.Remove(receiptId);                 // force a reload of this receipt's lines

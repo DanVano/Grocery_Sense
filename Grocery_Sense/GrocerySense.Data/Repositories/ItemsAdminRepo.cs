@@ -136,11 +136,27 @@ public static class ItemsAdminRepo
     // Alias-correction ("fix line + learn"): re-point one receipt line and the price row it produced to the
     // correct item, and learn description -> item so future scans map right. No retro-sweep — earlier
     // mis-mapped receipts are cleaned via MergeItems. All in the caller's transaction.
-    // ponytail: an originally-unmapped line (oldItemId null) has no price row to move; it still re-points the
+    // ponytail: an originally-unmapped line (old item_id null) has no price row to move; it still re-points the
     // line + learns the alias. Back-creating the missing historical price is out of scope (re-import covers it).
-    public static void CorrectLineMapping(SqliteConnection conn, SqliteTransaction tx, int lineItemId,
-        int receiptId, string description, int? oldItemId, int newItemId)
+    // receipt_id / description / the current item_id are DB-owned facts on the line row — loaded here, not
+    // accepted from the caller. description IS the price row's raw_name (both come from this column at ingest),
+    // so loading it keeps that pairing consistent and stops a stale/edited caller value from missing the row.
+    public static void CorrectLineMapping(SqliteConnection conn, SqliteTransaction tx, int lineItemId, int newItemId)
     {
+        int receiptId;
+        string description;
+        int? oldItemId;
+        using (var load = Db.Command(conn, tx,
+            "SELECT receipt_id, description, item_id FROM receipt_line_items WHERE id = $line"))
+        {
+            load.Parameters.AddWithValue("$line", lineItemId);
+            using var r = load.ExecuteReader();
+            if (!r.Read()) throw new InvalidOperationException($"Receipt line not found: {lineItemId}");
+            receiptId = r.GetInt32(0);
+            description = r.GetStringOrNull(1) ?? "";
+            oldItemId = r.IsDBNull(2) ? null : r.GetInt32(2);
+        }
+
         Exec(conn, tx, "UPDATE receipt_line_items SET item_id = $new WHERE id = $line",
             ("$new", newItemId), ("$line", lineItemId));
 
