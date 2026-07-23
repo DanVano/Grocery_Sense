@@ -29,7 +29,7 @@ public sealed class ReceiptReplacementTests : IDisposable
     }
 
     private static ReceiptIngestionService Build(TempDb db, IReceiptOcrClient ocr) =>
-        new(ocr, db.Factory, new IngredientMappingService(db.Factory),
+        new(ocr, new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
 
     private string WriteFile(string content)

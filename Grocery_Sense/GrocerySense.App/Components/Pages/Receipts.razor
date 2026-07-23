@@ -415,6 +415,14 @@ else
             var picked = picks?.Where(p => p is not null).Select(p => p!).ToList() ?? new List<FileResult>();
             if (picked.Count == 0) return; // user backed out
 
+            // Early UX check only — the authoritative cap lives in ImportBatchAsync (service boundary).
+            if (picked.Count > ReceiptIngestionService.MaxBatchFiles)
+            {
+                Fail($"Backfill imports are capped at {ReceiptIngestionService.MaxBatchFiles} photos per batch " +
+                     $"(you picked {picked.Count}) — the backfill protocol works in chunks of 10.");
+                return;
+            }
+
             _stage = "Copying…";
             StateHasChanged();
             foreach (var pick in picked)

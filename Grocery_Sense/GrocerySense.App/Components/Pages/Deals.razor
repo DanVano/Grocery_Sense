@@ -310,6 +310,15 @@ else
             var picked = picks?.Where(p => p is not null).Select(p => p!).ToList() ?? new List<FileResult>();
             if (picked.Count == 0) return; // user backed out
 
+            // Early UX check only — the authoritative cap lives in IngestAssetsAsync (service boundary).
+            if (picked.Count > FlyerIngestService.MaxFilesPerImport)
+            {
+                _syncSeverity = Severity.Error;
+                _syncMessage = $"Flyer imports are capped at {FlyerIngestService.MaxFilesPerImport} files " +
+                               $"(you picked {picked.Count}) — import in batches.";
+                return;
+            }
+
             List<Store> stores;
             using (var conn = Db.Open())
                 stores = StoresRepo.ListStores(conn).ToList();

@@ -30,7 +30,12 @@ public sealed class AzureReceiptOcrClient : IReceiptOcrClient
         var client = new DocumentIntelligenceClient(new Uri(_endpoint), new AzureKeyCredential(_apiKey));
 
         var bytes = await File.ReadAllBytesAsync(filePath, ct);
-        var options = new AnalyzeDocumentOptions("prebuilt-receipt", BinaryData.FromBytes(bytes)) { Locale = _locale };
+        // Pages = "1": a receipt is one page; a multipage TIFF must not bill every page (P0-3).
+        var options = new AnalyzeDocumentOptions("prebuilt-receipt", BinaryData.FromBytes(bytes))
+        {
+            Locale = _locale,
+            Pages = "1",
+        };
         var operation = await client.AnalyzeDocumentAsync(WaitUntil.Completed, options, ct);
 
         // Use the raw response JSON (REST field shape) rather than the typed model, so the dict matches what

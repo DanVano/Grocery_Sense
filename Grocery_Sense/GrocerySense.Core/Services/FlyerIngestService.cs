@@ -24,17 +24,26 @@ namespace GrocerySense.Core;
 // (pre-extracted JSON) has no v1 route and was never in the scaffold surface — skip until one needs it.
 public sealed class FlyerIngestService
 {
+    // P0-3 service-boundary bounds (the authoritative check — UI-level caps are unprovable). Acknowledged
+    // ceiling: with Pages="1-10" in the layout client, one flyer import can bill up to 10 × 10 pages.
+    public const int MaxFilesPerImport = 10;
+    public const long MaxAggregateBytes = 100L * 1024 * 1024;
+    public const int MaxRawJsonChars = 16 * 1024 * 1024; // parse/persistence guard, post-SDK buffering
+    public const int MaxDealsPerAsset = 500;             // a denser "flyer" is hostile input, not a flyer
+
     private readonly IFlyerLayoutClient _layout;
+    private readonly OcrGate _gate;
     private readonly SqliteConnectionFactory _factory;
     private readonly IngredientMappingService _mapper;
     private readonly UnitNormalizationService _unitNorm;
     private readonly MultiBuyDealService _multibuy;
     private readonly FlyersRepo _repo = new();
 
-    public FlyerIngestService(IFlyerLayoutClient layout, SqliteConnectionFactory factory,
+    public FlyerIngestService(IFlyerLayoutClient layout, OcrGate gate, SqliteConnectionFactory factory,
         IngredientMappingService mapper, UnitNormalizationService unitNorm, MultiBuyDealService multibuy)
     {
         _layout = layout;
+        _gate = gate;
         _factory = factory;
         _mapper = mapper;
         _unitNorm = unitNorm;
@@ -46,6 +55,19 @@ public sealed class FlyerIngestService
         string? sourceRef = null, string? note = null, bool tryItemMapping = true, CancellationToken ct = default)
     {
         if (storeId is null) throw new ArgumentException("storeId is required for flyer ingest.", nameof(storeId));
+
+        // P0-3 caps before ANY paid client call: over-limit = disclosed reject, zero Azure requests.
+        if (filePaths.Count > MaxFilesPerImport)
+            throw new InvalidOperationException(
+                $"Flyer imports are capped at {MaxFilesPerImport} files (got {filePaths.Count}) — import in batches.");
+        long aggregateBytes = 0;
+        foreach (var p in filePaths)
+            if (new FileInfo(p) is { Exists: true } fi)
+                aggregateBytes += fi.Length;
+        if (aggregateBytes > MaxAggregateBytes)
+            throw new InvalidOperationException(
+                $"Flyer import totals {aggregateBytes / (1024 * 1024)} MiB — over the " +
+                $"{MaxAggregateBytes / (1024 * 1024)} MiB cap; import fewer or smaller pages.");
 
         // --- Phase A (pre-transaction): Azure layout + extraction + mapping/unit-norm prep. ---
         var staged = new List<StagedAsset>();
@@ -60,10 +82,15 @@ public sealed class FlyerIngestService
                 var assetType = GuessAssetType(fp);
                 var sha = Sha256(bytes);
 
-                var (_, analyze) = await _layout.AnalyzeLayoutFileAsync(fp, ct);
+                // The one paid call per asset, serialized + deadlined by the injected singleton gate.
+                var (_, analyze) = await _gate.RunAsync(tok => _layout.AnalyzeLayoutFileAsync(fp, tok), ct);
 
                 // Raw JSON is persisted only to SQLite (flyer_raw_json) in Phase B — no plaintext disk copy.
                 var rawJsonStr = RawJson.ToJsonString(analyze);
+                if (rawJsonStr.Length > MaxRawJsonChars)
+                    throw new InvalidDataException(
+                        $"Flyer OCR response is {rawJsonStr.Length / (1024 * 1024)} MiB of JSON — over the " +
+                        "16 MiB guard; not parsed or persisted.");
                 var rawSha = Sha256(Encoding.UTF8.GetBytes(rawJsonStr));
 
                 var deals = new List<FlyerDeal>();
@@ -179,6 +206,12 @@ public sealed class FlyerIngestService
             {
                 var priceText = ExtractPriceText(texts[i]);
                 if (priceText is null) continue;
+
+                // P0-3: a page set producing this many deal anchors is hostile input — reject before the
+                // mapper/normalizer (and the DB) ever see it.
+                if (outv.Count >= MaxDealsPerAsset)
+                    throw new InvalidDataException(
+                        $"Flyer produced over {MaxDealsPerAsset} deals from one file — rejected as malformed input.");
 
                 var prev1 = i - 1 >= 0 ? texts[i - 1].Trim() : "";
                 var prev2 = i - 2 >= 0 ? texts[i - 2].Trim() : "";

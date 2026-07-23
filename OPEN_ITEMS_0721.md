@@ -27,9 +27,12 @@ The Android head compiles; getting a signed build onto a phone does not.
 
 - [ ] **Release keystore** [USER, secret] — `keytool -genkeypair -v -keystore grocerysense-release.keystore
   -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000` in `%USERPROFILE%\keystores\`.
-  **Back it up off-machine.** Lose it → testers uninstall/reinstall and lose local data.
-- [ ] **Azure OCR budget cap** [USER, portal] — CAD $10/mo + 50%/100% email alerts, set **before** any OCR
-  smoke or the ~50-receipt backfill. Verify prebuilt-receipt per-page price while in the portal
+  **Back it up off-machine, and store the keystore recovery info (alias + passwords) with the backup.**
+  Lose it → testers uninstall/reinstall and lose local data.
+- [ ] **Azure OCR budget alerts** [USER, portal] — CAD $10/mo budget + 50%/100% email alerts, set **before**
+  any OCR smoke or the ~50-receipt backfill. **Azure budgets ALERT only — they do not stop spend.** The
+  in-app page/batch caps (P0-3: one page per receipt, ≤10 files × ≤10 pages per flyer import, one OCR call
+  at a time) are the actual spend control. Verify prebuilt-receipt per-page price while in the portal
   (expected backfill spend ≈ US$1–2).
 - [ ] **Signed r1 APK + on-device smoke** [DEVICE] — `dotnet publish -f net10.0-android -c Release`
   (`-p:AndroidPackageFormats=apk`, signing passwords via env vars, never in csproj); `apksigner verify`;

@@ -29,7 +29,7 @@ public sealed class ScanIngestServiceTests : IDisposable
 
     private ScanIngestService Build(TempDb db, Dictionary<string, object?> raw)
     {
-        var ingest = new ReceiptIngestionService(new FakeOcr(raw), db.Factory,
+        var ingest = new ReceiptIngestionService(new FakeOcr(raw), new OcrGate(), db.Factory,
             new IngredientMappingService(db.Factory), new UnitNormalizationService(), new MultiBuyDealService());
         var scanAlerts = new ScanAlertNotificationService(new PriceDropAlertService(db.Factory), new FakeLocalNotifier());
         return new ScanIngestService(ingest, scanAlerts);

@@ -32,7 +32,13 @@ public sealed class FlyerDocIntClient : IFlyerLayoutClient
         var client = new DocumentIntelligenceClient(new Uri(_endpoint), new AzureKeyCredential(_apiKey));
 
         var bytes = await File.ReadAllBytesAsync(filePath, ct);
-        var options = new AnalyzeDocumentOptions("prebuilt-layout", BinaryData.FromBytes(bytes)) { Locale = _locale };
+        // Pages = "1-10": acknowledged ceiling — one flyer import (≤10 files) can bill up to 100 pages,
+        // never more (P0-3). A longer PDF simply has pages 11+ ignored.
+        var options = new AnalyzeDocumentOptions("prebuilt-layout", BinaryData.FromBytes(bytes))
+        {
+            Locale = _locale,
+            Pages = "1-10",
+        };
         var operation = await client.AnalyzeDocumentAsync(WaitUntil.Completed, options, ct);
 
         // Use the raw response JSON (REST field shape) rather than the typed model, so the dict matches what

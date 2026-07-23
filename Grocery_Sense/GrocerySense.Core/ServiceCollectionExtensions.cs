@@ -24,6 +24,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<StapleRestockService>();
         services.AddSingleton<PlanningService>();
         services.AddSingleton<BasketOptimizerService>();
+        // P0-3: the ONE gate every paid OCR call runs through. It must be this singleton — the App head
+        // constructs a new Azure client per call, so a lock anywhere else serializes nothing.
+        services.AddSingleton<OcrGate>();
         services.AddSingleton<ReceiptIngestionService>();
         services.AddSingleton<FlyerIngestService>();
         services.AddSingleton<FlyerSyncService>();

@@ -18,7 +18,19 @@ namespace GrocerySense.Core;
 // divergence, not worth a second mapper instance + DI change.
 public sealed class ReceiptIngestionService
 {
+    // P0-3 service-boundary bounds — authoritative here (the tests project has no App reference, so
+    // UI-level checks are unprovable). Batch size aligns with the documented chunk-of-10 backfill protocol.
+    public const int MaxBatchFiles = 10;
+    public const long MaxBatchAggregateBytes = 100L * 1024 * 1024;
+    // Application parse/persistence guard on the OCR response (post-SDK-buffering — NOT a transport limit).
+    public const int MaxRawJsonChars = 16 * 1024 * 1024;
+    // Pre-BuildIngest validation, enforced before any DB open or catalog write.
+    public const int MaxReceiptLines = 300;
+    public const int MaxMerchantChars = 200;
+    public const int MaxFieldChars = 500;
+
     private readonly IReceiptOcrClient _ocr;
+    private readonly OcrGate _gate;
     private readonly SqliteConnectionFactory _factory;
     private readonly IngredientMappingService _mapper;
     private readonly UnitNormalizationService _unitNorm;
@@ -27,10 +39,11 @@ public sealed class ReceiptIngestionService
 
     private const int StoreMatchThreshold = 85;
 
-    public ReceiptIngestionService(IReceiptOcrClient ocr, SqliteConnectionFactory factory,
+    public ReceiptIngestionService(IReceiptOcrClient ocr, OcrGate gate, SqliteConnectionFactory factory,
         IngredientMappingService mapper, UnitNormalizationService unitNorm, MultiBuyDealService multibuy)
     {
         _ocr = ocr;
+        _gate = gate;
         _factory = factory;
         _mapper = mapper;
         _unitNorm = unitNorm;
@@ -73,8 +86,15 @@ public sealed class ReceiptIngestionService
             }
         }
 
-        // 2) OCR.
-        var (operationId, rawJson) = await _ocr.AnalyzeReceiptFileAsync(filePath, ct: ct);
+        // 2) OCR — the one paid call, serialized + deadlined by the injected singleton gate.
+        var (operationId, rawJson) = await _gate.RunAsync(
+            tok => _ocr.AnalyzeReceiptFileAsync(filePath, tok), ct);
+
+        // Parse/persistence guard: refuse to navigate or store a pathologically large OCR response.
+        var rawJsonStr = RawJson.ToJsonString(rawJson);
+        if (rawJsonStr.Length > MaxRawJsonChars)
+            throw new InvalidDataException(
+                $"OCR response is {rawJsonStr.Length / (1024 * 1024)} MiB of JSON — over the 16 MiB guard; not parsed or persisted.");
 
         // 3) signature dedupe (catches rescans of the same receipt).
         int? signatureOwner = null;
@@ -101,7 +121,7 @@ public sealed class ReceiptIngestionService
                 fallbackDate, operationId);
 
         // 4) parse + resolve item ids/unit-norm/multibuy (pre-transaction; mapper writes alias/items here).
-        var ingest = BuildIngest(rawJson, filePath, operationId, fileHash, signature, ct);
+        var ingest = BuildIngest(rawJson, rawJsonStr, filePath, operationId, fileHash, signature, ct);
         _mapper.FlushLearnedAliases();
 
         var ocrDate = sigDate.Length > 0 ? sigDate : null; // ExtractHeaderForSignature keeps only ISO dates
@@ -196,6 +216,22 @@ public sealed class ReceiptIngestionService
         Func<ReceiptPrepared, CancellationToken, Task<string?>> dateResolver, bool replaceExisting = false,
         IProgress<int>? progress = null, CancellationToken ct = default)
     {
+        // P0-3 authoritative caps, before any OCR: a UI can repeat these early for UX, but only this
+        // boundary is provable (the tests project has no App reference). Over-limit = disclosed reject,
+        // zero paid calls.
+        if (filePaths.Count > MaxBatchFiles)
+            throw new InvalidOperationException(
+                $"Backfill imports are capped at {MaxBatchFiles} files per batch (got {filePaths.Count}) — " +
+                "import in chunks of 10.");
+        long aggregateBytes = 0;
+        foreach (var p in filePaths)
+            if (new FileInfo(p) is { Exists: true } fi)
+                aggregateBytes += fi.Length;
+        if (aggregateBytes > MaxBatchAggregateBytes)
+            throw new InvalidOperationException(
+                $"Backfill batch totals {aggregateBytes / (1024 * 1024)} MiB — over the " +
+                $"{MaxBatchAggregateBytes / (1024 * 1024)} MiB cap; import fewer or smaller photos.");
+
         var items = new List<BatchImportItem>(filePaths.Count);
         for (var i = 0; i < filePaths.Count; i++)
         {
@@ -255,13 +291,14 @@ public sealed class ReceiptIngestionService
         string? operationId = null) =>
         new(null, operationId, null, fallbackDate, "", null, 0, false, outcome);
 
-    private ReceiptIngest BuildIngest(Dictionary<string, object?> rawJson, string filePath, string operationId,
-        string fileHash, string? signature, CancellationToken ct)
+    private ReceiptIngest BuildIngest(Dictionary<string, object?> rawJson, string rawJsonStr, string filePath,
+        string operationId, string fileHash, string? signature, CancellationToken ct)
     {
         var fields = TopFields(rawJson);
 
         var (merchantVal, merchantConf) = FieldValue(PickField(fields, "MerchantName", "Merchant"));
-        var merchant = Str(merchantVal).Trim();
+        // Field caps (P0-3): OCR noise is truncated, never persisted unbounded.
+        var merchant = Truncate(Str(merchantVal).Trim(), MaxMerchantChars);
 
         var (dateVal, dateConf) = FieldValue(PickField(fields, "TransactionDate", "Date"));
         var purchaseDate = IsIsoDate(Str(dateVal)) ? Str(dateVal).Trim() : InferDate(filePath);
@@ -275,12 +312,18 @@ public sealed class ReceiptIngestionService
 
         var overallConf = Average(merchantConf, dateConf, subConf, taxConf, totalConf);
 
+        // Line-count cap enforced BEFORE any DB open or catalog write — a hostile 10 000-line "receipt"
+        // is rejected without touching the catalog.
+        var itemsField = PickField(fields, "Items", "ItemList", "LineItems");
+        var valueArray = AsList(GetProp(itemsField, "valueArray"));
+        if (valueArray is { Count: > MaxReceiptLines })
+            throw new InvalidDataException(
+                $"Receipt has {valueArray.Count} line items — over the {MaxReceiptLines}-line guard; not imported.");
+
         using var conn = _factory.Open();
         var storeId = GetOrCreateStoreId(conn, merchant);
 
         var lines = new List<ReceiptIngestLine>();
-        var itemsField = PickField(fields, "Items", "ItemList", "LineItems");
-        var valueArray = AsList(GetProp(itemsField, "valueArray"));
         if (valueArray is not null)
         {
             for (var idx = 0; idx < valueArray.Count; idx++)
@@ -290,7 +333,7 @@ public sealed class ReceiptIngestionService
                 if (obj is null) continue;
 
                 var (descVal, descConf) = FieldValue(PickField(obj, "Description", "Name", "Item"));
-                var description = Str(descVal).Trim();
+                var description = Truncate(Str(descVal).Trim(), MaxFieldChars);
                 if (description.Length == 0) continue;
 
                 var (qtyVal, qtyConf) = FieldValue(PickField(obj, "Quantity", "Qty"));
@@ -341,10 +384,11 @@ public sealed class ReceiptIngestionService
             }
         }
 
-        var rawJsonStr = RawJson.ToJsonString(rawJson);
         return new ReceiptIngest(storeId, purchaseDate, subtotal, tax, total, filePath, ConfidenceTo15(overallConf),
             operationId, null, rawJsonStr, fileHash, signature, lines);
     }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
     private (int ItemId, int? Confidence15) UpsertItemFromMapping(SqliteConnection conn, string desc, MappingResult mapping)
     {

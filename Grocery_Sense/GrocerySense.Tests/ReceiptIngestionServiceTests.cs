@@ -31,11 +31,11 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
     }
 
     private ReceiptIngestionService Build(TempDb db, Dictionary<string, object?> raw) =>
-        new(new FakeOcr(raw), db.Factory, new IngredientMappingService(db.Factory),
+        new(new FakeOcr(raw), new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
 
     private ReceiptIngestionService BuildSeq(TempDb db, params Dictionary<string, object?>[] raws) =>
-        new(new SeqOcr(new Queue<Dictionary<string, object?>>(raws)), db.Factory,
+        new(new SeqOcr(new Queue<Dictionary<string, object?>>(raws)), new OcrGate(), db.Factory,
             new IngredientMappingService(db.Factory), new UnitNormalizationService(), new MultiBuyDealService());
 
     private static string? PriceDate(TempDb db, int itemId)
