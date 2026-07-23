@@ -3,6 +3,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject AppStartup Startup
+@inject DbMaintenanceService Maintenance
 @inject FamilyRequestsService Family
 @inject NavigationManager Nav
 @inject PendingNavigationService PendingNav
@@ -55,7 +56,22 @@
             }
             else if (Startup.Status == StartupStatus.Error)
             {
+                @* P1-5 recovery shell: Preferences is unreachable when startup fails, so the recovery
+                   controls must live here. Restore stages a validated backup; the swap happens on the
+                   next startup (retry completes it without killing the process). *@
                 <MudAlert Severity="Severity.Error">Database failed to initialize: @Startup.Error</MudAlert>
+                <MudStack Row="true" Spacing="2" Class="mt-2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_recoveryBusy"
+                               OnClick="RetryStartupAsync">Retry</MudButton>
+                    <MudButton Variant="Variant.Outlined" Disabled="@_recoveryBusy"
+                               OnClick="RestoreFromBackupAsync">Restore from backup</MudButton>
+                    <MudButton Variant="Variant.Text" Disabled="@_recoveryBusy"
+                               OnClick="ExportDiagnosticsAsync">Export diagnostics</MudButton>
+                </MudStack>
+                @if (_recoveryMessage is not null)
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2">@_recoveryMessage</MudText>
+                }
             }
             else
             {
@@ -112,8 +128,77 @@
     private bool _drawerOpen;
     private int _familyCount;
     private bool _scanning;
+    private bool _recoveryBusy;
+    private string? _recoveryMessage;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    // ---- P1-5 startup-error recovery ----
+
+    private async Task RetryStartupAsync()
+    {
+        _recoveryBusy = true;
+        _recoveryMessage = null;
+        try { await Startup.RetryAsync(); }
+        finally { _recoveryBusy = false; }
+        StateHasChanged();
+    }
+
+    // Stage a picked backup for the cold-start swap, then retry startup — the retry completes the swap
+    // (no DB consumer exists yet in the Error state) and runs migrations on the restored file.
+    private async Task RestoreFromBackupAsync()
+    {
+        _recoveryBusy = true;
+        _recoveryMessage = null;
+        string? copied = null;
+        try
+        {
+            var pick = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Pick a Grocery Sense backup (.db)" });
+            if (pick is null) return; // user backed out
+
+            // Copy the picked stream into the cache first — validation needs a real local file.
+            copied = Path.Combine(FileSystem.CacheDirectory, $"restore_candidate_{Guid.NewGuid():N}.db");
+            await using (var source = await pick.OpenReadAsync())
+            await using (var dest = File.Create(copied))
+                await source.CopyToAsync(dest);
+
+            await Task.Run(() => Maintenance.StageRestore(copied));
+            _recoveryMessage = "Backup validated and staged — retrying startup with the restored database…";
+            StateHasChanged();
+            await Startup.RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            _recoveryMessage = $"Restore failed: {ex.Message}";
+        }
+        finally
+        {
+            if (copied is not null) { try { File.Delete(copied); } catch { /* cache cleanup is best-effort */ } }
+            _recoveryBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExportDiagnosticsAsync()
+    {
+        _recoveryBusy = true;
+        try
+        {
+            var path = Path.Combine(FileSystem.CacheDirectory, "grocery_sense_diagnostics.txt");
+            await File.WriteAllTextAsync(path,
+                $"Grocery Sense startup diagnostics ({DateTime.UtcNow:o})\nStatus: {Startup.Status}\nError: {Startup.Error}\n");
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "Grocery Sense diagnostics",
+                File = new ShareFile(path),
+            });
+        }
+        catch (Exception ex)
+        {
+            _recoveryMessage = $"Could not export diagnostics: {ex.Message}";
+        }
+        finally { _recoveryBusy = false; }
+    }
 
     // Global one-tap capture. Every outcome is reported: a failure says so verbatim, a duplicate says
     // it was already imported, and a success links through to the receipt. Silence is only correct

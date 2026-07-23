@@ -400,6 +400,15 @@ public static class Database
         EnsureVersionTable(conn);
         var current = GetVersion(conn);
 
+        // P1-5 newer-schema guard: a DB written by a NEWER app (e.g. restored onto an older install) must
+        // fail loud with both numbers — never migrate down, never open blind and let mismatched code
+        // corrupt data the newer schema owns.
+        if (current > _migrations.Length)
+            throw new InvalidOperationException(
+                $"This database is schema version {current}, but this app only supports up to " +
+                $"{_migrations.Length}. It was created by a newer version of Grocery Sense — " +
+                "update the app, or restore a backup made by this version.");
+
         for (var version = current + 1; version <= _migrations.Length; version++)
         {
             using var tx = conn.BeginTransaction();

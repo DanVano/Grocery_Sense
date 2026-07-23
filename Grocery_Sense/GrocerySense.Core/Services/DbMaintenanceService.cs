@@ -19,6 +19,12 @@ public sealed class DbMaintenanceService
 
     public DbMaintenanceService(SqliteConnectionFactory factory) => _factory = factory;
 
+    // P1-5 restore, runtime half: validate the picked backup on a private copy and arm the cold-start
+    // swap marker. The live DB is untouched until the next app launch completes the swap.
+    public void StageRestore(string backupPath) => RestoreStaging.StageRestore(_factory.DbPath, backupPath);
+
+    public bool HasPendingRestore => RestoreStaging.HasPendingRestore(_factory.DbPath);
+
     // Writes a clean copy of the live DB to destPath and returns it. destPath is overwritten if present.
     public string BackupDatabase(string destPath)
     {
