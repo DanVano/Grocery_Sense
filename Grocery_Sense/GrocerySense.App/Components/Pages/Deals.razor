@@ -7,6 +7,7 @@
 @inject SqliteConnectionFactory Db
 @inject PreferencesService Prefs
 @inject FlyerSyncScheduler Sync
+@inject FlyerSyncService SyncMetaSource
 @inject FlyerIngestService FlyerIngest
 @inject MultiBuyDealService MultiBuy
 @inject ShoppingListService Shopping
@@ -37,6 +38,11 @@
 @if (_syncMessage is not null)
 {
     <MudAlert Class="mb-2" Severity="@_syncSeverity" Dense="true">@_syncMessage</MudAlert>
+}
+@if (_lastSyncFailure is not null)
+{
+    @* P1-4: the last persisted sync failure stays visible after the snackbar is gone. *@
+    <MudText Typo="Typo.caption" Class="mb-2">Last sync issue: @_lastSyncFailure</MudText>
 }
 @if (_error is not null)
 {
@@ -158,6 +164,7 @@ else
     private bool _syncing;
     private bool _importing;
     private string? _syncMessage;
+    private string? _lastSyncFailure;
     private Severity _syncSeverity = Severity.Info;
     private CancellationTokenSource? _syncCts;
 
@@ -185,6 +192,8 @@ else
         try
         {
             _error = null;
+            try { _lastSyncFailure = SyncMetaSource.ReadMeta().Failure; }
+            catch { /* meta display is non-critical */ }
             var (groups, hidden) = await Task.Run(() =>
             {
                 var eff = Prefs.ComputeEffectivePreferences();
@@ -254,8 +263,11 @@ else
                 _syncSeverity = Severity.Info;
                 _syncMessage = reason switch
                 {
-                    "busy" => "A sync is already running.",
+                    "busy" => "A sync or flyer import is already running.",
                     "no_stores" => "Add stores before syncing flyers.",
+                    "too_soon" => "Synced very recently — try again in a few minutes.",
+                    "throttled" => "The flyer service asked us to back off — try again later.",
+                    "clock_skew" => "The last sync appears to be in the future (device clock changed?) — a manual Sync will reset it.",
                     _ => $"Sync skipped ({reason}).",
                 };
             }

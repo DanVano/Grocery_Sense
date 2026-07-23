@@ -40,7 +40,7 @@ public sealed class OcrSpendBoundsTests : IDisposable
             new UnitNormalizationService(), new MultiBuyDealService());
 
     private static FlyerIngestService BuildFlyers(TempDb db, IFlyerLayoutClient layout) =>
-        new(layout, new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
+        new(layout, new OcrGate(), new FlyerMutationGate(), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
 
     private string WriteFile(string content)

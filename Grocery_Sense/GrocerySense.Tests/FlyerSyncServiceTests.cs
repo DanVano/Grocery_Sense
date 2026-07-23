@@ -1,4 +1,4 @@
-using GrocerySense.Core;
+﻿using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
@@ -37,7 +37,7 @@ public sealed class FlyerSyncServiceTests : IDisposable
     {
         public Task<IReadOnlyList<Dictionary<string, object?>>> FetchFlyersForStoreAsync(
             string storeName, string postalCode, CancellationToken ct = default)
-            => Task.FromResult(fn(storeName)); // fn may throw synchronously — the service catches it
+            => Task.FromResult(fn(storeName)); // fn may throw synchronously â€” the service catches it
     }
 
     private static Dictionary<string, object?> Deal(string title, double unitPrice) => new()
@@ -223,7 +223,7 @@ public sealed class FlyerSyncServiceTests : IDisposable
     public async Task Scheduler_RequestSync_fires_SyncCompleted_when_it_ran()
     {
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
-        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()));
+        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()), new FlyerMutationGate());
         FlyerSyncResult? fired = null;
         scheduler.SyncCompleted += r => fired = r;
 
@@ -238,7 +238,7 @@ public sealed class FlyerSyncServiceTests : IDisposable
     {
         WriteMeta(DateTimeOffset.UtcNow);
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
-        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()));
+        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()), new FlyerMutationGate());
         var fired = false;
         scheduler.SyncCompleted += _ => fired = true;
 
@@ -252,7 +252,7 @@ public sealed class FlyerSyncServiceTests : IDisposable
     public async Task Scheduler_reports_post_sync_hook_failure_in_Errors_not_as_sync_failure()
     {
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
-        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()));
+        var scheduler = new FlyerSyncScheduler(Build(new StubProvider()), new FlyerMutationGate());
         scheduler.SyncCompleted += _ => throw new InvalidOperationException("boom");
 
         var result = await scheduler.RequestSyncAsync();

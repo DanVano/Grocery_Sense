@@ -65,6 +65,18 @@ public sealed class FlyersRepo
         return (int)Db.LastRowId(conn, tx);
     }
 
+    // P1-4 retention: delete a store's batches of ONE source type (e.g. flipp_api auto-sync batches),
+    // leaving manual batches alone. Deals/assets/raw_json cascade via their FKs (foreign_keys=ON per
+    // connection) — do not add redundant child deletes. Runs in the caller's transaction.
+    public int DeleteBatchesForStore(SqliteConnection conn, int storeId, string sourceType, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "DELETE FROM flyer_batches WHERE store_id = $store AND source_type = $stype");
+        cmd.Parameters.AddWithValue("$store", storeId);
+        cmd.Parameters.AddWithValue("$stype", sourceType);
+        return cmd.ExecuteNonQuery();
+    }
+
     public void SetBatchStatus(SqliteConnection conn, int flyerId, string status, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx, "UPDATE flyer_batches SET status = $s WHERE id = $id");

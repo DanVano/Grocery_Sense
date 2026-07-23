@@ -6,27 +6,34 @@ namespace GrocerySense.Core;
 // RequestSyncAsync from the Sync button; there is no background timer to start/stop.
 //
 // Single-flight: a resume tick and a button press can race; the in-flight run already covers the work, so a
-// second caller is dropped (returns "busy") rather than double-inserting flyer batches.
+// second caller is dropped (returns "busy") rather than double-inserting flyer batches. The gate is the
+// SHARED injected FlyerMutationGate (P1-4) — the same one manual flyer import holds — so sync and import
+// can never interleave flyer writes, and no second independent lock exists.
 public sealed class FlyerSyncScheduler
 {
     private readonly FlyerSyncService _sync;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly FlyerMutationGate _gate;
 
     // Fired after a sync that actually ran (skipped/too-soon syncs do not fire it), so the UI can kick the
     // price-drop alert check — the C# analog of Python's on_sync_complete callback.
     public event Action<FlyerSyncResult>? SyncCompleted;
 
-    public FlyerSyncScheduler(FlyerSyncService sync) => _sync = sync;
+    public FlyerSyncScheduler(FlyerSyncService sync, FlyerMutationGate gate)
+    {
+        _sync = sync;
+        _gate = gate;
+    }
 
     // Call from the app's resume lifecycle event. Runs a sync only if the throttle says one is due.
     public Task<FlyerSyncResult> CheckOnResumeAsync(CancellationToken ct = default) => RunGuardedAsync(force: false, ct);
 
-    // Call from the manual "Sync Flyers" button. Bypasses the throttle.
+    // Call from the manual "Sync Flyers" button. Bypasses only the freshness throttle (P1-4: the attempt
+    // cooldown and any server retry_not_before still apply inside RunSyncAsync).
     public Task<FlyerSyncResult> RequestSyncAsync(CancellationToken ct = default) => RunGuardedAsync(force: true, ct);
 
     private async Task<FlyerSyncResult> RunGuardedAsync(bool force, CancellationToken ct)
     {
-        if (!await _gate.WaitAsync(0, ct))
+        if (!_gate.TryEnter())
             return new FlyerSyncResult(0, 0, "busy", Array.Empty<string>());
         try
         {
@@ -48,7 +55,7 @@ public sealed class FlyerSyncScheduler
         }
         finally
         {
-            _gate.Release();
+            _gate.Exit();
         }
     }
 }

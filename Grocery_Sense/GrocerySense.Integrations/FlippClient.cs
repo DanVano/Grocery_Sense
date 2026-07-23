@@ -97,6 +97,22 @@ public sealed class FlippClient : IFlyerProvider
     private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken ct)
     {
         using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        // 429/403 = the unofficial endpoint is telling us to back off (or has blocked us). Typed throw so
+        // FlyerSyncService aborts the remaining stores and persists retry_not_before (P1-4) instead of
+        // hammering per-store.
+        if (resp.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.Forbidden)
+        {
+            TimeSpan? retryAfter = resp.Headers.RetryAfter switch
+            {
+                { Delta: { } delta } => delta,
+                { Date: { } date } => date - DateTimeOffset.UtcNow,
+                _ => null,
+            };
+            throw new FlyerProviderThrottledException(
+                $"Flipp returned {(int)resp.StatusCode} ({resp.StatusCode}) — backing off.", retryAfter);
+        }
+
         resp.EnsureSuccessStatusCode();
         if (resp.Content.Headers.ContentLength is > MaxResponseBytes)
             throw new InvalidOperationException("Flipp response exceeded 4 MiB.");

@@ -27,12 +27,15 @@ public static class ServiceCollectionExtensions
         // P0-3: the ONE gate every paid OCR call runs through. It must be this singleton — the App head
         // constructs a new Azure client per call, so a lock anywhere else serializes nothing.
         services.AddSingleton<OcrGate>();
+        // P1-4: the ONE single-flight gate covering scheduler resume, manual sync, and manual flyer import.
+        services.AddSingleton<FlyerMutationGate>();
         services.AddSingleton<ReceiptIngestionService>();
         services.AddSingleton<FlyerIngestService>();
         services.AddSingleton<FlyerSyncService>();
         services.AddSingleton(sp =>
         {
-            var scheduler = new FlyerSyncScheduler(sp.GetRequiredService<FlyerSyncService>());
+            var scheduler = new FlyerSyncScheduler(sp.GetRequiredService<FlyerSyncService>(),
+                sp.GetRequiredService<FlyerMutationGate>());
             var alerts = sp.GetRequiredService<PriceDropAlertService>();
             // Phase 8 hook: a sync that actually ran refreshes engine price-drop alerts (the C# analog of
             // Python's on_sync_complete). Both call paths — App resume and the Deals sync button — route

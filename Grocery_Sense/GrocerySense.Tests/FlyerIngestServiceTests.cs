@@ -21,8 +21,8 @@ public sealed class FlyerIngestServiceTests : IDisposable
     }
 
     private FlyerIngestService Build(TempDb db, Dictionary<string, object?> layout) =>
-        new(new FakeLayout(layout), new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
-            new UnitNormalizationService(), new MultiBuyDealService());
+        new(new FakeLayout(layout), new OcrGate(), new FlyerMutationGate(), db.Factory,
+            new IngredientMappingService(db.Factory), new UnitNormalizationService(), new MultiBuyDealService());
 
     private string WriteAsset(string content)
     {

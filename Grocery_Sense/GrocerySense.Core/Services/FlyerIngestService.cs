@@ -33,17 +33,20 @@ public sealed class FlyerIngestService
 
     private readonly IFlyerLayoutClient _layout;
     private readonly OcrGate _gate;
+    private readonly FlyerMutationGate _flyerGate;
     private readonly SqliteConnectionFactory _factory;
     private readonly IngredientMappingService _mapper;
     private readonly UnitNormalizationService _unitNorm;
     private readonly MultiBuyDealService _multibuy;
     private readonly FlyersRepo _repo = new();
 
-    public FlyerIngestService(IFlyerLayoutClient layout, OcrGate gate, SqliteConnectionFactory factory,
-        IngredientMappingService mapper, UnitNormalizationService unitNorm, MultiBuyDealService multibuy)
+    public FlyerIngestService(IFlyerLayoutClient layout, OcrGate gate, FlyerMutationGate flyerGate,
+        SqliteConnectionFactory factory, IngredientMappingService mapper, UnitNormalizationService unitNorm,
+        MultiBuyDealService multibuy)
     {
         _layout = layout;
         _gate = gate;
+        _flyerGate = flyerGate;
         _factory = factory;
         _mapper = mapper;
         _unitNorm = unitNorm;
@@ -55,6 +58,26 @@ public sealed class FlyerIngestService
         string? sourceRef = null, string? note = null, bool tryItemMapping = true, CancellationToken ct = default)
     {
         if (storeId is null) throw new ArgumentException("storeId is required for flyer ingest.", nameof(storeId));
+
+        // P1-4: manual import shares ONE single-flight gate with scheduler resume and manual sync, so
+        // concurrent flyer writes can never interleave — the loser gets a disclosed busy, not a wait.
+        if (!_flyerGate.TryEnter())
+            throw new InvalidOperationException("A flyer sync or import is already running — try again when it finishes.");
+        try
+        {
+            return await IngestAssetsCoreAsync(storeId.Value, validFrom, validTo, filePaths,
+                sourceType, sourceRef, note, tryItemMapping, ct);
+        }
+        finally
+        {
+            _flyerGate.Exit();
+        }
+    }
+
+    private async Task<FlyerIngestResult> IngestAssetsCoreAsync(int storeId, string? validFrom, string? validTo,
+        IReadOnlyList<string> filePaths, string sourceType,
+        string? sourceRef, string? note, bool tryItemMapping, CancellationToken ct)
+    {
 
         // P0-3 caps before ANY paid client call: over-limit = disclosed reject, zero Azure requests.
         if (filePaths.Count > MaxFilesPerImport)
@@ -95,7 +118,7 @@ public sealed class FlyerIngestService
 
                 var deals = new List<FlyerDeal>();
                 foreach (var d in ExtractDealsFromLayout(analyze))
-                    deals.Add(BuildDeal(conn, storeId.Value, d, tryItemMapping));
+                    deals.Add(BuildDeal(conn, storeId, d, tryItemMapping));
 
                 staged.Add(new StagedAsset(assetType, fp, sha, rawJsonStr, rawSha, deals));
             }
@@ -107,7 +130,7 @@ public sealed class FlyerIngestService
         using (var conn = _factory.Open())
         using (var tx = conn.BeginTransaction())
         {
-            var flyerId = _repo.CreateFlyerBatch(conn, storeId.Value, validFrom, validTo, sourceType, sourceRef, note, tx: tx);
+            var flyerId = _repo.CreateFlyerBatch(conn, storeId, validFrom, validTo, sourceType, sourceRef, note, tx: tx);
 
             var assetsCount = 0;
             var rawCount = 0;
