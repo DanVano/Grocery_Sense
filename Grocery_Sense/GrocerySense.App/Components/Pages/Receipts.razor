@@ -325,7 +325,14 @@ else
             var outcome = await ScanIngest.IngestScannedFileAsync(copyPath, _replaceDuplicates, _cts.Token);
             var ingest = outcome.Ingest;
 
-            if (ingest.WasDuplicate)
+            if (ingest.ReplaceConflict)
+            {
+                TryDeleteReceiptFile(copyPath); // fail-closed: nothing committed, the copy is unreferenced
+                _messageSeverity = Severity.Warning;
+                _message = $"Replace conflict — nothing was imported or deleted: {ingest.ConflictDetail}. " +
+                           "Delete the duplicate you don't want first, then rescan.";
+            }
+            else if (ingest.WasDuplicate)
             {
                 TryDeleteReceiptFile(copyPath); // original receipt keeps its own image
                 _messageSeverity = Severity.Info;
@@ -424,9 +431,10 @@ else
                 if (item.Status != BatchImportStatus.Imported)
                     TryDeleteReceiptFile(item.FilePath);
 
-            _messageSeverity = summary.Failed > 0 ? Severity.Warning : Severity.Success;
+            _messageSeverity = summary.Failed > 0 || summary.Conflicts > 0 ? Severity.Warning : Severity.Success;
             _message = $"Backfill done — {summary.Imported} imported, {summary.Duplicates} duplicate(s), " +
                        $"{summary.Skipped} skipped, {summary.Failed} failed" +
+                       (summary.Conflicts > 0 ? $", {summary.Conflicts} replace conflict(s) — originals kept" : "") +
                        (summary.Cancelled > 0 ? $", {summary.Cancelled} cancelled" : "") + ".";
             await ReloadAsync();
         }
@@ -558,7 +566,7 @@ else
         _busy = true;
         _message = null;
         _cts = new CancellationTokenSource();
-        int imported = 0, duplicates = 0, alerts = 0, alertFailures = 0;
+        int imported = 0, duplicates = 0, conflicts = 0, alerts = 0, alertFailures = 0;
         try
         {
             foreach (var path in paths)
@@ -569,7 +577,8 @@ else
                 // Same single-scan workflow as an in-app scan. An ingest failure throws and aborts the batch
                 // (caught below); an alert-pass failure does not — the receipt imported, so keep its image.
                 var outcome = await ScanIngest.IngestScannedFileAsync(path, _replaceDuplicates, _cts.Token);
-                if (outcome.Ingest.WasDuplicate) { duplicates++; TryDeleteReceiptFile(path); }
+                if (outcome.Ingest.ReplaceConflict) { conflicts++; TryDeleteReceiptFile(path); }
+                else if (outcome.Ingest.WasDuplicate) { duplicates++; TryDeleteReceiptFile(path); }
                 else
                 {
                     imported++;
@@ -577,8 +586,9 @@ else
                     if (outcome.AlertError is not null) alertFailures++;
                 }
             }
-            _messageSeverity = alertFailures > 0 ? Severity.Warning : Severity.Success;
+            _messageSeverity = alertFailures > 0 || conflicts > 0 ? Severity.Warning : Severity.Success;
             _message = $"Shared import — {imported} imported, {duplicates} duplicate(s)"
+                + (conflicts > 0 ? $", {conflicts} replace conflict(s) — originals kept" : "")
                 + (rejected > 0 ? $", {rejected} rejected on share" : "")
                 + (alerts > 0 ? $" · {alerts} new price alert(s) — see Savings" : "")
                 + (alertFailures > 0 ? $" · {alertFailures} price-alert refresh(es) failed" : "") + ".";

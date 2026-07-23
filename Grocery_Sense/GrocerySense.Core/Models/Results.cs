@@ -122,9 +122,13 @@ public record WatchlistHit(
 
 // Outcome of a receipt ingest. DuplicateReason is "file_hash" | "signature" when WasDuplicate. Ingest
 // failures THROW (the receipt never commits) — there is no error field to carry a failed outcome.
+// ReplaceConflict is the fail-closed replace outcome (P0-1): the observed duplicate owner changed,
+// appeared, or split between prepare and commit — nothing was deleted, nothing was imported, and the
+// UI must say so distinctly (never folded into "duplicate" or "failed").
 public record IngestOutcome(
     int? ReceiptId, bool WasDuplicate, string? OperationId,
-    string? DuplicateReason = null, bool ReplacedExisting = false);
+    string? DuplicateReason = null, bool ReplacedExisting = false,
+    bool ReplaceConflict = false, string? ConflictDetail = null);
 
 // The single-scan workflow's result: the ingest outcome plus the price-alert pass. AlertError is set when the
 // receipt imported but the post-commit alert scan threw — the receipt stays imported and its image is kept;
@@ -135,15 +139,18 @@ public sealed record ScanIngestOutcome(IngestOutcome Ingest, int AlertsOpened, s
 // asked anything) or a ready-to-commit receipt (Ingest != null) awaiting a confirmed purchase date. OcrDate
 // is the ISO date OCR actually found, or null — when null the caller MUST supply a date (backfill rule:
 // never default an undated old receipt to today). FallbackDate is the single-scan path's mtime/today guess.
+// ReplaceRequested + the two observed owner ids feed the commit transaction (P0-1): prepare only OBSERVES
+// duplicates, never deletes — the commit re-reads both owners and deletes only what prepare observed.
 public sealed record ReceiptPrepared(
     ReceiptIngest? Ingest, string? OperationId, string? OcrDate, string FallbackDate,
-    string Merchant, double? Total, int LineCount, bool ReplacedExisting, IngestOutcome? Duplicate)
+    string Merchant, double? Total, int LineCount, bool ReplaceRequested, IngestOutcome? Duplicate,
+    int? FileHashOwnerId = null, int? SignatureOwnerId = null)
 {
     public bool OcrFoundDate => OcrDate is not null;
 }
 
-// Per-file result within a backfill batch import.
-public enum BatchImportStatus { Imported, DuplicateFile, DuplicateSignature, Skipped, Failed, Cancelled }
+// Per-file result within a backfill batch import. Conflict = replace fail-closed (see IngestOutcome).
+public enum BatchImportStatus { Imported, DuplicateFile, DuplicateSignature, Skipped, Failed, Cancelled, Conflict }
 
 public sealed record BatchImportItem(string FilePath, BatchImportStatus Status, int? ReceiptId, string? Detail);
 
@@ -155,6 +162,7 @@ public sealed record BatchImportSummary(IReadOnlyList<BatchImportItem> Items)
     public int Skipped => Items.Count(i => i.Status == BatchImportStatus.Skipped);
     public int Failed => Items.Count(i => i.Status == BatchImportStatus.Failed);
     public int Cancelled => Items.Count(i => i.Status == BatchImportStatus.Cancelled);
+    public int Conflicts => Items.Count(i => i.Status == BatchImportStatus.Conflict);
 }
 
 // Flat meal/recipe profile the RecipeEngine + MealSuggestionService consume (port of the dict Python's

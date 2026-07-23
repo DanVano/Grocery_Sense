@@ -43,12 +43,15 @@ public sealed class ReceiptIngestionService
         CancellationToken ct = default)
     {
         var prepared = await PrepareReceiptFileAsync(filePath, replaceExisting, ct);
-        return prepared.Duplicate ?? CommitPreparedReceipt(prepared);
+        return prepared.Duplicate ?? CommitPreparedReceipt(prepared, null, ct);
     }
 
     // Phase 1 (backfill on-ramp): the OCR + parse half, split from the DB write so the caller can confirm the
     // purchase date before committing. Runs file-hash dedupe (pre-OCR), OCR, signature dedupe, then parse. If a
     // dedupe decides the outcome, returns it in Duplicate with Ingest == null (no date prompt needed).
+    //
+    // Replace mode (P0-1) only OBSERVES the duplicate owners here — nothing is deleted until the commit
+    // transaction, so an OCR error, cancel, or backfill skip after prepare leaves the original untouched.
     public async Task<ReceiptPrepared> PrepareReceiptFileAsync(string filePath, bool replaceExisting = false,
         CancellationToken ct = default)
     {
@@ -58,7 +61,7 @@ public sealed class ReceiptIngestionService
         var fallbackDate = InferDate(filePath);
 
         // 1) file-hash dedupe (BEFORE any OCR call).
-        var replaced = false;
+        int? fileHashOwner = null;
         using (var conn = _factory.Open())
         {
             var existing = ReceiptsRepo.FindReceiptIdByFileHash(conn, fileHash);
@@ -66,8 +69,7 @@ public sealed class ReceiptIngestionService
             {
                 if (!replaceExisting)
                     return Decided(new IngestOutcome(existing, true, null, "file_hash"), fallbackDate);
-                ReceiptsRepo.DeleteReceiptWithBackup(conn, existing.Value);
-                replaced = true;
+                fileHashOwner = existing;
             }
         }
 
@@ -75,6 +77,7 @@ public sealed class ReceiptIngestionService
         var (operationId, rawJson) = await _ocr.AnalyzeReceiptFileAsync(filePath, ct: ct);
 
         // 3) signature dedupe (catches rescans of the same receipt).
+        int? signatureOwner = null;
         var (merchant, sigDate, total) = ExtractHeaderForSignature(rawJson);
         var signature = MakeSignature(merchant, sigDate, total);
         if (signature is not null)
@@ -85,11 +88,17 @@ public sealed class ReceiptIngestionService
             {
                 if (!replaceExisting)
                     return Decided(new IngestOutcome(existingSig, true, operationId, "signature"),
-                        fallbackDate, operationId, replaced);
-                ReceiptsRepo.DeleteReceiptWithBackup(conn, existingSig.Value);
-                replaced = true;
+                        fallbackDate, operationId);
+                signatureOwner = existingSig;
             }
         }
+
+        // Fail closed: the file-hash owner and the signature owner are DIFFERENT receipts — a replace would
+        // have to delete two receipts, which is never inferred. Disclosed conflict; no delete, no import.
+        if (fileHashOwner is not null && signatureOwner is not null && fileHashOwner != signatureOwner)
+            return Decided(ConflictOutcome(operationId,
+                $"file-hash matches receipt #{fileHashOwner} but merchant/date/total match receipt #{signatureOwner}"),
+                fallbackDate, operationId);
 
         // 4) parse + resolve item ids/unit-norm/multibuy (pre-transaction; mapper writes alias/items here).
         var ingest = BuildIngest(rawJson, filePath, operationId, fileHash, signature, ct);
@@ -97,14 +106,19 @@ public sealed class ReceiptIngestionService
 
         var ocrDate = sigDate.Length > 0 ? sigDate : null; // ExtractHeaderForSignature keeps only ISO dates
         return new ReceiptPrepared(ingest, operationId, ocrDate, fallbackDate,
-            string.IsNullOrEmpty(merchant) ? "Unknown Store" : merchant, total, ingest.Lines.Count, replaced, null);
+            string.IsNullOrEmpty(merchant) ? "Unknown Store" : merchant, total, ingest.Lines.Count,
+            replaceExisting, null, fileHashOwner, signatureOwner);
     }
 
     // The DB-write half. confirmedDate overrides the purchase date on the receipt AND every price row (both
     // read r.PurchaseDate in ReceiptsRepo.IngestReceipt). With no override, resolves OcrDate ?? FallbackDate —
     // the single-scan default. Backfill callers pass an explicit confirmedDate so an undated old receipt is
     // never stamped "today".
-    public IngestOutcome CommitPreparedReceipt(ReceiptPrepared prepared, string? confirmedDate = null)
+    //
+    // Replace mode: the owner re-read, backup-delete and insert commit in ONE transaction — either the
+    // replacement fully lands or the original receipt graph and backup ledger stay exactly as they were.
+    public IngestOutcome CommitPreparedReceipt(ReceiptPrepared prepared, string? confirmedDate = null,
+        CancellationToken ct = default)
     {
         if (prepared.Duplicate is not null) return prepared.Duplicate;
         if (prepared.Ingest is null) throw new InvalidOperationException("Nothing prepared to commit.");
@@ -113,16 +127,49 @@ public sealed class ReceiptIngestionService
         var ingest = prepared.Ingest with { PurchaseDate = date };
         var operationId = prepared.OperationId;
 
+        // Closes the await→commit cancellation window: once cancelled, no transaction is ever begun.
+        ct.ThrowIfCancellationRequested();
+
         using var conn = _factory.Open();
         using var tx = conn.BeginTransaction();
+        int? deletedReceiptId = null;
         try
         {
+            if (prepared.ReplaceRequested)
+            {
+                // Re-read both owners inside the tx — never delete a row prepare didn't observe.
+                var hashOwner = ingest.FileHash is { } fh ? ReceiptsRepo.FindReceiptIdByFileHash(conn, fh, tx) : null;
+                var sigOwner = ingest.Signature is { } sg ? ReceiptsRepo.FindReceiptIdBySignature(conn, sg, tx) : null;
+
+                if (OwnerAppearedOrChanged(prepared.FileHashOwnerId, hashOwner)
+                    || OwnerAppearedOrChanged(prepared.SignatureOwnerId, sigOwner)
+                    || (hashOwner is not null && sigOwner is not null && hashOwner != sigOwner))
+                {
+                    tx.Rollback();
+                    return ConflictOutcome(operationId,
+                        "the duplicate receipt changed between prepare and commit");
+                }
+
+                // An owner that disappeared since prepare needs no delete; a confirmed one is backed up
+                // and deleted inside this same transaction.
+                var target = hashOwner ?? sigOwner;
+                if (target is not null)
+                {
+                    ReceiptsRepo.DeleteReceiptWithBackup(conn, target.Value, tx);
+                    deletedReceiptId = target;
+                }
+            }
+
             var receiptId = ReceiptsRepo.IngestReceipt(conn, ingest, tx);
             tx.Commit();
-            return new IngestOutcome(receiptId, false, operationId, null, prepared.ReplacedExisting);
+            return new IngestOutcome(receiptId, false, operationId, null, deletedReceiptId is not null);
         }
-        catch (SqliteException e) when (e.SqliteErrorCode == 19)
+        catch (SqliteException e) when (e.SqliteErrorCode == 19 && deletedReceiptId is null)
         {
+            // Legitimate duplicate race on a non-deleting commit (concurrent import of the same receipt).
+            // When this commit DELETED an owner the filter is false and the exception propagates instead:
+            // the rolled-back original would be rediscovered here and a real insert failure would be
+            // misreported as "duplicate".
             tx.Rollback();
             if (ingest.FileHash is { } fh && ReceiptsRepo.FindReceiptIdByFileHash(conn, fh) is { } byHash)
                 return new IngestOutcome(byHash, true, operationId, "file_hash");
@@ -131,6 +178,14 @@ public sealed class ReceiptIngestionService
             throw;
         }
     }
+
+    // "Appeared" (prepare saw none, one exists now) or "changed" (a different receipt owns the key now).
+    // A disappeared owner is NOT a conflict — there is simply nothing left to delete.
+    private static bool OwnerAppearedOrChanged(int? observed, int? current) =>
+        current is not null && current != observed;
+
+    private static IngestOutcome ConflictOutcome(string? operationId, string detail) =>
+        new(null, false, operationId, ReplaceConflict: true, ConflictDetail: detail);
 
     // Backfill batch import: prepare each file, ask dateResolver for the confirmed purchase date, then commit.
     // dateResolver returns the ISO date to use, or null to SKIP the receipt (no write) — there is no "default
@@ -155,9 +210,12 @@ public sealed class ReceiptIngestionService
                 var prepared = await PrepareReceiptFileAsync(path, replaceExisting, ct);
                 if (prepared.Duplicate is { } dup)
                 {
-                    var status = dup.DuplicateReason == "signature"
-                        ? BatchImportStatus.DuplicateSignature : BatchImportStatus.DuplicateFile;
-                    items.Add(new BatchImportItem(path, status, dup.ReceiptId, dup.DuplicateReason));
+                    items.Add(dup.ReplaceConflict
+                        ? new BatchImportItem(path, BatchImportStatus.Conflict, null, dup.ConflictDetail)
+                        : new BatchImportItem(path,
+                            dup.DuplicateReason == "signature"
+                                ? BatchImportStatus.DuplicateSignature : BatchImportStatus.DuplicateFile,
+                            dup.ReceiptId, dup.DuplicateReason));
                     continue;
                 }
 
@@ -169,13 +227,15 @@ public sealed class ReceiptIngestionService
                     continue;
                 }
 
-                var outcome = CommitPreparedReceipt(prepared, confirmedDate);
-                var committed = outcome.WasDuplicate
-                    ? new BatchImportItem(path,
-                        outcome.DuplicateReason == "signature"
-                            ? BatchImportStatus.DuplicateSignature : BatchImportStatus.DuplicateFile,
-                        outcome.ReceiptId, outcome.DuplicateReason)
-                    : new BatchImportItem(path, BatchImportStatus.Imported, outcome.ReceiptId, null);
+                var outcome = CommitPreparedReceipt(prepared, confirmedDate, ct);
+                var committed = outcome.ReplaceConflict
+                    ? new BatchImportItem(path, BatchImportStatus.Conflict, null, outcome.ConflictDetail)
+                    : outcome.WasDuplicate
+                        ? new BatchImportItem(path,
+                            outcome.DuplicateReason == "signature"
+                                ? BatchImportStatus.DuplicateSignature : BatchImportStatus.DuplicateFile,
+                            outcome.ReceiptId, outcome.DuplicateReason)
+                        : new BatchImportItem(path, BatchImportStatus.Imported, outcome.ReceiptId, null);
                 items.Add(committed);
             }
             catch (OperationCanceledException)
@@ -192,8 +252,8 @@ public sealed class ReceiptIngestionService
     }
 
     private static ReceiptPrepared Decided(IngestOutcome outcome, string fallbackDate,
-        string? operationId = null, bool replaced = false) =>
-        new(null, operationId, null, fallbackDate, "", null, 0, replaced, outcome);
+        string? operationId = null) =>
+        new(null, operationId, null, fallbackDate, "", null, 0, false, outcome);
 
     private ReceiptIngest BuildIngest(Dictionary<string, object?> rawJson, string filePath, string operationId,
         string fileHash, string? signature, CancellationToken ct)
