@@ -2,7 +2,9 @@
 
 .NET 10 / C# / MAUI Blazor Hybrid (MudBlazor) grocery-savings app: receipt OCR → price
 intelligence → smart shopping list / deals / trip plan / budget. C# port of a Python original.
-Local-only (no accounts), CAD/en-CA. **Product targets: Android + iOS ONLY (2026-07-11 decision) —
+**Client-only with no first-party backend** — not "local-only": selected receipt/flyer images go to
+Azure Document Intelligence and the postal code goes to Flipp (the two disclosed egress points). No
+accounts. CAD/en-CA. **Product targets: Android + iOS ONLY (2026-07-11 decision) —
 the Windows head is a dev-only harness, not a shipping target.** v1 + v2 feature code done; the v2
 release is blocked on user-side hand-offs (Android toolchain, keystore) — current status: `../V2_FOLLOWUPS.md`.
 
@@ -27,7 +29,7 @@ release is blocked on user-side hand-offs (Android toolchain, keystore) — curr
 - Repos: static classes, signature `(SqliteConnection conn, …, SqliteTransaction? tx = null)` — the caller owns the transaction. Multi-table writes (ingest, merge, plan write-back, migrations) run in ONE transaction and get a no-partial-rows test.
 - A new table with an `item_id` column must be added to BOTH `ItemsAdminRepo.ItemIdTables` and the FK-sweep test's list, or `MergeItems` silently orphans its rows.
 - DB at `FileSystem.AppDataDirectory/grocery_sense.db`; `ConfigStore` JSON (`user_config.json`) beside it. Preferences live in config JSON, not the DB.
-- Migrations run off the UI thread via `App/Services/AppStartup` (Loading/Ready/Error state machine). A broken DB must be visible — surface the error, never retry silently.
+- Migrations run off the UI thread via `Data/AppStartup.cs` (Loading/Ready/Error state machine; lives in GrocerySense.Data so it's unit-testable — the App head only registers it). A broken DB must be visible — surface the error, never retry silently; the MainLayout error shell owns retry/restore.
 
 ## Integrations
 - Azure Document Intelligence for receipt OCR + flyer layout. Creds resolve env vars → MAUI SecureStorage (set on Preferences page). Never hardcode or log keys; a broken SecureStorage read fails loud, not "not configured".

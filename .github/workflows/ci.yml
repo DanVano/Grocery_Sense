@@ -1,0 +1,57 @@
+# P1-6 CI gate: a red test, a failed unsigned Android Release compile (the product target — the
+# Windows head is only a dev harness), or a leaked secret fails the pipeline.
+#
+# Vulnerability gate (honest wording): the repo's Directory.Build.props already promotes HIGH and
+# CRITICAL NuGet advisories (NU1903/NU1904) to build errors — dotnet test/build below inherit it.
+# It does NOT fail every vulnerable package; NU1900 (advisory data unavailable) is deliberately
+# not an error so offline restores still build.
+name: CI
+
+on:
+  push:
+    branches: [main, 'hardening/**', 'feat/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      # Unpiped on purpose (V2_FOLLOWUPS §4.4): piping through tail/head swallows the exit code.
+      - name: Run tests
+        run: dotnet test Grocery_Sense/GrocerySense.Tests
+
+  android-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install MAUI Android workload
+        run: dotnet workload install maui-android
+      - name: Unsigned Android Release compile
+        run: dotnet build Grocery_Sense/GrocerySense.App -f net10.0-android -c Release
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — the scan covers every commit ever pushed, not just the tip
+      # Version-pinned binary rather than a third-party action; --redact keeps any hit out of CI logs.
+      - name: Run gitleaks over full history
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz -o gitleaks.tgz
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks git --no-banner --redact .
