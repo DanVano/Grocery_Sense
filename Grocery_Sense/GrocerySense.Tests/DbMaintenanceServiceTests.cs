@@ -61,6 +61,64 @@ public sealed class DbMaintenanceServiceTests : IDisposable
         Assert.True(File.Exists(unrelated));
     }
 
+    // ---- P0-2 orphan sweep: unreferenced intake files older than the cutoff, both dirs, nothing else ----
+
+    private static string TouchFile(string dir, string name, DateTime lastWriteUtc)
+    {
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, name);
+        File.WriteAllText(path, "x");
+        File.SetLastWriteTimeUtc(path, lastWriteUtc);
+        return path;
+    }
+
+    [Fact]
+    public void Sweep_removes_only_unreferenced_old_files_in_both_intake_dirs()
+    {
+        using var db = new TempDb();
+        var receiptsDir = Path.Combine(_dir, "receipts");
+        var flyersDir = Path.Combine(_dir, "flyers");
+        var old = DateTime.UtcNow.AddDays(-2);
+
+        var orphanReceipt = TouchFile(receiptsDir, "orphan.jpg", old);
+        var youngOrphan = TouchFile(receiptsDir, "young.jpg", DateTime.UtcNow); // inside the 24 h age gate
+        var referencedReceipt = TouchFile(receiptsDir, "referenced.jpg", old);
+        var orphanFlyer = TouchFile(flyersDir, "orphan-page.jpg", old);
+        var referencedFlyer = TouchFile(flyersDir, "referenced-page.jpg", old);
+
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "INSERT INTO receipts (store_id, purchase_date, source, file_path) VALUES ($s, '2026-06-01', 'receipt', $p)";
+            cmd.Parameters.AddWithValue("$s", store);
+            cmd.Parameters.AddWithValue("$p", referencedReceipt);
+            cmd.ExecuteNonQuery();
+        }
+        var repo = new FlyersRepo();
+        var flyerId = repo.CreateFlyerBatch(db.Conn, store, "2026-06-01", "2026-06-08");
+        repo.AddAsset(db.Conn, flyerId, "image", referencedFlyer);
+
+        var removed = new DbMaintenanceService(db.Factory)
+            .SweepUnreferencedIntakeFiles(receiptsDir, flyersDir, DateTime.UtcNow.AddHours(-24));
+
+        Assert.Equal(2, removed);
+        Assert.False(File.Exists(orphanReceipt));
+        Assert.False(File.Exists(orphanFlyer));
+        Assert.True(File.Exists(youngOrphan));       // age gate: an in-flight batch is never reaped
+        Assert.True(File.Exists(referencedReceipt)); // referenced rows are never touched
+        Assert.True(File.Exists(referencedFlyer));
+    }
+
+    [Fact]
+    public void Sweep_of_missing_dirs_is_a_noop()
+    {
+        using var db = new TempDb();
+        var removed = new DbMaintenanceService(db.Factory).SweepUnreferencedIntakeFiles(
+            Path.Combine(_dir, "no-receipts"), Path.Combine(_dir, "no-flyers"), DateTime.UtcNow);
+        Assert.Equal(0, removed);
+    }
+
     [Fact]
     public void Backup_produces_a_valid_db_copy_with_the_data()
     {

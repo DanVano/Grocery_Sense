@@ -47,6 +47,11 @@ public class MainActivity : MauiAppCompatActivity
     // the paths to Blazor to confirm + ingest. The URI(s) are untrusted external input: every copy is
     // size- and type-bounded by ReceiptFilePolicy, and a rejected/unreadable share is recorded as an error
     // rather than dropped, so the confirm banner can disclose it.
+    //
+    // P0-2: the single copy slot is reserved SYNCHRONOUSLY here on the intent thread, before Task.Run —
+    // two simultaneous intents can never both start copying. A share arriving while a batch is in flight
+    // is rejected loudly with zero copies. Caps (≤10 URIs, ≤100 MiB aggregate, 2-min cooperative deadline)
+    // are enforced in the copy phase; the one-batch state machine is the actual containment.
     private void HandleSendIntent(Intent? intent)
     {
         if (intent?.Action is not (Intent.ActionSend or Intent.ActionSendMultiple)) return;
@@ -55,8 +60,21 @@ public class MainActivity : MauiAppCompatActivity
         var uris = ExtractStreamUris(intent);
         if (uris.Count == 0) return;
 
+        var services = IPlatformApplication.Current?.Services;
+        var pending = services?.GetService<PendingSharedReceiptsService>();
+        if (pending is null) return;
+
+        if (!pending.TryBeginCopy())
+        {
+            pending.RejectShare(
+                $"A share of {uris.Count} item(s) was rejected — another shared batch is still being processed. " +
+                "Import or discard it first, then share again.");
+            services?.GetService<PendingNavigationService>()?.Set("/receipts");
+            return;
+        }
+
         var resolver = ContentResolver;
-        _ = Task.Run(() => CopySharedReceiptsAsync(resolver, uris));
+        _ = Task.Run(() => CopySharedReceiptsAsync(resolver, uris, pending, services));
     }
 
 #pragma warning disable CA1422 // GetParcelable*Extra is obsolete on API 33+ but is the cross-version API here.
@@ -77,39 +95,81 @@ public class MainActivity : MauiAppCompatActivity
     }
 #pragma warning restore CA1422
 
-    private static async Task CopySharedReceiptsAsync(ContentResolver? resolver, IReadOnlyList<Android.Net.Uri> uris)
+    // Copy phase for a reserved batch. Caps: at most MaxUrisPerShare copies (excess disclosed), aggregate
+    // bytes ≤ MaxAggregateBytes, and a cooperative CopyDeadline — ContentResolver.Query gets a
+    // CancellationSignal and the stream copy honours the token, but OpenInputStream has no cancellable
+    // overload, so a hostile provider can still stall a single open; the state machine (one batch at a
+    // time) is the actual containment. CompleteCopy ALWAYS runs so the slot can never leak.
+    private static async Task CopySharedReceiptsAsync(ContentResolver? resolver, IReadOnlyList<Android.Net.Uri> uris,
+        PendingSharedReceiptsService pending, IServiceProvider? services)
     {
         var paths = new List<string>();
         var errors = new List<string>();
-        foreach (var uri in uris)
+        using var deadline = new CancellationTokenSource(PendingSharedReceiptsService.CopyDeadline);
+        long totalBytes = 0;
+        try
         {
-            try
+            IReadOnlyList<Android.Net.Uri> accepted = uris;
+            if (uris.Count > PendingSharedReceiptsService.MaxUrisPerShare)
             {
-                var name = QueryDisplayName(resolver, uri) ?? uri.LastPathSegment ?? "shared-receipt";
-                await using var stream = resolver?.OpenInputStream(uri)
-                    ?? throw new IOException("The shared item could not be opened.");
-                paths.Add(await ReceiptFilePolicy.CopyStreamAsync(stream, name));
+                accepted = uris.Take(PendingSharedReceiptsService.MaxUrisPerShare).ToList();
+                errors.Add($"{uris.Count - accepted.Count} of {uris.Count} shared items were not copied — " +
+                           $"at most {PendingSharedReceiptsService.MaxUrisPerShare} per share.");
             }
-            catch (Exception ex)
+
+            foreach (var uri in accepted)
             {
-                errors.Add(ex.Message);
+                try
+                {
+                    deadline.Token.ThrowIfCancellationRequested();
+                    var name = PendingSharedReceiptsService.Truncate(
+                        QueryDisplayName(resolver, uri, deadline.Token) ?? uri.LastPathSegment ?? "shared-receipt",
+                        PendingSharedReceiptsService.MaxDisplayNameChars);
+                    await using var stream = resolver?.OpenInputStream(uri)
+                        ?? throw new IOException("The shared item could not be opened.");
+                    var copied = await ReceiptFilePolicy.CopyStreamAsync(stream, name, deadline.Token);
+
+                    totalBytes += new FileInfo(copied).Length;
+                    if (totalBytes > PendingSharedReceiptsService.MaxAggregateBytes)
+                    {
+                        try { File.Delete(copied); } catch { /* best-effort; the sweep reaps it */ }
+                        errors.Add("Aggregate share size exceeded " +
+                                   $"{PendingSharedReceiptsService.MaxAggregateBytes / (1024 * 1024)} MiB — " +
+                                   "this and any remaining items were not copied.");
+                        break;
+                    }
+                    paths.Add(copied);
+                }
+                catch (OperationCanceledException)
+                {
+                    errors.Add("Copy deadline exceeded — remaining shared items were not copied.");
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(ex.Message);
+                }
             }
         }
-
-        var services = IPlatformApplication.Current?.Services;
-        services?.GetService<PendingSharedReceiptsService>()?.Set(paths, errors);
-        // Land the user on the Receipts page where the confirm banner drains the share.
-        services?.GetService<PendingNavigationService>()?.Set("/receipts");
+        finally
+        {
+            pending.CompleteCopy(paths, errors);
+            // Land the user on the Receipts page where the confirm banner shows the batch.
+            services?.GetService<PendingNavigationService>()?.Set("/receipts");
+        }
     }
 
     // Best-effort human-readable name so the bounded copy can honour a real extension; falls back to the
     // policy's default when the provider doesn't expose one. "_display_name" is OpenableColumns.DISPLAY_NAME.
-    private static string? QueryDisplayName(ContentResolver? resolver, Android.Net.Uri uri)
+    // The CancellationSignal ties the query to the copy deadline (cancellation-aware where the platform is).
+    private static string? QueryDisplayName(ContentResolver? resolver, Android.Net.Uri uri, CancellationToken ct)
     {
         if (resolver is null) return null;
         try
         {
-            using var cursor = resolver.Query(uri, new[] { "_display_name" }, null, null, null);
+            using var signal = new Android.OS.CancellationSignal();
+            using var registration = ct.Register(signal.Cancel);
+            using var cursor = resolver.Query(uri, new[] { "_display_name" }, null, null, null, signal);
             if (cursor is not null && cursor.MoveToFirst() && cursor.GetColumnIndex("_display_name") is var i && i >= 0)
                 return cursor.GetString(i);
         }

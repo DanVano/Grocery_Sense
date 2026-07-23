@@ -362,25 +362,15 @@ else
     }
 
     // Picker streams are copied into app-data before ingest (mirrors Receipts.razor — source paths expire).
-    // Bounded: a hostile/huge picker file is rejected before the layout OCR client loads it fully into memory.
-    private const long MaxImportBytes = 20L * 1024 * 1024;
-    private static readonly HashSet<string> FlyerExtensions = new(StringComparer.OrdinalIgnoreCase)
-        { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff", ".pdf" };
+    // The ceiling, allowlist and destination live in FlyerFilePolicy so this page, the orphan sweep and any
+    // future entry point cannot drift apart.
+    private static Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct) =>
+        GrocerySense.App.Services.FlyerFilePolicy.CopyPickAsync(pick, ct);
 
-    private static string FlyersDir() => Path.Combine(FileSystem.AppDataDirectory, "flyers");
-
-    private static async Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct)
-    {
-        await using var source = await pick.OpenReadAsync();
-        return await BoundedFileCopy.CopyAsync(
-            source, pick.FileName, FlyersDir(), FlyerExtensions,
-            defaultExtension: ".jpg", maxBytes: MaxImportBytes, ct: ct);
-    }
-
-    // Deletes a copied flyer asset (only inside FlyersDir) when an import fails before the DB references it.
+    // Deletes a copied flyer asset (only inside the flyers dir) when an import fails before the DB references it.
     private static void TryDeleteFlyerFile(string path)
     {
-        if (!PathSafety.IsUnderDirectory(FlyersDir(), path)) return;
+        if (!PathSafety.IsUnderDirectory(GrocerySense.App.Services.FlyerFilePolicy.FlyersDir(), path)) return;
         try { File.Delete(path); } catch { /* best-effort cleanup */ }
     }
 

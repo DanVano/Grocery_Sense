@@ -63,6 +63,33 @@ public sealed class DbMaintenanceService
         return removed;
     }
 
+    // P0-2 orphan sweep: a process kill mid-import can leave copied intake files (shared/picked receipt
+    // photos, flyer pages) that no DB row references. Sweeps ONLY the two intake dirs, ONLY files older
+    // than cutoffUtc (the 24 h age gate keeps any in-flight batch safe), and NEVER a file referenced by
+    // receipts.file_path or flyer_assets.path. Invoked from App startup after the DB is Ready.
+    public int SweepUnreferencedIntakeFiles(string receiptsDir, string flyersDir, DateTime cutoffUtc)
+    {
+        using var conn = _factory.Open();
+        return SweepDir(conn, receiptsDir, "SELECT 1 FROM receipts WHERE file_path = $p LIMIT 1", cutoffUtc)
+             + SweepDir(conn, flyersDir, "SELECT 1 FROM flyer_assets WHERE path = $p LIMIT 1", cutoffUtc);
+    }
+
+    private static int SweepDir(SqliteConnection conn, string dir, string referenceSql, DateTime cutoffUtc)
+    {
+        if (!Directory.Exists(dir)) return 0;
+        var removed = 0;
+        foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (File.GetLastWriteTimeUtc(file) >= cutoffUtc) continue;
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = referenceSql;
+            cmd.Parameters.AddWithValue("$p", file);
+            if (cmd.ExecuteScalar() is not null) continue;
+            try { File.Delete(file); removed++; } catch { /* locked or raced — the next launch retries */ }
+        }
+        return removed;
+    }
+
     public IReadOnlyList<string> ExportToCsv(string destDir)
     {
         Directory.CreateDirectory(destDir);

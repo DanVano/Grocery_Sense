@@ -44,7 +44,8 @@
 }
 
 @* Android share target (Phase 5): receipt image(s) shared into the app land here for confirmation —
-   never ingested without an explicit Import. Rejected shares (oversize/bad type) are disclosed, not hidden. *@
+   never ingested without an explicit Import. Rejected shares (oversize/bad type/busy) are disclosed, not
+   hidden. The page only PEEKS here; Import/Discard atomically claim or release the batch (P0-2). *@
 @if (_sharedPaths.Count > 0 || _sharedErrors.Count > 0)
 {
     <MudPaper Class="pa-3 mb-2" Outlined="true">
@@ -63,6 +64,11 @@
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
                 @_sharedErrors.Count shared item@(_sharedErrors.Count == 1 ? " was" : "s were") rejected: @string.Join("; ", _sharedErrors)
             </MudAlert>
+            @if (_sharedPaths.Count == 0)
+            {
+                @* Error-only batch: without this, rejection notices would linger with no clearing path. *@
+                <MudButton Variant="Variant.Text" OnClick="DiscardShared" Disabled="@_busy" Class="mt-1">Dismiss</MudButton>
+            }
         }
     </MudPaper>
 }
@@ -207,7 +213,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         PendingShared.Changed += OnSharedChanged; // warm share while this page is already open
-        DrainShared();                            // cold share: MainActivity set it before we navigated here
+        RefreshShared();                          // cold share: MainActivity staged it before we navigated here
         try
         {
             // includeArchived: old receipts may reference a store the user has since archived.
@@ -221,12 +227,13 @@ else
         await ReloadAsync();
     }
 
-    private void OnSharedChanged() => _ = InvokeAsync(() => { DrainShared(); StateHasChanged(); });
+    private void OnSharedChanged() => _ = InvokeAsync(() => { RefreshShared(); StateHasChanged(); });
 
-    private void DrainShared()
+    // Peek only — rendering the banner claims nothing; the batch stays owned by the state machine until
+    // the user picks Import or Discard.
+    private void RefreshShared()
     {
-        if (!PendingShared.HasPending) return;
-        var (paths, errors) = PendingShared.Take();
+        var (paths, errors) = PendingShared.Peek();
         _sharedPaths = [.. paths];
         _sharedErrors = [.. errors];
     }
@@ -557,28 +564,30 @@ else
     // Import the shared receipt(s) the user just confirmed. Each already lives in the receipts dir (copied
     // by the share handler through the bounded policy); this is the single-scan ingest path per file, so a
     // shared receipt gets the same duplicate handling and price-alert scan as one taken in-app.
+    // TryBeginImport claims the batch atomically; every exit path releases it via CompleteImport, and a
+    // failure or cancel deletes the failing + remaining copies so nothing is silently hoarded.
     private async Task ImportSharedAsync()
     {
-        var paths = _sharedPaths;
-        var rejected = _sharedErrors.Count;
-        _sharedPaths = [];
-        _sharedErrors = [];
+        if (!PendingShared.TryBeginImport(out var claimedPaths, out var claimedErrors)) return;
+        var paths = claimedPaths;
+        var rejected = claimedErrors.Count;
         _busy = true;
         _message = null;
         _cts = new CancellationTokenSource();
         int imported = 0, duplicates = 0, conflicts = 0, alerts = 0, alertFailures = 0;
+        var index = 0;
         try
         {
-            foreach (var path in paths)
+            for (; index < paths.Count; index++)
             {
                 _cts.Token.ThrowIfCancellationRequested();
                 _stage = "Reading receipt (OCR + parsing)…";
                 StateHasChanged();
                 // Same single-scan workflow as an in-app scan. An ingest failure throws and aborts the batch
                 // (caught below); an alert-pass failure does not — the receipt imported, so keep its image.
-                var outcome = await ScanIngest.IngestScannedFileAsync(path, _replaceDuplicates, _cts.Token);
-                if (outcome.Ingest.ReplaceConflict) { conflicts++; TryDeleteReceiptFile(path); }
-                else if (outcome.Ingest.WasDuplicate) { duplicates++; TryDeleteReceiptFile(path); }
+                var outcome = await ScanIngest.IngestScannedFileAsync(paths[index], _replaceDuplicates, _cts.Token);
+                if (outcome.Ingest.ReplaceConflict) { conflicts++; TryDeleteReceiptFile(paths[index]); }
+                else if (outcome.Ingest.WasDuplicate) { duplicates++; TryDeleteReceiptFile(paths[index]); }
                 else
                 {
                     imported++;
@@ -596,14 +605,22 @@ else
         }
         catch (OperationCanceledException)
         {
-            // Drop the copies for receipts not yet imported when the user cancels mid-batch.
-            foreach (var path in paths.Skip(imported + duplicates)) TryDeleteReceiptFile(path);
+            // Drop the copies not yet imported when the user cancels mid-batch.
+            for (var i = index; i < paths.Count; i++) TryDeleteReceiptFile(paths[i]);
             _messageSeverity = Severity.Info;
             _message = "Shared import cancelled.";
         }
-        catch (Exception ex) { Fail($"Shared import failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            // Generic failure: delete the failing copy and every remaining one — a committed receipt keeps
+            // its image; an uncommitted copy must not linger unowned.
+            for (var i = index; i < paths.Count; i++) TryDeleteReceiptFile(paths[i]);
+            Fail($"Shared import failed after {imported} import(s): {ex.Message}");
+        }
         finally
         {
+            PendingShared.CompleteImport();
+            RefreshShared();
             _busy = false;
             _stage = "";
             _cts?.Dispose();
@@ -611,12 +628,12 @@ else
         }
     }
 
-    // Discard the shared copies without importing — delete the files so nothing is hoarded.
+    // Discard (or dismiss an error-only batch) without importing — delete the released copies so nothing
+    // is hoarded.
     private void DiscardShared()
     {
-        foreach (var path in _sharedPaths) TryDeleteReceiptFile(path);
-        _sharedPaths = [];
-        _sharedErrors = [];
+        foreach (var path in PendingShared.Discard()) TryDeleteReceiptFile(path);
+        RefreshShared();
     }
 
     private void Fail(string message)

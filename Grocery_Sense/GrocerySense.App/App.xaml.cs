@@ -8,18 +8,20 @@ public partial class App : Application
 {
 	private readonly AppStartup _startup;
 	private readonly FlyerSyncScheduler _flyerSync;
+	private readonly DbMaintenanceService _maintenance;
 	private readonly ILogger<App> _logger;
 
 	// Marker key: iOS Keychain (SecureStorage) survives an uninstall, so creds from a prior install could
 	// leak into a fresh one. NSUserDefaults (Preferences) IS wiped on uninstall, so its absence = true first launch.
 	private const string SecureStorageInitializedKey = "secure_storage_initialized_v1";
 
-	public App(AppStartup startup, FlyerSyncScheduler flyerSync, ILogger<App> logger)
+	public App(AppStartup startup, FlyerSyncScheduler flyerSync, DbMaintenanceService maintenance, ILogger<App> logger)
 	{
 		InitializeComponent();
 		ResetIosSecretsOnFirstLaunch();
 		_startup = startup;
 		_flyerSync = flyerSync;
+		_maintenance = maintenance;
 		_logger = logger;
 
 		// Purge plaintext backup/export copies this app shared out that are older than 24h, so they don't
@@ -33,6 +35,27 @@ public partial class App : Application
 		catch (Exception ex)
 		{
 			_logger.LogWarning(ex, "Sensitive share-cache cleanup failed");
+		}
+
+		// P0-2: reap intake files a process kill orphaned (copied receipt/flyer images no DB row references,
+		// older than 24 h). DB-aware, so it must wait for startup Ready; must never block or crash startup.
+		_ = SweepIntakeOrphansAsync();
+	}
+
+	private async Task SweepIntakeOrphansAsync()
+	{
+		try
+		{
+			await _startup.EnsureStartedAsync();
+			if (_startup.Status != StartupStatus.Ready) return; // DB error is already on screen
+			await Task.Run(() => _maintenance.SweepUnreferencedIntakeFiles(
+				Services.ReceiptFilePolicy.ReceiptsDir(),
+				Services.FlyerFilePolicy.FlyersDir(),
+				DateTime.UtcNow.AddHours(-24)));
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "Intake orphan sweep failed");
 		}
 	}
 
