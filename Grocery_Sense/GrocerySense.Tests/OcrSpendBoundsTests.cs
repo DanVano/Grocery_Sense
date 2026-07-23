@@ -187,6 +187,32 @@ public sealed class OcrSpendBoundsTests : IDisposable
     }
 
     [Fact]
+    public async Task Oversized_merchant_never_reaches_the_signature_or_the_prepared_result()
+    {
+        using var db = new TempDb();
+        // A merchant over the cap plus a date+total so a dedupe signature IS built from it.
+        var raw = ReceiptRaw(new string('M', 4000), 1);
+        var fields = (Dictionary<string, object?>)((Dictionary<string, object?>)((List<object?>)raw["documents"]!)[0]!)["fields"]!;
+        fields["TransactionDate"] = new Dictionary<string, object?> { ["valueDate"] = "2026-06-01", ["confidence"] = 0.9 };
+        fields["Total"] = new Dictionary<string, object?>
+        {
+            ["valueCurrency"] = new Dictionary<string, object?> { ["amount"] = 9.99 },
+            ["confidence"] = 0.9,
+        };
+        var svc = BuildReceipts(db, new CountingOcr(raw));
+
+        var prepared = await svc.PrepareReceiptFileAsync(WriteFile("f"));
+        svc.CommitPreparedReceipt(prepared, "2026-06-01");
+
+        Assert.True(prepared.Merchant.Length <= ReceiptIngestionService.MaxMerchantChars);
+        using var cmd = db.Conn.CreateCommand();
+        cmd.CommandText = "SELECT MAX(LENGTH(signature)) FROM receipt_signatures";
+        var sigLen = Convert.ToInt64(cmd.ExecuteScalar());
+        Assert.True(sigLen <= ReceiptIngestionService.MaxMerchantChars + 50,
+            $"signature is {sigLen} chars — the merchant cap leaked");
+    }
+
+    [Fact]
     public async Task Flyer_deal_count_over_the_cap_is_rejected_before_the_db()
     {
         using var db = new TempDb();

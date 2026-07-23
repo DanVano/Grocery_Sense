@@ -420,7 +420,10 @@ public sealed class ReceiptIngestionService
     private static (string Merchant, string Date, double? Total) ExtractHeaderForSignature(Dictionary<string, object?> rawJson)
     {
         var fields = TopFields(rawJson);
-        var merchant = Str(FieldValue(PickField(fields, "MerchantName", "Merchant")).Value).Trim();
+        // Capped here — the one seam feeding the dedupe signature, ReceiptPrepared.Merchant (dialog
+        // display) AND BuildIngest's store name, so an oversized OCR merchant can't leak past the
+        // P0-3 field caps by any of the three routes.
+        var merchant = Truncate(Str(FieldValue(PickField(fields, "MerchantName", "Merchant")).Value).Trim(), MaxMerchantChars);
         var dateStr = Str(FieldValue(PickField(fields, "TransactionDate", "Date")).Value).Trim();
         var date = IsIsoDate(dateStr) ? dateStr : "";
         var total = CurrencyAmount(FieldValue(PickField(fields, "Total")).Value);
