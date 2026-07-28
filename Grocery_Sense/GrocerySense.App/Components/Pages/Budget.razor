@@ -73,6 +73,28 @@ else
         }
     </MudPaper>
 
+    @if (_byStore is { Count: > 0 })
+    {
+        <MudPaper Class="pa-3 mb-3" Outlined="true">
+            <MudText Typo="Typo.subtitle1" GutterBottom="true">This month by store</MudText>
+            <MudSimpleTable Dense="true">
+                <thead>
+                    <tr><th style="text-align:left">Store</th><th style="text-align:right">Spent</th><th style="text-align:right">Receipts</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _byStore)
+                    {
+                        <tr>
+                            <td>@(s.StoreName is { Length: > 0 } n ? n : $"Store #{s.StoreId}")</td>
+                            <td style="text-align:right">$@s.Total.ToString("0.00")</td>
+                            <td style="text-align:right">@s.ReceiptCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+
     <MudText Typo="Typo.subtitle1" GutterBottom="true">Spend trend</MudText>
     @if (_trend is { Count: > 0 })
     {
@@ -101,6 +123,7 @@ else
 @code {
     private BudgetStatus? _status;
     private IReadOnlyList<SpendTrendPoint>? _trend;
+    private IReadOnlyList<StoreMonthSpend>? _byStore;
     private InflationContext? _inflation;
     private double? _budgetInput;
     private bool _busy;
@@ -120,8 +143,9 @@ else
         try
         {
             _error = null;
-            (_status, _trend, _inflation) = await Task.Run(() =>
-                (BudgetSvc.GetBudgetStatus(), BudgetSvc.GetTrend(), BudgetSvc.GetInflationContext()));
+            (_status, _trend, _byStore, _inflation) = await Task.Run(() =>
+                (BudgetSvc.GetBudgetStatus(), BudgetSvc.GetTrend(), BudgetSvc.GetMonthStoreBreakdown(),
+                 BudgetSvc.GetInflationContext()));
             _budgetInput = _status.Budget is decimal b ? (double)b : null;
         }
         catch (Exception ex) { _error = ex.Message; }

@@ -144,6 +144,8 @@ public record MemberRequestRow(
 
 public record MonthSpend(string Month, decimal Total, int ReceiptCount);
 
+public record StoreMonthSpend(int StoreId, string StoreName, decimal Total, int ReceiptCount);
+
 public record SpendTrendPoint(string Month, decimal Total, int ReceiptCount);
 
 public record DeletedBackup(int BackupId, int? OriginalReceiptId, string? DeletedAt);

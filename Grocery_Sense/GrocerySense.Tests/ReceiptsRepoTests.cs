@@ -134,6 +134,34 @@ public sealed class ReceiptsRepoTests
     }
 
     [Fact]
+    public void GetMonthSpendByStore_sums_decimal_cents_within_month_bounds_biggest_first()
+    {
+        using var db = new TempDb();
+        var a = StoresRepo.CreateStore(db.Conn, "Store A").Id;
+        var b = StoresRepo.CreateStore(db.Conn, "Store B").Id;
+        InsertReceipt(db.Conn, a, "2026-06-01", 10.10m, null, null);
+        InsertReceipt(db.Conn, a, "2026-06-30", 0.01m, null, null);   // cents must survive
+        InsertReceipt(db.Conn, b, "2026-06-15", 99.99m, null, null);
+        InsertReceipt(db.Conn, a, "2026-07-01", 500.00m, null, null); // next month — excluded
+        InsertReceipt(db.Conn, a, "2026-05-31", 500.00m, null, null); // prior month — excluded
+
+        var rows = ReceiptsRepo.GetMonthSpendByStore(db.Conn, "2026-06");
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Store B", rows[0].StoreName); // biggest spend first
+        Assert.Equal(99.99m, rows[0].Total);
+        Assert.Equal(10.11m, rows[1].Total);        // 10.10 + 0.01, decimal-exact
+        Assert.Equal(2, rows[1].ReceiptCount);
+    }
+
+    [Fact]
+    public void GetMonthSpendByStore_empty_month_returns_empty()
+    {
+        using var db = new TempDb();
+        Assert.Empty(ReceiptsRepo.GetMonthSpendByStore(db.Conn, "2026-06"));
+    }
+
+    [Fact]
     public void ListRecentReceipts_filters_by_store_and_date_range()
     {
         using var db = new TempDb();

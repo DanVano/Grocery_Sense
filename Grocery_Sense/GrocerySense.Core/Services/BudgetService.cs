@@ -52,6 +52,13 @@ public sealed class BudgetService
         return pct > 1.0 ? "over" : pct >= 0.85 ? "warning" : "ok";
     }
 
+    // Where this month's money actually went (F03) — per-store spend, biggest first.
+    public IReadOnlyList<StoreMonthSpend> GetMonthStoreBreakdown()
+    {
+        using var conn = _factory.Open();
+        return ReceiptsRepo.GetMonthSpendByStore(conn, CurrentYearMonth());
+    }
+
     // Monthly spend for the last N months (oldest first).
     public IReadOnlyList<SpendTrendPoint> GetTrend(int months = 12)
     {

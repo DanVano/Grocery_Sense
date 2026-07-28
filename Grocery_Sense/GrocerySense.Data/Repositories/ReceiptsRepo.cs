@@ -140,6 +140,43 @@ public static class ReceiptsRepo
         return new MonthSpend(start.ToString("yyyy-MM", CultureInfo.InvariantCulture), total, count);
     }
 
+    // Per-store spend for one month (F03). Same half-open ISO range trick as GetMonthSpend; TEXT money
+    // summed in C# decimal (SQL SUM over money is banned). Biggest spend first.
+    public static IReadOnlyList<StoreMonthSpend> GetMonthSpendByStore(SqliteConnection conn, string yearMonth,
+        SqliteTransaction? tx = null)
+    {
+        if (!DateOnly.TryParseExact((yearMonth ?? "").Trim() + "-01", "yyyy-MM-dd",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+            throw new ArgumentException($"yearMonth must be in 'yyyy-MM' format: '{yearMonth}'", nameof(yearMonth));
+        var startIso = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var endIso = start.AddMonths(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        using var cmd = Db.Command(conn, tx,
+            """
+            SELECT r.store_id, COALESCE(s.name, '') AS store_name, r.total_amount
+            FROM receipts r
+            LEFT JOIN stores s ON s.id = r.store_id
+            WHERE r.purchase_date >= $start AND r.purchase_date < $end AND r.total_amount IS NOT NULL
+            """);
+        cmd.Parameters.AddWithValue("$start", startIso);
+        cmd.Parameters.AddWithValue("$end", endIso);
+
+        var agg = new Dictionary<int, (string Name, decimal Total, int Count)>();
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                var storeId = r.GetInt32(0);
+                agg.TryGetValue(storeId, out var cur);
+                agg[storeId] = (r.GetString(1), cur.Total + r.GetDecimal(2), cur.Count + 1);
+            }
+        }
+        return agg
+            .Select(kv => new StoreMonthSpend(kv.Key, kv.Value.Name, kv.Value.Total, kv.Value.Count))
+            .OrderByDescending(x => x.Total)
+            .ToList();
+    }
+
     public static IReadOnlyList<SpendTrendPoint> GetSpendTrend(SqliteConnection conn, int months = 12,
         SqliteTransaction? tx = null)
     {
