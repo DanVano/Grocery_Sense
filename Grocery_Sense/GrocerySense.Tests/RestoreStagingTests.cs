@@ -8,6 +8,15 @@ namespace GrocerySense.Tests;
 
 // P1-5: backup → stage → cold-start swap. Validation happens on a private copy, the live DB is only
 // replaced during the cold-start half, and every crash point recovers deterministically.
+//
+// Serialized against the whole suite: CompletePendingRestore (and this class's Dispose) call
+// SqliteConnection.ClearAllPools(), which is PROCESS-WIDE — run in parallel it can dispose a pooled
+// handle another test is concurrently fetching (ObjectDisposedException on sqlite3). Production is
+// unaffected: the swap runs at cold start before any DB consumer exists.
+[CollectionDefinition("restore-staging", DisableParallelization = true)]
+public sealed class RestoreStagingCollection { }
+
+[Collection("restore-staging")]
 public sealed class RestoreStagingTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_restore_{Guid.NewGuid():N}");
