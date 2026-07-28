@@ -60,6 +60,27 @@ public sealed class PriceHistoryService
             source: "manual", date: dateStr ?? Today());
     }
 
+    // The Items page's price-history panel (F02): recent points (newest-first, store names resolved)
+    // plus window stats. Thin history stays honest — UsualPrice null with Basis "unknown", zero points
+    // yield an empty list, nothing is fabricated.
+    public ItemPriceProfile GetItemPriceProfile(int itemId, int windowDays = 180, int maxPoints = 20)
+    {
+        using var conn = _factory.Open();
+        var raw = PricesRepo.GetPricesForItem(conn, itemId, sinceDays: windowDays, limit: maxPoints);
+        var storeNames = StoresRepo.ListStores(conn, includeArchived: true).ToDictionary(s => s.Id, s => s.Name);
+        var points = raw
+            .OrderByDescending(p => p.Date).ThenByDescending(p => p.Id)
+            .Select(p => new ItemPriceHistoryPoint(
+                p.Date, storeNames.GetValueOrDefault(p.StoreId, $"Store #{p.StoreId}"),
+                p.UnitPrice, p.Unit, p.Source))
+            .ToList();
+
+        var stats = PricesRepo.GetPriceStatsForItem(conn, itemId, sinceDays: windowDays);
+        var (usual, usualSamples, basis) = PricesRepo.GetUsualUnitPrice(conn, itemId, sinceDays: windowDays);
+        return new ItemPriceProfile(points, usual, usualSamples, basis,
+            stats.MinPrice, stats.MaxPrice, stats.Count, windowDays);
+    }
+
     // ---------- stats & comparison ----------
 
     // Batched trailing-window baseline: {trimmed_input_name -> avg_or_null}. Case-insensitive; dedupes by lower key.

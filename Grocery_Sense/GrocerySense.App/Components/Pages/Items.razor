@@ -2,6 +2,7 @@
 @inject SqliteConnectionFactory Db
 @inject IDialogService DialogService
 @inject ItemManagerService ItemManager
+@inject PriceHistoryService PriceHistory
 
 <MudText Typo="Typo.h5" GutterBottom="true">Items</MudText>
 <MudText Typo="Typo.body2" Class="mb-2">
@@ -70,6 +71,43 @@ else
                         </div>
                     }
 
+                    @* Price history (F02): the actual points behind the "N prices" count. Thin history is
+                       honest — stats only when the window has samples, no fabricated usual. *@
+                    @if (_profiles.TryGetValue(item.Id, out var profile))
+                    {
+                        @if (profile.SampleCount == 0)
+                        {
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                No price history in the last @profile.WindowDays days.
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Class="d-block">
+                                Last @profile.WindowDays days: @profile.SampleCount price point(s)
+                                @(profile.UsualPrice is double u ? $" · usual ${u:0.00} ({profile.UsualBasis.Replace('_', ' ')}, {profile.UsualSamples} samples)" : " · not enough samples for a usual price")
+                                @(profile.MinPrice is double mn && profile.MaxPrice is double mx ? $" · range ${mn:0.00}–${mx:0.00}" : "")
+                            </MudText>
+                            <MudSimpleTable Dense="true" Class="mb-2">
+                                <thead>
+                                    <tr><th style="text-align:left">Date</th><th style="text-align:left">Store</th>
+                                        <th style="text-align:right">Price</th><th style="text-align:left">Source</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in profile.Points)
+                                    {
+                                        <tr>
+                                            <td>@p.Date</td>
+                                            <td>@p.StoreName</td>
+                                            <td style="text-align:right">$@p.UnitPrice.ToString("0.00")@(p.Unit is { Length: > 0 } pu ? $"/{pu}" : "")</td>
+                                            <td>@p.Source</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        }
+                    }
+
                     <MudStack Row="true" Spacing="2">
                         <MudButton StartIcon="@Icons.Material.Filled.Edit" Disabled="@_busy"
                                    OnClick="@(() => StartRename(item))">Rename</MudButton>
@@ -85,6 +123,7 @@ else
 @code {
     private IReadOnlyList<ItemAdminRow>? _items;
     private readonly Dictionary<int, IReadOnlyList<ItemAlias>> _aliases = new();
+    private readonly Dictionary<int, ItemPriceProfile> _profiles = new();
     private string _query = "";
     private int? _renamingId;
     private string _renameText = "";
@@ -107,6 +146,7 @@ else
                 return ItemsAdminRepo.SearchItems(conn, q);
             });
             _aliases.Clear();
+            _profiles.Clear();
             _renamingId = null;
         }
         catch (Exception ex) { Fail(ex.Message); }
@@ -117,11 +157,14 @@ else
         if (!expanded || _aliases.ContainsKey(itemId)) return;
         try
         {
-            _aliases[itemId] = await Task.Run(() =>
+            var (aliases, profile) = await Task.Run(() =>
             {
                 using var conn = Db.Open();
-                return new ItemAliasesRepo().ListByItem(conn, itemId);
+                return (new ItemAliasesRepo().ListByItem(conn, itemId),
+                        PriceHistory.GetItemPriceProfile(itemId));
             });
+            _aliases[itemId] = aliases;
+            _profiles[itemId] = profile;
         }
         catch (Exception ex) { Fail(ex.Message); }
     }

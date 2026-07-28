@@ -8,6 +8,14 @@ namespace GrocerySense.Core;
 
 public record NormalizedPrice(double NormUnitPrice, string NormUnit, string Note);
 
+// Item price-history profile for the Items page (F02). Points are the most recent in the window,
+// newest-first, store names resolved. Stats degrade honestly: UsualPrice null (Basis "unknown") on
+// thin history, never a fabricated number.
+public sealed record ItemPriceHistoryPoint(string Date, string StoreName, double UnitPrice, string Unit, string Source);
+public sealed record ItemPriceProfile(
+    IReadOnlyList<ItemPriceHistoryPoint> Points, double? UsualPrice, int UsualSamples, string UsualBasis,
+    double? MinPrice, double? MaxPrice, int SampleCount, int WindowDays);
+
 // PriceHistoryService result — typed replacement for the Python dict return.
 public record DealClassification(
     Item? Item, bool HasHistory, string Classification, double? PercentVsAvg,

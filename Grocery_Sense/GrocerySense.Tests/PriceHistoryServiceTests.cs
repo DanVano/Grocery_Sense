@@ -26,6 +26,46 @@ public sealed class PriceHistoryServiceTests
     }
 
     [Fact]
+    public void ItemPriceProfile_returns_points_newest_first_with_store_names_and_stats()
+    {
+        using var db = new TempDb();
+        var svc = new PriceHistoryService(db.Factory);
+        var store = Store(db);
+        var itemId = svc.GetOrCreateItem("Milk").Id;
+        svc.RecordPriceFromReceipt("Milk", store, 3.00, "each", dateStr: "2026-07-01");
+        svc.RecordPriceFromReceipt("Milk", store, 4.00, "each", dateStr: "2026-07-20");
+        svc.RecordPriceFromReceipt("Milk", store, 3.50, "each", dateStr: "2026-07-10");
+        svc.RecordPriceFromReceipt("Milk", store, 5.00, "each", dateStr: "2026-07-15");
+
+        var profile = svc.GetItemPriceProfile(itemId);
+
+        Assert.Equal(4, profile.SampleCount);
+        Assert.Equal(new[] { "2026-07-20", "2026-07-15", "2026-07-10", "2026-07-01" },
+            profile.Points.Select(p => p.Date).ToArray());
+        Assert.All(profile.Points, p => Assert.Equal("Loblaws", p.StoreName));
+        Assert.Equal(3.00, profile.MinPrice);
+        Assert.Equal(5.00, profile.MaxPrice);
+        Assert.NotNull(profile.UsualPrice); // 4 receipt samples = enough for a receipt_median
+        Assert.Equal("receipt_median", profile.UsualBasis);
+    }
+
+    [Fact]
+    public void ItemPriceProfile_with_no_history_is_honest_not_fabricated()
+    {
+        using var db = new TempDb();
+        var svc = new PriceHistoryService(db.Factory);
+        var itemId = svc.GetOrCreateItem("Never Bought").Id;
+
+        var profile = svc.GetItemPriceProfile(itemId);
+
+        Assert.Empty(profile.Points);
+        Assert.Equal(0, profile.SampleCount);
+        Assert.Null(profile.UsualPrice);
+        Assert.Null(profile.MinPrice);
+        Assert.Equal("unknown", profile.UsualBasis);
+    }
+
+    [Fact]
     public void ClassifyDeal_thresholds()
     {
         using var db = new TempDb();
