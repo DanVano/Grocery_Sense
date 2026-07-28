@@ -96,6 +96,18 @@ public sealed class ShoppingListService
             plannedStoreId: alert.StoreId, itemId: alert.ItemId);
     }
 
+    // Add a watchlist hit to the active list (F04) — mirrors AddAlertToList: the hit was just computed
+    // from the live items/prices join, so ItemName/ItemId/StoreId need no re-lookup. The row lands mapped,
+    // planned at the hit's store, with the hit price disclosed in the note. Returns the new row id.
+    public int AddWatchHitToList(WatchlistHit hit)
+    {
+        using var conn = _factory.Open();
+        var price = hit.BestPrice.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        return ShoppingListRepo.AddItem(conn, hit.ItemName, quantity: 1.0, unit: "", category: "",
+            notes: $"Watch hit: ${price} at {hit.StoreName} ({hit.Source})",
+            plannedStoreId: hit.StoreId, itemId: hit.ItemId);
+    }
+
     private static string DealTitle(FlyerDeal d) =>
         d.Title is { Length: > 0 } t ? t : d.Description is { Length: > 0 } de ? de : "(deal)";
 

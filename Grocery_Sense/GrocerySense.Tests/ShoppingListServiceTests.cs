@@ -19,6 +19,27 @@ public sealed class ShoppingListServiceTests
         Assert.Equal(3, svc.GetActiveItems().Count);
     }
 
+    // A watch hit lands mapped, planned at the hit's store, with the price disclosed in the note (F04).
+    [Fact]
+    public void AddWatchHitToList_adds_mapped_row_at_the_hit_store_with_price_note()
+    {
+        using var db = new TempDb();
+        var item = ItemsRepo.CreateItem(db.Conn, "Butter").Id;
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+        var hit = new WatchlistHit(WatchId: 1, ItemId: item, ItemName: "Butter", TargetPrice: 4.00,
+            BestPrice: 3.49, StoreId: store, StoreName: "Loblaws", Source: "flyer",
+            UsualPrice: 5.00, PctBelowUsual: 30.0, HitReason: "target");
+
+        var rowId = svc.AddWatchHitToList(hit);
+
+        var row = ShoppingListRepo.GetItem(db.Conn, rowId)!;
+        Assert.Equal(item, row.ItemId);
+        Assert.Equal(store, row.PlannedStoreId);
+        Assert.Contains("$3.49", row.Notes);
+        Assert.Contains("Loblaws", row.Notes);
+    }
+
     // Manual adds map to canonical items (match-only) so they reach the optimizer/Shop Mode intel.
     [Fact]
     public void AddSingleItem_maps_known_name_to_item_id()

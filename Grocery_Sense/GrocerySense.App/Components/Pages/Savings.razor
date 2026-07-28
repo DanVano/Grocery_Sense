@@ -32,17 +32,22 @@
                     @foreach (var h in _hits)
                     {
                         <MudListItem T="int">
-                            <MudText Typo="Typo.body2">
-                                <b>@h.ItemName</b> — $@F2(h.BestPrice) at @h.StoreName
-                                <MudChip T="string" Size="Size.Small"
-                                         Color="@(h.HitReason == "target" ? Color.Primary : Color.Success)">
-                                    @(h.HitReason == "target" ? "hit target" : "below usual")
-                                </MudChip>
-                                @if (h.PctBelowUsual is double p and > 0)
-                                {
-                                    <span> (@p.ToString("0")% below usual)</span>
-                                }
-                            </MudText>
+                            <div class="d-flex align-center gap-1">
+                                <MudText Typo="Typo.body2">
+                                    <b>@h.ItemName</b> — $@F2(h.BestPrice) at @h.StoreName
+                                    <MudChip T="string" Size="Size.Small"
+                                             Color="@(h.HitReason == "target" ? Color.Primary : Color.Success)">
+                                        @(h.HitReason == "target" ? "hit target" : "below usual")
+                                    </MudChip>
+                                    @if (h.PctBelowUsual is double p and > 0)
+                                    {
+                                        <span> (@p.ToString("0")% below usual)</span>
+                                    }
+                                </MudText>
+                                <MudSpacer />
+                                <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart" Size="Size.Small"
+                                               OnClick="@(() => AddHitAsync(h))" aria-label="Add to shopping list" />
+                            </div>
                         </MudListItem>
                     }
                 </MudList>
@@ -210,6 +215,13 @@
     {
         await Guard(() => { Shopping.AddAlertToList(alert); return 0; });
         if (_error is null) Snackbar.Add($"Added {alert.ItemName} — see Shopping List", Severity.Success);
+    }
+
+    // Add a watch hit to the list (F04) — mapped, planned at the hit's store, price in the note.
+    private async Task AddHitAsync(WatchlistHit hit)
+    {
+        await Guard(() => Shopping.AddWatchHitToList(hit));
+        if (_error is null) Snackbar.Add($"Added {hit.ItemName} — see Shopping List", Severity.Success);
     }
 
     private async Task ReloadWatchlistAsync()
