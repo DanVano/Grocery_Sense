@@ -169,8 +169,43 @@ else
     </MudExpansionPanels>
 }
 
+@* Recently deleted (F01): the "backup kept" promise made actionable. Backups load on expand only;
+   restore consumes the backup (repo-enforced) and discloses any dedupe conflicts. *@
+<MudExpansionPanels Class="mt-4" MultiExpansion="false">
+    <MudExpansionPanel Text="Recently deleted" ExpandedChanged="OnDeletedExpandedAsync">
+        @if (_deletedBackups is null)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Loading backups" />
+        }
+        else if (_deletedBackups.Count == 0)
+        {
+            <MudText Typo="Typo.body2">No deleted receipts backed up.</MudText>
+        }
+        else
+        {
+            <MudList T="int" Dense="true">
+                @foreach (var b in _deletedBackups)
+                {
+                    <MudListItem T="int">
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.body2">
+                                Receipt #@(b.OriginalReceiptId?.ToString() ?? "?") — deleted @(b.DeletedAt ?? "unknown")
+                            </MudText>
+                            <MudSpacer />
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.RestoreFromTrash" Disabled="@_busy"
+                                       OnClick="@(() => RestoreDeletedAsync(b.BackupId))">Restore</MudButton>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+    </MudExpansionPanel>
+</MudExpansionPanels>
+
 @code {
     private IReadOnlyList<ReceiptSummary>? _receipts;
+    private IReadOnlyList<DeletedBackup>? _deletedBackups;
     private readonly Dictionary<int, IReadOnlyList<ReceiptLineItemRow>> _lines = new();
     private IReadOnlyList<Store> _stores = [];
     private int? _filterStoreId;
@@ -539,6 +574,51 @@ else
             await ReloadAsync();
         }
         catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task OnDeletedExpandedAsync(bool expanded)
+    {
+        if (!expanded) return;
+        await ReloadDeletedBackupsAsync();
+    }
+
+    private async Task ReloadDeletedBackupsAsync()
+    {
+        try
+        {
+            _deletedBackups = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return ReceiptsRepo.ListDeletedBackups(conn);
+            });
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+    }
+
+    // Restore a backed-up deletion. The repo consumes the backup in the same transaction, so a
+    // double-tap can't duplicate the receipt; dedupe conflicts are disclosed, never swallowed.
+    private async Task RestoreDeletedAsync(int backupId)
+    {
+        _busy = true;
+        try
+        {
+            _message = null;
+            var (newId, conflicts) = await Task.Run(() =>
+            {
+                using var conn = Db.Open();
+                return ReceiptsRepo.RestoreReceiptFromBackup(conn, backupId);
+            });
+            _messageSeverity = conflicts.Count > 0 ? Severity.Warning : Severity.Success;
+            _message = $"Receipt restored as #{newId}."
+                + (conflicts.Count > 0
+                    ? $" {conflicts.Count} dedupe key(s) now belong to another receipt " +
+                      $"({string.Join(", ", conflicts.Select(c => c.Kind).Distinct())}) — duplicate detection may re-import it."
+                    : "");
+            await ReloadAsync();
+            await ReloadDeletedBackupsAsync();
+        }
+        catch (Exception ex) { Fail($"Restore failed: {ex.Message}"); }
         finally { _busy = false; }
     }
 

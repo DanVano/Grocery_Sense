@@ -483,6 +483,14 @@ public static class ReceiptsRepo
                 }
             }
 
+            // The backup is CONSUMED by a successful restore (same transaction): restoring the same
+            // backup twice would insert a second identical receipt whose dedupe keys silently conflict.
+            using (var consume = Db.Command(conn, t, "DELETE FROM deleted_receipt_backups WHERE id = $id"))
+            {
+                consume.Parameters.AddWithValue("$id", backupId);
+                consume.ExecuteNonQuery();
+            }
+
             return receiptId;
         });
 

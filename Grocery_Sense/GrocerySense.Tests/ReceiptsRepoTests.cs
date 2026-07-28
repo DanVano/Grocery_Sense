@@ -100,6 +100,21 @@ public sealed class ReceiptsRepoTests
     }
 
     [Fact]
+    public void Restore_consumes_the_backup_so_a_second_restore_cannot_duplicate_the_receipt()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Store");
+        var rid = InsertReceipt(db.Conn, store.Id, "2026-06-02", 9.99m, null, null);
+        var backupId = ReceiptsRepo.DeleteReceiptWithBackup(db.Conn, rid);
+
+        ReceiptsRepo.RestoreReceiptFromBackup(db.Conn, backupId);
+
+        Assert.DoesNotContain(ReceiptsRepo.ListDeletedBackups(db.Conn), b => b.BackupId == backupId);
+        Assert.Throws<ArgumentException>(() => ReceiptsRepo.RestoreReceiptFromBackup(db.Conn, backupId));
+        Assert.Equal(1, Count(db.Conn, "receipts")); // exactly one restored copy exists
+    }
+
+    [Fact]
     public void Restore_reports_signature_conflict_without_stealing_the_key()
     {
         using var db = new TempDb();
