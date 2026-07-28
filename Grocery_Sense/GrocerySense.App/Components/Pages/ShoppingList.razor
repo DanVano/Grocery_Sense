@@ -1,7 +1,10 @@
 @page "/list"
 @using GrocerySense.App.Services
 @using GrocerySense.Core
+@using GrocerySense.Data
+@using GrocerySense.Data.Repositories
 @using GrocerySense.Domain
+@inject SqliteConnectionFactory Db
 @inject ShoppingListService Shopping
 @inject ShoppingInsightsService Insights
 @inject StapleRestockService Restock
@@ -12,15 +15,20 @@
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.h5">Shopping List</MudText>
     <MudSpacer />
+    <MudIconButton Icon="@Icons.Material.Filled.Share" Size="Size.Small" OnClick="ShareListAsync"
+                   Disabled="@_busy" aria-label="Share list as text" />
     <MudSwitch T="bool" Value="@_shopMode" ValueChanged="@ToggleShopModeAsync" Color="Color.Primary"
                Label="Shop Mode" LabelPlacement="Placement.Start" />
 </div>
 
 @if (!_shopMode)
 {
+    @* Autocomplete against the item catalog (F06): a picked suggestion adds MAPPED (price intel,
+       optimizer); free text and comma-separated multi-add keep working exactly as before. *@
     <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-        <MudTextField @bind-Value="_newItems" Label="Add items (comma-separated)" Variant="Variant.Outlined"
-                      Margin="Margin.Dense" Immediate="true" FullWidth="true" />
+        <MudAutocomplete T="string" @bind-Value="_newItems" Label="Add items (pick known, or comma-separated)"
+                         SearchFunc="SearchCatalogAsync" CoerceValue="true" Clearable="true" MaxItems="20"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync"
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newItems))">Add</MudButton>
     </MudStack>
@@ -333,6 +341,20 @@ else
         _newItems = "";
     });
 
+    // Catalog suggestions while typing (F06). Comma lists are free-text multi-add — suggesting mid-list
+    // would fight the field, so they get none. Free text that matches nothing still adds as before.
+    private async Task<IEnumerable<string>> SearchCatalogAsync(string value, CancellationToken ct)
+    {
+        var q = (value ?? "").Trim();
+        if (q.Length < 2 || q.Contains(',')) return [];
+        return await Task.Run(() =>
+        {
+            using var conn = Db.Open();
+            return (IEnumerable<string>)ItemsAdminRepo.SearchItems(conn, q)
+                .Select(i => i.CanonicalName).Take(20).ToList();
+        }, ct);
+    }
+
     private Task AddRestockAsync(RestockSuggestion s) => RunAsync(() => AddRestock(s));
 
     private Task AddAllRestockAsync()
@@ -367,6 +389,18 @@ else
     private Task DeferAsync(int rowId) => RunAsync(() => Shopping.SetItemPriority(rowId, "wait_for_sale"));
 
     private Task ClearCheckedAsync() => RunAsync(Shopping.ClearAllCheckedOff);
+
+    // Share the list as plain text via the OS share sheet (F07).
+    private async Task ShareListAsync()
+    {
+        try
+        {
+            _error = null;
+            var text = await Task.Run(Shopping.FormatListAsText);
+            await Share.Default.RequestAsync(new ShareTextRequest { Text = text, Title = "Shopping list" });
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
 
     // Plan trip (Phase 1b): run the optimizer and hold the result as a preview — nothing is written until
     // the user confirms. Reuses the same service the /plan page drives.

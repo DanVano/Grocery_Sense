@@ -124,6 +124,36 @@ public sealed class ShoppingListService
         ShoppingListRepo.UpdateItemDetails(conn, rowId, quantity, unit, notes);
     }
 
+    // Plain-text export of the active list (F07): grouped by planned store (unplanned last), rows
+    // alphabetical, checked-off marked — deterministic so a share always reads the same way. For the OS
+    // share sheet; a family member without the app shops from it.
+    public string FormatListAsText()
+    {
+        using var conn = _factory.Open();
+        var rows = ShoppingListRepo.ListActiveItems(conn, includeCheckedOff: true);
+        if (rows.Count == 0) return "Shopping list is empty.";
+        var storeNames = StoresRepo.ListStores(conn, includeArchived: true).ToDictionary(s => s.Id, s => s.Name);
+        string StoreLabel(int? id) => id is { } s ? storeNames.GetValueOrDefault(s, $"Store #{s}") : "Any store";
+
+        var sb = new System.Text.StringBuilder("Shopping list");
+        foreach (var group in rows
+            .GroupBy(r => r.PlannedStoreId)
+            .OrderBy(g => g.Key is null ? 1 : 0) // planned stores first, "Any store" last
+            .ThenBy(g => StoreLabel(g.Key), StringComparer.OrdinalIgnoreCase))
+        {
+            sb.Append('\n').Append('\n').Append(StoreLabel(group.Key)).Append(':');
+            foreach (var r in group.OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                var qty = r.Quantity == 1.0 && r.Unit.Length == 0
+                    ? ""
+                    : $" — {r.Quantity.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}" +
+                      (r.Unit.Length > 0 ? $" {r.Unit}" : "");
+                sb.Append('\n').Append(r.IsCheckedOff ? "[x] " : "[ ] ").Append(r.DisplayName).Append(qty);
+            }
+        }
+        return sb.ToString();
+    }
+
     public void SoftDeleteItem(int itemId)
     {
         using var conn = _factory.Open();

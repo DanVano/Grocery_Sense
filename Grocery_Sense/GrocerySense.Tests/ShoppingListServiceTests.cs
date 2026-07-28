@@ -19,6 +19,38 @@ public sealed class ShoppingListServiceTests
         Assert.Equal(3, svc.GetActiveItems().Count);
     }
 
+    // Plain-text export (F07): store-grouped (unplanned last), alphabetical, checked-off marked.
+    [Fact]
+    public void FormatListAsText_groups_by_store_marks_checked_and_is_deterministic()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+        svc.AddSingleItem("Zucchini", plannedStoreId: store);
+        svc.AddSingleItem("Apples", quantity: 2.5, unit: "kg", plannedStoreId: store);
+        var loose = svc.AddSingleItem("Batteries");
+        svc.CheckOffItem(loose);
+
+        var text = svc.FormatListAsText();
+
+        var expected =
+            "Shopping list\n\n" +
+            "Loblaws:\n" +
+            "[ ] Apples — 2.5 kg\n" +
+            "[ ] Zucchini\n\n" +
+            "Any store:\n" +
+            "[x] Batteries";
+        Assert.Equal(expected, text);
+    }
+
+    [Fact]
+    public void FormatListAsText_empty_list_is_a_clear_one_liner()
+    {
+        using var db = new TempDb();
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+        Assert.Equal("Shopping list is empty.", svc.FormatListAsText());
+    }
+
     // A watch hit lands mapped, planned at the hit's store, with the price disclosed in the note (F04).
     [Fact]
     public void AddWatchHitToList_adds_mapped_row_at_the_hit_store_with_price_note()
