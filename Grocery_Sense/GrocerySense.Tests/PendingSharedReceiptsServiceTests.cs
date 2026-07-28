@@ -1,9 +1,9 @@
-using GrocerySense.Core;
+﻿using GrocerySense.Core;
 using Xunit;
 
 namespace GrocerySense.Tests;
 
-// P0-2: the share intake is an atomic state machine (Idle → Copying → Pending → Importing → Idle).
+// P0-2: the share intake is an atomic state machine (Idle -> Copying -> Pending -> Importing -> Idle).
 // One batch at a time; a share arriving mid-flight is rejected loudly with zero copies.
 public sealed class PendingSharedReceiptsServiceTests
 {
@@ -12,7 +12,6 @@ public sealed class PendingSharedReceiptsServiceTests
     {
         var svc = new PendingSharedReceiptsService();
         Assert.Equal(ShareIntakeState.Idle, svc.State);
-        Assert.False(svc.HasPending);
     }
 
     [Fact]
@@ -33,7 +32,7 @@ public sealed class PendingSharedReceiptsServiceTests
         var svc = new PendingSharedReceiptsService();
         Assert.True(svc.TryBeginCopy());
         svc.CompleteCopy(["/data/receipts/a.jpg"], []);
-        Assert.True(svc.HasPending);
+        Assert.Equal(ShareIntakeState.Pending, svc.State);
 
         Assert.False(svc.TryBeginCopy()); // second share must not start copying
         svc.RejectShare("another shared batch is still being processed");
@@ -88,13 +87,12 @@ public sealed class PendingSharedReceiptsServiceTests
         Assert.True(svc.TryBeginCopy());
         svc.CompleteCopy([], ["exceeds 20 MiB", "unsupported type"]);
 
-        Assert.True(svc.HasPending);
+        Assert.Equal(ShareIntakeState.Pending, svc.State);
         Assert.False(svc.TryBeginImport(out _, out _)); // nothing to import
 
         var released = svc.Discard(); // the Dismiss control routes here
         Assert.Empty(released);
         Assert.Equal(ShareIntakeState.Idle, svc.State);
-        Assert.False(svc.HasPending);
     }
 
     [Fact]
@@ -143,3 +141,4 @@ public sealed class PendingSharedReceiptsServiceTests
         Assert.Equal(PendingSharedReceiptsService.MaxErrorChars, svc.Peek().Errors[0].Length);
     }
 }
+

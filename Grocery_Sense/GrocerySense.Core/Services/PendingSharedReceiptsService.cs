@@ -39,11 +39,6 @@ public sealed class PendingSharedReceiptsService
         get { lock (_sync) return _state; }
     }
 
-    public bool HasPending
-    {
-        get { lock (_sync) return _state == ShareIntakeState.Pending && (_paths.Count > 0 || _errors.Count > 0); }
-    }
-
     // Intent thread, BEFORE any Task.Run: reserve the single copy slot. False means another batch is in
     // flight — the caller must copy nothing and record the rejection via RejectShare.
     public bool TryBeginCopy()

@@ -598,25 +598,35 @@ else
 
     // Restore a backed-up deletion. The repo consumes the backup in the same transaction, so a
     // double-tap can't duplicate the receipt; dedupe conflicts are disclosed, never swallowed.
+    // A FK failure (store/item merged or deleted since) gets an actionable message — the failed
+    // restore rolled back and KEPT the backup, so the user can fix the catalog and retry.
     private async Task RestoreDeletedAsync(int backupId)
     {
         _busy = true;
         try
         {
             _message = null;
-            var (newId, conflicts) = await Task.Run(() =>
+            var (newId, conflicts, imageMissing) = await Task.Run(() =>
             {
                 using var conn = Db.Open();
-                return ReceiptsRepo.RestoreReceiptFromBackup(conn, backupId);
+                var (id, conf) = ReceiptsRepo.RestoreReceiptFromBackup(conn, backupId);
+                var fp = ReceiptsRepo.GetReceipt(conn, id)?.FilePath;
+                return (id, conf, fp is { Length: > 0 } && !File.Exists(fp));
             });
             _messageSeverity = conflicts.Count > 0 ? Severity.Warning : Severity.Success;
             _message = $"Receipt restored as #{newId}."
                 + (conflicts.Count > 0
                     ? $" {conflicts.Count} dedupe key(s) now belong to another receipt " +
                       $"({string.Join(", ", conflicts.Select(c => c.Kind).Distinct())}) — duplicate detection may re-import it."
-                    : "");
+                    : "")
+                + (imageMissing ? " Its image file was removed when the receipt was deleted — data only." : "");
             await ReloadAsync();
             await ReloadDeletedBackupsAsync();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException e) when (e.SqliteErrorCode == 19)
+        {
+            Fail("Restore failed — this receipt references a store or item that was merged or deleted since. " +
+                 "The backup is kept: recreate or un-merge it, then retry.");
         }
         catch (Exception ex) { Fail($"Restore failed: {ex.Message}"); }
         finally { _busy = false; }
@@ -641,13 +651,7 @@ else
     private static bool CanDeleteReceiptFile(string path) =>
         PathSafety.IsUnderDirectory(ReceiptsDir(), path) && File.Exists(path);
 
-    private static bool TryDeleteReceiptFile(string? path)
-    {
-        if (path is null) return false;
-        if (!PathSafety.IsUnderDirectory(ReceiptsDir(), path)) return false;
-        try { File.Delete(path); return true; }
-        catch { return false; }
-    }
+    private static bool TryDeleteReceiptFile(string? path) => ReceiptFilePolicy.TryDelete(path);
 
     // Import the shared receipt(s) the user just confirmed. Each already lives in the receipts dir (copied
     // by the share handler through the bounded policy); this is the single-scan ingest path per file, so a

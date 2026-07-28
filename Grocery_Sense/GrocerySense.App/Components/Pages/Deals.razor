@@ -389,11 +389,8 @@ else
         GrocerySense.App.Services.FlyerFilePolicy.CopyPickAsync(pick, ct);
 
     // Deletes a copied flyer asset (only inside the flyers dir) when an import fails before the DB references it.
-    private static void TryDeleteFlyerFile(string path)
-    {
-        if (!PathSafety.IsUnderDirectory(GrocerySense.App.Services.FlyerFilePolicy.FlyersDir(), path)) return;
-        try { File.Delete(path); } catch { /* best-effort cleanup */ }
-    }
+    private static void TryDeleteFlyerFile(string path) =>
+        GrocerySense.App.Services.FlyerFilePolicy.TryDelete(path);
 
     // Add a deal to the active shopping list. Mapped deals land under their store with price intel; unmapped
     // deals land as a disclosed text row (see ShoppingListService.AddDealToList). List is user-managed —

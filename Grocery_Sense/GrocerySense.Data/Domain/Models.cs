@@ -169,7 +169,6 @@ public record ItemAlias(
     string? LastSeenAt,
     int TimesSeen);
 
-public record StoreRow(int Id, string Name);
 
 // Savings watchlist row (watchlist table, joined to items for ItemName). TargetPrice null => watch for any
 // good deal (percent-below-usual). CreatedAt is null on insert inputs, set when read back.

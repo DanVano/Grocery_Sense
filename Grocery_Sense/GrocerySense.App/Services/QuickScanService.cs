@@ -53,9 +53,5 @@ public sealed class QuickScanService
         }
     }
 
-    private static void TryDelete(string? path)
-    {
-        if (path is null || !PathSafety.IsUnderDirectory(ReceiptFilePolicy.ReceiptsDir(), path)) return;
-        try { File.Delete(path); } catch { /* best-effort cleanup of an unreferenced copy */ }
-    }
+    private static void TryDelete(string? path) => ReceiptFilePolicy.TryDelete(path);
 }

@@ -55,7 +55,7 @@ public sealed class FlyerIngestService
 
     public async Task<FlyerIngestResult> IngestAssetsAsync(int? storeId, string? validFrom, string? validTo,
         IReadOnlyList<string> filePaths, string sourceType = "manual_upload",
-        string? sourceRef = null, string? note = null, bool tryItemMapping = true, CancellationToken ct = default)
+        string? sourceRef = null, string? note = null, CancellationToken ct = default)
     {
         if (storeId is null) throw new ArgumentException("storeId is required for flyer ingest.", nameof(storeId));
 
@@ -66,7 +66,7 @@ public sealed class FlyerIngestService
         try
         {
             return await IngestAssetsCoreAsync(storeId.Value, validFrom, validTo, filePaths,
-                sourceType, sourceRef, note, tryItemMapping, ct);
+                sourceType, sourceRef, note, ct);
         }
         finally
         {
@@ -76,7 +76,7 @@ public sealed class FlyerIngestService
 
     private async Task<FlyerIngestResult> IngestAssetsCoreAsync(int storeId, string? validFrom, string? validTo,
         IReadOnlyList<string> filePaths, string sourceType,
-        string? sourceRef, string? note, bool tryItemMapping, CancellationToken ct)
+        string? sourceRef, string? note, CancellationToken ct)
     {
 
         // P0-3 caps before ANY paid client call: over-limit = disclosed reject, zero Azure requests.
@@ -118,13 +118,13 @@ public sealed class FlyerIngestService
 
                 var deals = new List<FlyerDeal>();
                 foreach (var d in ExtractDealsFromLayout(analyze))
-                    deals.Add(BuildDeal(conn, storeId, d, tryItemMapping));
+                    deals.Add(BuildDeal(conn, storeId, d));
 
                 staged.Add(new StagedAsset(assetType, fp, sha, rawJsonStr, rawSha, deals));
             }
         }
 
-        if (tryItemMapping) _mapper.FlushLearnedAliases();
+        _mapper.FlushLearnedAliases();
 
         // --- Phase B (one transaction): batch + assets + raw-json + deals. ---
         using (var conn = _factory.Open())
@@ -155,8 +155,8 @@ public sealed class FlyerIngestService
         string AssetType, string Path, string Sha, string RawJson, string RawSha, List<FlyerDeal> Deals);
 
     // Builds a deal row (FlyerId/AssetId stamped later inside the tx). Mirrors the Python per-deal block:
-    // multibuy-adjust the price text, guess the observed unit, then optionally map to an item and normalize.
-    private FlyerDeal BuildDeal(SqliteConnection conn, int storeId, ExtractedDeal d, bool tryItemMapping)
+    // multibuy-adjust the price text, guess the observed unit, then map to an item and normalize.
+    private FlyerDeal BuildDeal(SqliteConnection conn, int storeId, ExtractedDeal d)
     {
         var title = d.Title ?? "";
         var description = string.IsNullOrEmpty(d.Description) ? title : d.Description;
@@ -174,20 +174,17 @@ public sealed class FlyerIngestService
         var normUnit = observedUnit;
         var normNote = $"flyer;{adj.DealNote}";
 
-        if (tryItemMapping)
+        var m = _mapper.MapToItem(conn, combined);
+        if (m.ItemId is not null)
         {
-            var m = _mapper.MapToItem(conn, combined);
-            if (m.ItemId is not null)
+            itemId = m.ItemId;
+            mapConf = m.Confidence;
+            if (adj.UnitPrice is not null)
             {
-                itemId = m.ItemId;
-                mapConf = m.Confidence;
-                if (adj.UnitPrice is not null)
-                {
-                    var norm = _unitNorm.Normalize(conn, m.ItemId.Value, adj.UnitPrice.Value, observedUnit, combined);
-                    normUnitPrice = norm.NormUnitPrice;
-                    normUnit = norm.NormUnit;
-                    normNote = $"{norm.Note};{adj.DealNote};flyer";
-                }
+                var norm = _unitNorm.Normalize(conn, m.ItemId.Value, adj.UnitPrice.Value, observedUnit, combined);
+                normUnitPrice = norm.NormUnitPrice;
+                normUnit = norm.NormUnit;
+                normNote = $"{norm.Note};{adj.DealNote};flyer";
             }
         }
 

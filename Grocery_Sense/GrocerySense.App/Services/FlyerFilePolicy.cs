@@ -29,4 +29,11 @@ public static class FlyerFilePolicy
             source, pick.FileName, FlyersDir(), Extensions,
             defaultExtension: DefaultExtension, maxBytes: MaxImportBytes, ct: ct);
     }
+
+    // The single guarded delete for flyer copies — mirrors ReceiptFilePolicy.TryDelete.
+    public static bool TryDelete(string? path)
+    {
+        if (path is null || !PathSafety.IsUnderDirectory(FlyersDir(), path)) return false;
+        try { File.Delete(path); return true; } catch { return false; }
+    }
 }

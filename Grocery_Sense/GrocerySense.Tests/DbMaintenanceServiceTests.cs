@@ -34,6 +34,22 @@ public sealed class DbMaintenanceServiceTests : IDisposable
         Assert.Contains(files, f => Path.GetFileName(f).StartsWith("user_recipes"));
     }
 
+    // F05 made shopping-list notes free user text and shopping_list is exported — lock the
+    // formula-injection neutralization on THIS path so an export refactor can't drop it silently.
+    [Fact]
+    public void Csv_export_neutralizes_formulas_in_user_edited_list_notes()
+    {
+        using var db = new TempDb();
+        var id = ShoppingListRepo.AddItem(db.Conn, "Milk");
+        ShoppingListRepo.UpdateItemDetails(db.Conn, id, 1.0, "", "=HYPERLINK(\"http://evil\",\"click\")");
+
+        var files = new DbMaintenanceService(db.Factory).ExportToCsv(_dir);
+
+        var csv = File.ReadAllText(files.Single(f => Path.GetFileName(f).StartsWith("shopping_list")));
+        Assert.Contains("'=HYPERLINK", csv);                    // neutralized with a leading quote
+        Assert.DoesNotContain("\n=HYPERLINK", csv);             // never raw at cell start
+    }
+
     [Fact]
     public void CleanupShareArtifacts_deletes_only_old_known_paths()
     {

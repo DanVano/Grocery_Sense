@@ -35,4 +35,13 @@ public static class ReceiptFilePolicy
         BoundedFileCopy.CopyAsync(
             source, sourceFileName, ReceiptsDir(), Extensions,
             defaultExtension: DefaultExtension, maxBytes: MaxImportBytes, ct: ct);
+
+    // The single guarded delete for receipt copies: only files inside the receipts dir are ever
+    // deletable, so no caller can be handed a path that escapes it. Every delete path (page, FAB,
+    // share import) routes through here.
+    public static bool TryDelete(string? path)
+    {
+        if (path is null || !PathSafety.IsUnderDirectory(ReceiptsDir(), path)) return false;
+        try { File.Delete(path); return true; } catch { return false; }
+    }
 }

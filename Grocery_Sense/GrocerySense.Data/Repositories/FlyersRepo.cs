@@ -17,33 +17,6 @@ public sealed class FlyersRepo
         NormUnit: r.GetStringOrNull(13), NormNote: r.GetStringOrNull(14), ItemId: r.GetIntOrNull(15),
         MappingConfidence: r.GetDoubleOrNull(16), Confidence: r.GetDoubleOrNull(17), CreatedAt: r.GetStringOrNull(18));
 
-    // stores.name has no UNIQUE constraint, so this is select-then-insert (single-user assumption).
-    public int UpsertStore(SqliteConnection conn, string name, SqliteTransaction? tx = null)
-    {
-        name = (name ?? "").Trim();
-        if (name.Length == 0) throw new ArgumentException("Store name is required", nameof(name));
-
-        using (var sel = Db.Command(conn, tx, "SELECT id FROM stores WHERE name = $name"))
-        {
-            sel.Parameters.AddWithValue("$name", name);
-            if (sel.ExecuteScalar() is { } existing) return Convert.ToInt32(existing);
-        }
-        using var ins = Db.Command(conn, tx, "INSERT INTO stores (name, created_at) VALUES ($name, $now)");
-        ins.Parameters.AddWithValue("$name", name);
-        ins.Parameters.AddWithValue("$now", Db.NowIso());
-        ins.ExecuteNonQuery();
-        return (int)Db.LastRowId(conn, tx);
-    }
-
-    public IReadOnlyList<StoreRow> ListStores(SqliteConnection conn, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx, "SELECT id, name FROM stores ORDER BY name ASC");
-        using var r = cmd.ExecuteReader();
-        var rows = new List<StoreRow>();
-        while (r.Read()) rows.Add(new StoreRow(r.GetInt32(0), r.GetString(1)));
-        return rows;
-    }
-
     public int CreateFlyerBatch(SqliteConnection conn, int storeId, string? validFrom, string? validTo,
         string? sourceType = null, string? sourceRef = null, string? note = null, string status = "active",
         SqliteTransaction? tx = null)
@@ -75,14 +48,6 @@ public sealed class FlyersRepo
         cmd.Parameters.AddWithValue("$store", storeId);
         cmd.Parameters.AddWithValue("$stype", sourceType);
         return cmd.ExecuteNonQuery();
-    }
-
-    public void SetBatchStatus(SqliteConnection conn, int flyerId, string status, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx, "UPDATE flyer_batches SET status = $s WHERE id = $id");
-        cmd.Parameters.AddWithValue("$s", status);
-        cmd.Parameters.AddWithValue("$id", flyerId);
-        cmd.ExecuteNonQuery();
     }
 
     public int AddAsset(SqliteConnection conn, int flyerId, string assetType, string path, string? sha256 = null,
@@ -146,6 +111,20 @@ public sealed class FlyersRepo
             cmd.ExecuteNonQuery();
         }
         return deals.Count;
+    }
+
+    // COUNT twin of ListActiveDeals (same predicate) for dashboards — the Home screen must not
+    // materialize 5 000 deal rows to show a number.
+    public int CountActiveDeals(SqliteConnection conn, string? onDate = null, SqliteTransaction? tx = null)
+    {
+        onDate ??= DateTime.UtcNow.ToString("yyyy-MM-dd");
+        using var cmd = Db.Command(conn, tx,
+            "SELECT COUNT(*) FROM flyer_deals d JOIN flyer_batches b ON b.id = d.flyer_id " +
+            "WHERE b.status = 'active' " +
+            "AND (b.valid_from IS NULL OR b.valid_from <= $onDate) " +
+            "AND (b.valid_to IS NULL OR b.valid_to >= $onDate)");
+        cmd.Parameters.AddWithValue("$onDate", onDate);
+        return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
     public IReadOnlyList<FlyerDeal> ListActiveDeals(SqliteConnection conn, int? storeId = null,

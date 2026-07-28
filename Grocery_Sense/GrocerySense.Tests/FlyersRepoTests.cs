@@ -11,22 +11,11 @@ public sealed class FlyersRepoTests
     private static readonly string LastWeek = DateTime.UtcNow.AddDays(-7).ToString("yyyy-MM-dd");
 
     [Fact]
-    public void UpsertStore_dedupes_by_name()
-    {
-        using var db = new TempDb();
-        var repo = new FlyersRepo();
-        var a = repo.UpsertStore(db.Conn, "Walmart");
-        var b = repo.UpsertStore(db.Conn, "Walmart");
-        Assert.Equal(a, b);
-        Assert.Single(repo.ListStores(db.Conn));
-    }
-
-    [Fact]
     public void Batch_assets_rawjson_and_deals_round_trip_money()
     {
         using var db = new TempDb();
         var repo = new FlyersRepo();
-        var storeId = repo.UpsertStore(db.Conn, "Loblaws");
+        var storeId = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var batch = repo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow, sourceType: "manual_upload");
         repo.AddAsset(db.Conn, batch, "image", "/tmp/flyer.png", sha256: "abc");
         repo.AddRawJson(db.Conn, batch, "{\"pages\":1}", sha256: "def");
@@ -47,11 +36,11 @@ public sealed class FlyersRepoTests
     }
 
     [Fact]
-    public void ListActiveDeals_filters_by_status_and_validity()
+    public void ListActiveDeals_filters_by_status_and_validity_and_count_agrees()
     {
         using var db = new TempDb();
         var repo = new FlyersRepo();
-        var storeId = repo.UpsertStore(db.Conn, "Sobeys");
+        var storeId = StoresRepo.CreateStore(db.Conn, "Sobeys").Id;
 
         var live = repo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow);
         repo.AddDeals(db.Conn, new[] { Deal(live, storeId, "Live") });
@@ -59,13 +48,14 @@ public sealed class FlyersRepoTests
         var expired = repo.CreateFlyerBatch(db.Conn, storeId, LastWeek, Yesterday);
         repo.AddDeals(db.Conn, new[] { Deal(expired, storeId, "Expired") });
 
-        var archived = repo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow);
+        var archived = repo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow, status: "archived");
         repo.AddDeals(db.Conn, new[] { Deal(archived, storeId, "Archived") });
-        repo.SetBatchStatus(db.Conn, archived, "archived");
 
         var active = repo.ListActiveDeals(db.Conn);
         Assert.Single(active);
         Assert.Equal("Live", active[0].Title);
+        // The COUNT twin (Home dashboard) must always agree with the materializing reader.
+        Assert.Equal(active.Count, repo.CountActiveDeals(db.Conn));
     }
 
     [Fact]
@@ -73,7 +63,7 @@ public sealed class FlyersRepoTests
     {
         using var db = new TempDb();
         var repo = new FlyersRepo();
-        var storeId = repo.UpsertStore(db.Conn, "Sobeys");
+        var storeId = StoresRepo.CreateStore(db.Conn, "Sobeys").Id;
         var batch = repo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow);
         repo.AddDeals(db.Conn, new[] { Deal(batch, storeId, "Live") });
 

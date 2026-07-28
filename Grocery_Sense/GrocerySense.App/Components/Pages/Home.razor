@@ -112,7 +112,7 @@ else
                 _familyCount = Family.UnreviewedCount();
 
                 using var conn = Db.Open();
-                _dealCount = new FlyersRepo().ListActiveDeals(conn).Count;
+                _dealCount = new FlyersRepo().CountActiveDeals(conn); // COUNT, not 5 000 materialized rows
             });
         }
         catch (Exception ex) { _error = ex.Message; }

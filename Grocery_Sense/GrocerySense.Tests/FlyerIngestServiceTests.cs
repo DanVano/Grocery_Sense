@@ -251,7 +251,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
     {
         using var db = new TempDb();
         var repo = new FlyersRepo();
-        var storeId = repo.UpsertStore(db.Conn, "Mart");
+        var storeId = StoresRepo.CreateStore(db.Conn, "Mart").Id;
 
         using (var tx = db.Conn.BeginTransaction())
         {
