@@ -115,6 +115,28 @@ public sealed class ReceiptsRepoTests
     }
 
     [Fact]
+    public void Failed_restore_rolls_back_and_keeps_the_backup_for_retry()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Doomed Mart");
+        var rid = InsertReceipt(db.Conn, store.Id, "2026-06-02", 9.99m, null, null);
+        var backupId = ReceiptsRepo.DeleteReceiptWithBackup(db.Conn, rid);
+
+        // The store vanishes after the backup — the restore's receipts insert now violates the FK.
+        using (var del = db.Conn.CreateCommand())
+        {
+            del.CommandText = "DELETE FROM stores WHERE id = " + store.Id;
+            del.ExecuteNonQuery();
+        }
+
+        Assert.ThrowsAny<SqliteException>(() => ReceiptsRepo.RestoreReceiptFromBackup(db.Conn, backupId));
+
+        Assert.Equal(0, Count(db.Conn, "receipts")); // nothing partially written
+        // The backup is NOT consumed by a failed restore — recreate the store and retry.
+        Assert.Contains(ReceiptsRepo.ListDeletedBackups(db.Conn), b => b.BackupId == backupId);
+    }
+
+    [Fact]
     public void Restore_reports_signature_conflict_without_stealing_the_key()
     {
         using var db = new TempDb();
