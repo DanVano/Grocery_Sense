@@ -88,6 +88,21 @@ public static class ShoppingListRepo
         return (int)Db.LastRowId(conn, tx);
     }
 
+    // Update the user-editable details of one row (F05). An unknown row throws — a silent no-op would
+    // read as a successful save.
+    public static void UpdateItemDetails(SqliteConnection conn, int rowId, double quantity, string unit,
+        string notes, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "UPDATE shopping_list SET quantity = $q, unit = $u, notes = $n WHERE id = $id");
+        cmd.Parameters.AddWithValue("$q", quantity);
+        cmd.Parameters.AddWithValue("$u", unit ?? "");
+        cmd.Parameters.AddWithValue("$n", notes ?? "");
+        cmd.Parameters.AddWithValue("$id", rowId);
+        if (cmd.ExecuteNonQuery() == 0)
+            throw new ArgumentException($"Shopping list row not found: {rowId}", nameof(rowId));
+    }
+
     public static void SetPriority(SqliteConnection conn, int rowId, string priority, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx, "UPDATE shopping_list SET priority = $p WHERE id = $id");

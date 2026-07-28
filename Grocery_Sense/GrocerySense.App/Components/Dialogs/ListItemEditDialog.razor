@@ -1,0 +1,41 @@
+@* Edit a shopping-list row's quantity/unit/notes (F05). Returns the edited values, or cancels. *@
+@using GrocerySense.Domain
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.subtitle1" Class="mb-2">@Row?.DisplayName</MudText>
+        <MudNumericField T="double" @bind-Value="_quantity" Label="Quantity" Min="0.01"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField @bind-Value="_unit" Label="Unit (optional, e.g. kg, L, each)"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_notes" Label="Notes" Lines="2"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_quantity <= 0)"
+                   OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Result(double Quantity, string Unit, string Notes);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ShoppingListRow? Row { get; set; }
+
+    private double _quantity = 1.0;
+    private string _unit = "";
+    private string _notes = "";
+
+    protected override void OnInitialized()
+    {
+        if (Row is null) return;
+        _quantity = Row.Quantity;
+        _unit = Row.Unit;
+        _notes = Row.Notes;
+    }
+
+    private void Save() => MudDialog.Close(DialogResult.Ok(new Result(_quantity, _unit.Trim(), _notes.Trim())));
+    private void Cancel() => MudDialog.Cancel();
+}

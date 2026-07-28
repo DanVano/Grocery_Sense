@@ -7,6 +7,7 @@
 @inject StapleRestockService Restock
 @inject BasketOptimizerService Optimizer
 @inject ShopModeState ShopState
+@inject IDialogService DialogService
 
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.h5">Shopping List</MudText>
@@ -245,6 +246,8 @@ else
                             <MudSelectItem T="string" Value="@("normal")">Normal</MudSelectItem>
                             <MudSelectItem T="string" Value="@("wait_for_sale")">Wait for sale</MudSelectItem>
                         </MudSelect>
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => EditRowAsync(row))" aria-label="Edit item" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
                                        OnClick="@(() => DeleteAsync(row.Id))" aria-label="Delete item" />
                     </div>
@@ -347,6 +350,15 @@ else
         RunAsync(() => Shopping.CheckOffItem(rowId, checkedOff));
 
     private Task DeleteAsync(int rowId) => RunAsync(() => Shopping.SoftDeleteItem(rowId));
+
+    // Edit quantity/unit/notes in place (F05) — no more delete + re-add for a typo'd quantity.
+    private async Task EditRowAsync(ShoppingListRow row)
+    {
+        var parameters = new DialogParameters<ListItemEditDialog> { { x => x.Row, row } };
+        var dialog = await DialogService.ShowAsync<ListItemEditDialog>($"Edit \"{row.DisplayName}\"", parameters);
+        if (await dialog.Result is not { Canceled: false, Data: ListItemEditDialog.Result edited }) return;
+        await RunAsync(() => Shopping.UpdateItemDetails(row.Id, edited.Quantity, edited.Unit, edited.Notes));
+    }
 
     private Task SetPriorityAsync(int rowId, string priority) =>
         RunAsync(() => Shopping.SetItemPriority(rowId, priority));

@@ -117,6 +117,13 @@ public sealed class ShoppingListService
             ? $"From deal: ${up.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}{(d.Unit is { Length: > 0 } u ? $"/{u}" : "")}"
             : "From deal";
 
+    // Edit a row's quantity/unit/notes after the fact (F05).
+    public void UpdateItemDetails(int rowId, double quantity, string unit, string notes)
+    {
+        using var conn = _factory.Open();
+        ShoppingListRepo.UpdateItemDetails(conn, rowId, quantity, unit, notes);
+    }
+
     public void SoftDeleteItem(int itemId)
     {
         using var conn = _factory.Open();

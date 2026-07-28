@@ -23,6 +23,31 @@ public sealed class ShoppingListRepoTests
     }
 
     [Fact]
+    public void UpdateItemDetails_persists_quantity_unit_notes_and_touches_nothing_else()
+    {
+        using var db = new TempDb();
+        var id = ShoppingListRepo.AddItem(db.Conn, "Rice", quantity: 1, unit: "bag", category: "pantry");
+        ShoppingListRepo.SetPriority(db.Conn, id, "must_have");
+
+        ShoppingListRepo.UpdateItemDetails(db.Conn, id, quantity: 2.5, unit: "kg", notes: "brown, not white");
+
+        var row = ShoppingListRepo.GetItem(db.Conn, id)!;
+        Assert.Equal(2.5, row.Quantity);
+        Assert.Equal("kg", row.Unit);
+        Assert.Equal("brown, not white", row.Notes);
+        Assert.Equal("Rice", row.DisplayName);      // untouched
+        Assert.Equal("must_have", row.Priority);    // untouched
+    }
+
+    [Fact]
+    public void UpdateItemDetails_unknown_row_throws_instead_of_pretending_to_save()
+    {
+        using var db = new TempDb();
+        Assert.Throws<ArgumentException>(() =>
+            ShoppingListRepo.UpdateItemDetails(db.Conn, 9999, 1.0, "", ""));
+    }
+
+    [Fact]
     public void ListActive_excludes_checked_off_and_deleted()
     {
         using var db = new TempDb();
