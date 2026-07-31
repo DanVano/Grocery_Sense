@@ -45,8 +45,7 @@ public sealed class FlyerSyncService
     private readonly SqliteConnectionFactory _factory;
     private readonly ConfigStore _config;
     private readonly IngredientMappingService _mapper;
-    private readonly UnitNormalizationService _unitNorm;
-    private readonly MultiBuyDealService _multibuy;
+    private readonly DealEnricher _enricher;
     private readonly FlyersRepo _repo = new();
     private readonly string _metaPath;
 
@@ -59,8 +58,7 @@ public sealed class FlyerSyncService
         _factory = factory;
         _config = config;
         _mapper = mapper;
-        _unitNorm = unitNorm;
-        _multibuy = multibuy;
+        _enricher = new DealEnricher(mapper, unitNorm, multibuy);
         var dir = Path.GetDirectoryName(factory.DbPath) is { Length: > 0 } d ? d : ".";
         _metaPath = Path.Combine(dir, "flyer_sync_meta.json");
     }
@@ -199,46 +197,18 @@ public sealed class FlyerSyncService
 
     private static TimeSpan Clamp(TimeSpan value, TimeSpan max) => value > max ? max : value;
 
-    // Same per-deal prep as FlyerIngestService.BuildDeal, applied to a provider row: promo phrase -> effective
-    // unit price, observed-unit guess, item mapping (no auto-create), unit normalization inside the caller's tx.
+    // Per-deal prep via the shared DealEnricher (the same pipeline manual flyer ingest uses), applied to a
+    // provider row inside the caller's tx. A row with no text at all stays untouched.
     private FlyerDeal EnrichDeal(SqliteConnection conn, SqliteTransaction tx, FlyerDeal d)
     {
-        var title = d.Title ?? "";
-        var description = string.IsNullOrEmpty(d.Description) ? title : d.Description!;
-        var combined = $"{title} {description}".Trim();
-        if (combined.Length == 0) return d;
-
-        var adj = _multibuy.Adjust($"{title} {d.PriceText ?? ""}".Trim(), quantity: 1.0,
-            unitPrice: ToDouble(d.UnitPrice), lineTotal: ToDouble(d.DealTotal), discount: null);
-
-        var observedUnit = _unitNorm.GuessUnitFromText(combined);
-        if (observedUnit == "unknown") observedUnit = "each";
-
-        int? itemId = null;
-        double? mapConf = null;
-        var normUnitPrice = adj.UnitPrice;
-        var normUnit = observedUnit;
-        var normNote = $"flyer;{adj.DealNote}";
-
-        var m = _mapper.MapToItem(conn, combined, tx);
-        if (m.ItemId is not null)
-        {
-            itemId = m.ItemId;
-            mapConf = m.Confidence;
-            if (adj.UnitPrice is not null)
-            {
-                var norm = _unitNorm.Normalize(conn, m.ItemId.Value, adj.UnitPrice.Value, observedUnit, combined, tx);
-                normUnitPrice = norm.NormUnitPrice;
-                normUnit = norm.NormUnit;
-                normNote = $"{norm.Note};{adj.DealNote};flyer";
-            }
-        }
-
+        var e = _enricher.Enrich(conn, d.Title, d.Description, d.PriceText,
+            ToDouble(d.UnitPrice), ToDouble(d.DealTotal), tx);
+        if (e is null) return d;
         return d with
         {
-            DealQty = adj.Quantity, DealTotal = Dec(adj.LineTotal), UnitPrice = Dec(adj.UnitPrice),
-            Unit = observedUnit, NormUnitPrice = Dec(normUnitPrice), NormUnit = normUnit, NormNote = normNote,
-            ItemId = itemId, MappingConfidence = mapConf,
+            DealQty = e.DealQty, DealTotal = e.DealTotal, UnitPrice = e.UnitPrice, Unit = e.Unit,
+            NormUnitPrice = e.NormUnitPrice, NormUnit = e.NormUnit, NormNote = e.NormNote,
+            ItemId = e.ItemId, MappingConfidence = e.MappingConfidence,
         };
     }
 

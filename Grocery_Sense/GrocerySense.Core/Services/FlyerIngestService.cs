@@ -36,8 +36,7 @@ public sealed class FlyerIngestService
     private readonly FlyerMutationGate _flyerGate;
     private readonly SqliteConnectionFactory _factory;
     private readonly IngredientMappingService _mapper;
-    private readonly UnitNormalizationService _unitNorm;
-    private readonly MultiBuyDealService _multibuy;
+    private readonly DealEnricher _enricher;
     private readonly FlyersRepo _repo = new();
 
     public FlyerIngestService(IFlyerLayoutClient layout, OcrGate gate, FlyerMutationGate flyerGate,
@@ -49,8 +48,7 @@ public sealed class FlyerIngestService
         _flyerGate = flyerGate;
         _factory = factory;
         _mapper = mapper;
-        _unitNorm = unitNorm;
-        _multibuy = multibuy;
+        _enricher = new DealEnricher(mapper, unitNorm, multibuy);
     }
 
     public async Task<FlyerIngestResult> IngestAssetsAsync(int? storeId, string? validFrom, string? validTo,
@@ -154,46 +152,23 @@ public sealed class FlyerIngestService
     private sealed record StagedAsset(
         string AssetType, string Path, string Sha, string RawJson, string RawSha, List<FlyerDeal> Deals);
 
-    // Builds a deal row (FlyerId/AssetId stamped later inside the tx). Mirrors the Python per-deal block:
-    // multibuy-adjust the price text, guess the observed unit, then map to an item and normalize.
+    // Builds a deal row (FlyerId/AssetId stamped later inside the tx) via the shared DealEnricher — the
+    // same pipeline flyer sync uses, so the two paths can no longer drift. Extracted deals always carry
+    // a price-anchored title, so a null enrichment here is a broken extractor, not a valid row.
     private FlyerDeal BuildDeal(SqliteConnection conn, int storeId, ExtractedDeal d)
     {
         var title = d.Title ?? "";
         var description = string.IsNullOrEmpty(d.Description) ? title : d.Description;
-        var combined = $"{title} {description}".Trim();
 
-        var adj = _multibuy.Adjust($"{title} {d.PriceText ?? ""}".Trim(), quantity: 1.0,
-            unitPrice: null, lineTotal: null, discount: null);
-
-        var observedUnit = _unitNorm.GuessUnitFromText(combined);
-        if (observedUnit == "unknown") observedUnit = "each";
-
-        int? itemId = null;
-        double? mapConf = null;
-        var normUnitPrice = adj.UnitPrice;
-        var normUnit = observedUnit;
-        var normNote = $"flyer;{adj.DealNote}";
-
-        var m = _mapper.MapToItem(conn, combined);
-        if (m.ItemId is not null)
-        {
-            itemId = m.ItemId;
-            mapConf = m.Confidence;
-            if (adj.UnitPrice is not null)
-            {
-                var norm = _unitNorm.Normalize(conn, m.ItemId.Value, adj.UnitPrice.Value, observedUnit, combined);
-                normUnitPrice = norm.NormUnitPrice;
-                normUnit = norm.NormUnit;
-                normNote = $"{norm.Note};{adj.DealNote};flyer";
-            }
-        }
+        var e = _enricher.Enrich(conn, title, description, d.PriceText, unitPrice: null, dealTotal: null)
+            ?? throw new InvalidOperationException("Extractor produced a deal with no text to enrich.");
 
         return new FlyerDeal(
             Id: 0, FlyerId: 0, AssetId: null, StoreId: storeId, PageIndex: d.PageIndex,
             Title: title, Description: description, PriceText: d.PriceText,
-            DealQty: adj.Quantity, DealTotal: Dec(adj.LineTotal), UnitPrice: Dec(adj.UnitPrice), Unit: observedUnit,
-            NormUnitPrice: Dec(normUnitPrice), NormUnit: normUnit, NormNote: normNote,
-            ItemId: itemId, MappingConfidence: mapConf, Confidence: d.Confidence, CreatedAt: null);
+            DealQty: e.DealQty, DealTotal: e.DealTotal, UnitPrice: e.UnitPrice, Unit: e.Unit,
+            NormUnitPrice: e.NormUnitPrice, NormUnit: e.NormUnit, NormNote: e.NormNote,
+            ItemId: e.ItemId, MappingConfidence: e.MappingConfidence, Confidence: d.Confidence, CreatedAt: null);
     }
 
     // ---------------- extractor v1 (heuristic, ported from _extract_deals_from_layout) ----------------
