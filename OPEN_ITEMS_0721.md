@@ -5,11 +5,19 @@ on 2026-07-21: `V3_Phase0_plan.md`, `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`, `INFLAT
 `Phase0_changes.md`, `Pony_tail_audit_claude_0718.md`, and the four `*_review_*_0718.md` files — all of
 which were fully or ~fully executed (verified against the code, 2026-07-21).
 
-**Current state (verified 2026-07-21):** all v2 + v2-follow-up feature code is done and merged to `main`
-(PR #1). **The Android head now BUILDS** (JDK 17 + API 36 installed; `dotnet build GrocerySense.App
+**Current state (updated 2026-07-31):** all v2 + v2-follow-up feature code is done and merged to `main`
+(PR #1). **The Android head BUILDS** (JDK 17 + API 36 installed; `dotnet build GrocerySense.App
 -f net10.0-android` → 0 errors, 7 pre-existing CS8602 nullable warnings in `AndroidLocalNotifier.cs`).
-Windows + Android heads both compile 0-error; **488 tests green**. What remains is almost entirely
-**on-device / user / hardware-gated** — no service or data code blocks release.
+
+**Unpushed work sits on `feat/feature-pack-1` (15 commits, off the `hardening/p0-intake-replace-ocr`
+tip, which is off `feat/family-food-features`): 608 tests green; Windows + Integrations build 0-error.**
+It carries the full `HARDENING_PLAN.md` rev 3.1 (P0-1…P1-6), seven UI/workflow features, a
+bugfix/security/perf/refactor pass, and three architecture deepenings. **Push + PR is a [USER]
+decision — not done.** The first push also gives the new CI workflow its first run.
+
+Everything still open below is **on-device / user / hardware-gated** — no service or data code blocks
+release. Android-only source (`MainActivity` share intake) is **compile-unverified on this machine**:
+it is outside the Windows head's TFM, so only an Android build proves it.
 
 **Supersedes** `V2_FOLLOWUPS.md` §1 (platform Phase 0) and §2 (on-device verification) — that file's outer
 copy predates the 2026-07-21 Android bring-up. `V2_FOLLOWUPS.md` §3 (known limitations), **§4
@@ -74,9 +82,30 @@ valid recorded outcome. Record every verdict in `IMPLEMENTATION_NOTES.md`.
 
 ## 4. On-device UI verification debt — [DEVICE]
 
-488 tests pass but **none exercise Razor or the Android platform layer** — all UI + intent behaviour is
+608 tests pass but **none exercise Razor or the Android platform layer** — all UI + intent behaviour is
 unproven at runtime. Verify on device (blocker = crash / data loss / feature unusable / silent-degradation;
 degraded = log to a device-polish backlog, doesn't block):
+
+**New surfaces from the hardening/feature branch (verify these first — several replace flows you may
+have smoke-tested before):**
+- **Share intake state machine** (P0-2, Android-only code — first Android build also proves it
+  compiles): share while a batch is pending/importing → **loud reject, zero copies**, original batch
+  intact · >10 URIs → 10 copied + disclosed reject · error-only batch shows **Dismiss** · kill mid-copy
+  → relaunch → the orphan is swept only **past the 24 h age gate** (age the file artificially to test).
+- **Atomic replace** (P0-1): backfill chunk with Replace ON, **skip a duplicate at the date dialog** →
+  the original receipt is still listed (this is the bug that motivated the work) · a forced conflict
+  reads as "replace conflict — originals kept", never as "duplicate"/"failed".
+- **Spend caps** (P0-3): 25-file backfill pick → clean reject before any OCR call · chunk of 10 OK ·
+  multipage TIFF bills one page (check the Azure portal's page count after a scan).
+- **Restore** (P1-5 + the new UI): Receipts → **Recently deleted** → Restore (conflicts disclosed) ·
+  share-sheet backup → **second emulator / wiped app** → restore-from-backup in the **startup error
+  shell** → data visible after the cold-start swap (this is the backfill gate's exit test) · kill the
+  app mid-swap → next launch recovers deterministically.
+- **Flipp sync semantics** (P1-4): airplane-mode sync → visible failure, `NeedsSync` still true, next
+  resume retries · the last-failure line persists on Deals after the snackbar is gone.
+- **New feature surfaces:** item price-history panel · budget by-store table · watch-hit Add-to-list ·
+  list-row edit dialog (qty/unit/notes) · add-field **autocomplete** (picked suggestion maps, free text
+  and comma multi-add still work) · **share list as text** through the OS share sheet.
 
 - **Backfill batch**: multi-pick, per-receipt date-confirm dialog, missing-date entry, cancel mid-batch,
   summary counts, retention (only imported images kept), store + date-range filter narrows/clears honestly.
@@ -104,11 +133,16 @@ Needs a **Mac build host (Xcode)** + Apple Developer account ($99/yr) — imposs
 C#/Blazor code is platform-neutral; the work is toolchain + head config + device smoke, not a rewrite.
 Dan wants to revisit. Gate: physical Mac (used M-series class) + Stages 2 & 4 complete.
 
-- [ ] **B1 source-gen sweep** [CODE, can start pre-Mac] — convert the remaining reflection-STJ sites (8-site
-  watch-list: `ConfigStore.cs:176/190/210/369`, `ReceiptIngestionService.cs:284`, `FlyerIngestService.cs:67`,
-  `AzureReceiptOcrClient.cs:40`, `FlyerDocIntClient.cs:42`) to source-gen `JsonSerializerContext` /
-  `JsonDocument` rewrites — must cover `FoodInflationByYear`. iOS full AOT has no JIT fallback; this is the
-  real risk. (Partly done: `UserConfig` load/save + several raw-JSON sites already source-genned.)
+- [x] **B1 source-gen sweep** [CODE] — **the 8-site watch-list is converted** (re-verified 2026-07-31 by
+  sweeping `JsonSerializer.(Serialize|Deserialize)` across the tree): every shipping call site now passes a
+  source-gen context — `ConfigStore` → `UserConfigJsonContext` (covers `FoodInflationByYear`; the
+  polymorphic member profile goes through `ProfileDictionaryConverter`), `ReceiptsRepo` →
+  `ReceiptSnapshotContext`, `UserRecipesRepo` → `StringListJsonContext`; the receipt/flyer ingest and both
+  Azure clients build their dictionaries with `Utf8JsonWriter`/`JsonDocument` (`RawJson.ToJsonString`)
+  rather than reflecting over `Dictionary<string, object?>`. The only reflection-based STJ left is in
+  `GrocerySense.Tests` fixtures, which never ship. **Residual risk is verification, not conversion:** iOS
+  full AOT has no JIT fallback, so this still has to be *proven* on a real AOT build (B3/B4) — and any new
+  serialized type must add a context (`V2_FOLLOWUPS.md` §4.7).
 - [ ] B1 privacy manifest / keychain entitlement / `IosLocalNotifier` — mostly landed (commit `eb50682`);
   finish + verify on device.
 - [ ] B2 first Mac build → simulator → device Debug · B3 Release AOT (MtouchInterpreter contingency for
@@ -118,6 +152,14 @@ Dan wants to revisit. Gate: physical Mac (used M-series class) + Stages 2 & 4 co
 ## 6. Security — on-device verification + standing gate
 
 Feature/hardening code done (SEC-01…05, 2026-07-18); details in `SECURITY_REVIEW_FUTURE_WORK.md`.
+**Second hardening pass done 2026-07-23** on `feat/feature-pack-1` — the full `HARDENING_PLAN.md`
+rev 3.1: atomic receipt replacement · bounded share intake + DB-aware orphan sweep · Azure
+spend/resource bounds (page caps, batch caps, one-at-a-time OCR gate, response + field guards) ·
+correct Flipp sync semantics (committed-success throttle, Retry-After, per-store retention) · staged
+cold-start restore + newer-schema guard · CI (unpiped `dotnet test` + unsigned Android Release compile
++ pinned full-history gitleaks). **Full-history secret scan run 2026-07-23: no secrets in tree or
+history** (method + rotation steps recorded in `SECURITY_REVIEW_FUTURE_WORK.md`); CI's gitleaks job is
+the authoritative recurring scan from here.
 
 - [ ] **On-device verification** [DEVICE] — iOS Keychain uninstall/reinstall (SEC-01), 20 MiB reject UX
   (SEC-02), disclosure copy + failed-import cleanup (SEC-03/04); re-validate Android **Release** security
@@ -132,6 +174,9 @@ The perf plans (Claude + Codex, 2026-07-18) are **~90% shipped** as `perf:` comm
 bounded item-search + receipt-summary aggregation, batched optimizer history, narrowed swap candidates,
 paged deal rows, reused mapping connections. What's left is deliberately measure-first:
 
+- [x] **Home no longer materializes the deal table for a count** (2026-07-31) — the landing screen ran
+  `ListActiveDeals` (up to 5 000 rows) just to show a number; `FlyersRepo.CountActiveDeals` is a real
+  `COUNT` with the same predicate, agreement pinned by test.
 - [ ] **Profile on an Android Release/AOT build with a seeded DB** — the whole plan gates on this and it
   hasn't run (query plans captured, on-device traces were blocked; now unblocked). Then stop.
 - [ ] Only if the numbers say so: **Items-page list virtualization** (`<Virtualize>` — Items still renders
