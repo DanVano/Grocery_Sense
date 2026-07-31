@@ -16,8 +16,20 @@ bugfix/security/perf/refactor pass, and three architecture deepenings. **Push + 
 decision — not done.** The first push also gives the new CI workflow its first run.
 
 Everything still open below is **on-device / user / hardware-gated** — no service or data code blocks
-release. Android-only source (`MainActivity` share intake) is **compile-unverified on this machine**:
-it is outside the Windows head's TFM, so only an Android build proves it.
+release. **The Android head builds in BOTH configurations (verified 2026-07-31): Debug and Release,
+0 errors, 8 pre-existing warnings** (7 CS8602 in `AndroidLocalNotifier.cs`, 1 CS0612 obsolete
+`OnBackPressed`) — so the Android-only share-intake source is compile-proven and CI's Android Release
+job should pass. Build it with:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"
+dotnet build GrocerySense.App -f net10.0-android [-c Release] `
+  -p:AndroidSdkDirectory="C:\Program Files (x86)\Android\android-sdk" `
+  -p:JavaSdkDirectory="C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"
+```
+
+**Run that after ANY edit under `Platforms/Android/` — the Windows head does not compile that folder**
+(it caught a CS0104 the whole Windows-only loop had missed; see `V2_FOLLOWUPS.md` §4.23).
 
 **Supersedes** `V2_FOLLOWUPS.md` §1 (platform Phase 0) and §2 (on-device verification) — that file's outer
 copy predates the 2026-07-21 Android bring-up. `V2_FOLLOWUPS.md` §3 (known limitations), **§4

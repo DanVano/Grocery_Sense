@@ -250,6 +250,14 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
     first so a **duplicate still wins over a line-count reject**, and `ParseLines` still runs its count
     guard before any catalog write. Skipped OCR entries leave **gaps** in `line_index` (survivors keep
     their original indices, so stored rows stay aligned with the paper receipt).
+23. **`Platforms/Android/` is NOT compiled by the Windows head — build the Android TFM after touching
+    it.** `dotnet test` + the Windows head can be fully green while Android-only source is broken. This
+    bit the P0-2 share-intake work: `MainActivity` has `using Android.OS;`, which ships its **own
+    `OperationCanceledException`**, so the deadline `catch (OperationCanceledException)` was a CS0104
+    ambiguity — invisible for a week of Windows-only verification, and it would have failed CI's Android
+    Release job on the first push. Catch `System.OperationCanceledException` explicitly in that folder
+    (the Android type would never match a `CancellationToken` throw anyway). Build command in
+    `OPEN_ITEMS_0721.md` §"Current state".
 
 ---
 

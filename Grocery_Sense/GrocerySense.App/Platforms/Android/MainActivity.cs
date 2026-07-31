@@ -140,7 +140,10 @@ public class MainActivity : MauiAppCompatActivity
                     }
                     paths.Add(copied);
                 }
-                catch (OperationCanceledException)
+                // Fully qualified: Android.OS ships its own OperationCanceledException, and this file
+                // has `using Android.OS;` — the unqualified name is ambiguous (CS0104) and, worse, the
+                // Android one would never match the token's throw.
+                catch (System.OperationCanceledException)
                 {
                     errors.Add("Copy deadline exceeded — remaining shared items were not copied.");
                     break;
