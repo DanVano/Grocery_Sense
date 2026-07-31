@@ -653,65 +653,44 @@ else
 
     private static bool TryDeleteReceiptFile(string? path) => ReceiptFilePolicy.TryDelete(path);
 
-    // Import the shared receipt(s) the user just confirmed. Each already lives in the receipts dir (copied
-    // by the share handler through the bounded policy); this is the single-scan ingest path per file, so a
-    // shared receipt gets the same duplicate handling and price-alert scan as one taken in-app.
-    // TryBeginImport claims the batch atomically; every exit path releases it via CompleteImport, and a
-    // failure or cancel deletes the failing + remaining copies so nothing is silently hoarded.
+    // Import the shared receipt(s) the user just confirmed. The whole workflow — atomic claim, per-file
+    // single-scan ingest, which copies to delete, batch release — lives in
+    // ScanIngestService.ImportSharedBatchAsync (Core, tested on TempDb); this page renders the summary.
     private async Task ImportSharedAsync()
     {
-        if (!PendingShared.TryBeginImport(out var claimedPaths, out var claimedErrors)) return;
-        var paths = claimedPaths;
-        var rejected = claimedErrors.Count;
         _busy = true;
         _message = null;
         _cts = new CancellationTokenSource();
-        int imported = 0, duplicates = 0, conflicts = 0, alerts = 0, alertFailures = 0;
-        var index = 0;
         try
         {
-            for (; index < paths.Count; index++)
+            _stage = "Reading receipt (OCR + parsing)…";
+            StateHasChanged();
+            var summary = await ScanIngest.ImportSharedBatchAsync(
+                PendingShared, _replaceDuplicates, p => TryDeleteReceiptFile(p), _cts.Token);
+            if (summary is null) return; // nothing claimable — another import holds the batch
+
+            if (summary.Cancelled)
             {
-                _cts.Token.ThrowIfCancellationRequested();
-                _stage = "Reading receipt (OCR + parsing)…";
-                StateHasChanged();
-                // Same single-scan workflow as an in-app scan. An ingest failure throws and aborts the batch
-                // (caught below); an alert-pass failure does not — the receipt imported, so keep its image.
-                var outcome = await ScanIngest.IngestScannedFileAsync(paths[index], _replaceDuplicates, _cts.Token);
-                if (outcome.Ingest.ReplaceConflict) { conflicts++; TryDeleteReceiptFile(paths[index]); }
-                else if (outcome.Ingest.WasDuplicate) { duplicates++; TryDeleteReceiptFile(paths[index]); }
-                else
-                {
-                    imported++;
-                    alerts += outcome.AlertsOpened;
-                    if (outcome.AlertError is not null) alertFailures++;
-                }
+                _messageSeverity = Severity.Info;
+                _message = "Shared import cancelled.";
             }
-            _messageSeverity = alertFailures > 0 || conflicts > 0 ? Severity.Warning : Severity.Success;
-            _message = $"Shared import — {imported} imported, {duplicates} duplicate(s)"
-                + (conflicts > 0 ? $", {conflicts} replace conflict(s) — originals kept" : "")
-                + (rejected > 0 ? $", {rejected} rejected on share" : "")
-                + (alerts > 0 ? $" · {alerts} new price alert(s) — see Savings" : "")
-                + (alertFailures > 0 ? $" · {alertFailures} price-alert refresh(es) failed" : "") + ".";
+            else if (summary.FailureMessage is { } fail)
+            {
+                Fail($"Shared import failed after {summary.Imported} import(s): {fail}");
+            }
+            else
+            {
+                _messageSeverity = summary.AlertFailures > 0 || summary.Conflicts > 0 ? Severity.Warning : Severity.Success;
+                _message = $"Shared import — {summary.Imported} imported, {summary.Duplicates} duplicate(s)"
+                    + (summary.Conflicts > 0 ? $", {summary.Conflicts} replace conflict(s) — originals kept" : "")
+                    + (summary.Rejected > 0 ? $", {summary.Rejected} rejected on share" : "")
+                    + (summary.AlertsOpened > 0 ? $" · {summary.AlertsOpened} new price alert(s) — see Savings" : "")
+                    + (summary.AlertFailures > 0 ? $" · {summary.AlertFailures} price-alert refresh(es) failed" : "") + ".";
+            }
             await ReloadAsync();
-        }
-        catch (OperationCanceledException)
-        {
-            // Drop the copies not yet imported when the user cancels mid-batch.
-            for (var i = index; i < paths.Count; i++) TryDeleteReceiptFile(paths[i]);
-            _messageSeverity = Severity.Info;
-            _message = "Shared import cancelled.";
-        }
-        catch (Exception ex)
-        {
-            // Generic failure: delete the failing copy and every remaining one — a committed receipt keeps
-            // its image; an uncommitted copy must not linger unowned.
-            for (var i = index; i < paths.Count; i++) TryDeleteReceiptFile(paths[i]);
-            Fail($"Shared import failed after {imported} import(s): {ex.Message}");
         }
         finally
         {
-            PendingShared.CompleteImport();
             RefreshShared();
             _busy = false;
             _stage = "";

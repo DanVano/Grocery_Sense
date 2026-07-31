@@ -41,4 +41,55 @@ public sealed class ScanIngestService
             return new ScanIngestOutcome(outcome, 0, ex.Message);
         }
     }
+
+    // The shared-batch workflow (architecture-review deepening): claim the pending batch atomically, run
+    // every copy through the single-scan workflow above, decide which copies die (duplicate/conflict copies
+    // immediately; on failure or cancel, the failing + remaining ones — a committed receipt keeps its image,
+    // an uncommitted copy must not linger unowned), and ALWAYS release the batch. This orchestration used to
+    // live in Receipts.razor — the one place the test project cannot reach. File deletion stays delegated:
+    // the guarded file policy lives in the App head, Core only decides WHICH paths are handed to it.
+    // Returns null when no batch was claimable (nothing pending, or another import holds it).
+    public async Task<SharedImportSummary?> ImportSharedBatchAsync(
+        PendingSharedReceiptsService pending, bool replaceExisting, Action<string> deleteCopy,
+        CancellationToken ct = default)
+    {
+        if (!pending.TryBeginImport(out var paths, out var claimedErrors)) return null;
+
+        int imported = 0, duplicates = 0, conflicts = 0, alerts = 0, alertFailures = 0;
+        var index = 0;
+        try
+        {
+            for (; index < paths.Count; index++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var outcome = await IngestScannedFileAsync(paths[index], replaceExisting, ct);
+                if (outcome.Ingest.ReplaceConflict) { conflicts++; deleteCopy(paths[index]); }
+                else if (outcome.Ingest.WasDuplicate) { duplicates++; deleteCopy(paths[index]); }
+                else
+                {
+                    imported++;
+                    alerts += outcome.AlertsOpened;
+                    if (outcome.AlertError is not null) alertFailures++;
+                }
+            }
+            return new SharedImportSummary(imported, duplicates, conflicts, claimedErrors.Count,
+                alerts, alertFailures, Cancelled: false, FailureMessage: null);
+        }
+        catch (OperationCanceledException)
+        {
+            for (var i = index; i < paths.Count; i++) deleteCopy(paths[i]);
+            return new SharedImportSummary(imported, duplicates, conflicts, claimedErrors.Count,
+                alerts, alertFailures, Cancelled: true, FailureMessage: null);
+        }
+        catch (Exception ex)
+        {
+            for (var i = index; i < paths.Count; i++) deleteCopy(paths[i]);
+            return new SharedImportSummary(imported, duplicates, conflicts, claimedErrors.Count,
+                alerts, alertFailures, Cancelled: false, FailureMessage: ex.Message);
+        }
+        finally
+        {
+            pending.CompleteImport();
+        }
+    }
 }

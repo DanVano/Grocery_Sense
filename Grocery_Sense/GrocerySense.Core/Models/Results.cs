@@ -143,6 +143,14 @@ public record IngestOutcome(
 // only the alert enrichment failed. Ingest failures throw (the receipt never committed) and are not modeled here.
 public sealed record ScanIngestOutcome(IngestOutcome Ingest, int AlertsOpened, string? AlertError = null);
 
+// Outcome of importing a claimed shared batch (ScanIngestService.ImportSharedBatchAsync). Rejected counts
+// the share-time rejections claimed with the batch. Cancelled / FailureMessage describe an aborted run —
+// the failing and remaining copies were already handed to the deleteCopy callback, and counts up to the
+// abort point are real.
+public sealed record SharedImportSummary(
+    int Imported, int Duplicates, int Conflicts, int Rejected,
+    int AlertsOpened, int AlertFailures, bool Cancelled, string? FailureMessage);
+
 // The result of PrepareReceiptFileAsync: either a decided duplicate (Duplicate != null, before the user is
 // asked anything) or a ready-to-commit receipt (Ingest != null) awaiting a confirmed purchase date. OcrDate
 // is the ISO date OCR actually found, or null — when null the caller MUST supply a date (backfill rule:
