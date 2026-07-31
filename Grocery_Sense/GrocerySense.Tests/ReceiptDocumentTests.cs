@@ -91,6 +91,31 @@ public sealed class ReceiptDocumentTests
     }
 
     [Fact]
+    public void Skipped_entries_preserve_the_original_line_indices_of_survivors()
+    {
+        // line_index is the receipt's own ordering — a skipped OCR entry must leave a gap, not
+        // renumber the survivors (the stored rows would silently misalign with the paper receipt).
+        var doc = ReceiptDocument.Parse(Raw(new Dictionary<string, object?>
+        {
+            ["Items"] = new Dictionary<string, object?>
+            {
+                ["valueArray"] = new List<object?>
+                {
+                    Line(("Description", Field("Milk"))),
+                    Line(("Quantity", Field(1.0, "valueNumber"))), // no description -> skipped
+                    Line(("Description", Field("Eggs"))),
+                },
+            },
+        }), maxMerchantChars: 200);
+
+        var lines = doc.ParseLines(maxLines: 300, maxFieldChars: 500);
+
+        Assert.Equal(2, lines.Count);
+        Assert.Equal(0, lines[0].Index);
+        Assert.Equal(2, lines[1].Index); // gap preserved
+    }
+
+    [Fact]
     public void Missing_documents_yield_an_empty_but_honest_document()
     {
         var doc = ReceiptDocument.Parse(new Dictionary<string, object?>(), maxMerchantChars: 200);
