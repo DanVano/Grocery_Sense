@@ -24,10 +24,10 @@ public sealed class FlippClient : IFlyerProvider
     private const int MaxTextChars = 1000;
     private static readonly TimeSpan MaxResponseReadTime = TimeSpan.FromSeconds(20);
 
-    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly HttpClient _http;
 
-    public FlippClient() : this(SharedHttp) { }
+    // DI registers FlippClient as a singleton, so this creates exactly one HttpClient for the app.
+    public FlippClient() : this(new HttpClient { Timeout = TimeSpan.FromSeconds(20) }) { }
     public FlippClient(HttpClient http) => _http = http; // test seam: fake handler with canned JSON
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> FetchFlyersForStoreAsync(
@@ -114,8 +114,6 @@ public sealed class FlippClient : IFlyerProvider
         }
 
         resp.EnsureSuccessStatusCode();
-        if (resp.Content.Headers.ContentLength is > MaxResponseBytes)
-            throw new InvalidOperationException("Flipp response exceeded 4 MiB.");
 
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         readCts.CancelAfter(MaxResponseReadTime);

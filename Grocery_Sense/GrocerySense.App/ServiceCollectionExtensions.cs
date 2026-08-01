@@ -43,7 +43,7 @@ public static class ServiceCollectionExtensions
             string filePath, CancellationToken ct = default)
         {
             var (endpoint, apiKey) = await ReadAzureDocIntCredsAsync();
-            return await new AzureReceiptOcrClient(endpoint, apiKey).AnalyzeReceiptFileAsync(filePath, ct);
+            return await new AzureDocIntClient(endpoint, apiKey).AnalyzeReceiptFileAsync(filePath, ct);
         }
     }
 
@@ -54,7 +54,7 @@ public static class ServiceCollectionExtensions
             string filePath, CancellationToken ct = default)
         {
             var (endpoint, apiKey) = await ReadAzureDocIntCredsAsync();
-            return await new FlyerDocIntClient(endpoint, apiKey).AnalyzeLayoutFileAsync(filePath, ct);
+            return await new AzureDocIntClient(endpoint, apiKey).AnalyzeLayoutFileAsync(filePath, ct);
         }
     }
 

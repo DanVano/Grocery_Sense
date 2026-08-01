@@ -5,9 +5,9 @@ namespace GrocerySense.Tests;
 public sealed class AzureDocIntClientSecurityTests
 {
     [Fact]
-    public async Task Receipt_client_rejects_non_azure_endpoint_before_reading_file()
+    public async Task Receipt_path_rejects_non_azure_endpoint_before_reading_file()
     {
-        var client = new AzureReceiptOcrClient("https://evil.example", "key");
+        var client = new AzureDocIntClient("https://evil.example", "key");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => client.AnalyzeReceiptFileAsync("missing.jpg"));
@@ -16,9 +16,9 @@ public sealed class AzureDocIntClientSecurityTests
     }
 
     [Fact]
-    public async Task Flyer_client_rejects_non_azure_endpoint_before_reading_file()
+    public async Task Layout_path_rejects_non_azure_endpoint_before_reading_file()
     {
-        var client = new FlyerDocIntClient("https://evil.example", "key");
+        var client = new AzureDocIntClient("https://evil.example", "key");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => client.AnalyzeLayoutFileAsync("missing.jpg"));
@@ -27,9 +27,9 @@ public sealed class AzureDocIntClientSecurityTests
     }
 
     [Fact]
-    public async Task Receipt_client_allows_azure_endpoint()
+    public async Task Azure_endpoint_is_allowed()
     {
-        var client = new AzureReceiptOcrClient("https://demo.cognitiveservices.azure.com", "key");
+        var client = new AzureDocIntClient("https://demo.cognitiveservices.azure.com", "key");
 
         await Assert.ThrowsAsync<FileNotFoundException>(() => client.AnalyzeReceiptFileAsync("missing.jpg"));
     }
