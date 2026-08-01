@@ -140,5 +140,17 @@ public sealed class PendingSharedReceiptsServiceTests
 
         Assert.Equal(PendingSharedReceiptsService.MaxErrorChars, svc.Peek().Errors[0].Length);
     }
+
+    // Locks the intake ceilings against silent loosening. What this does NOT prove: the branching that
+    // applies them lives in MainActivity.CopySharedReceiptsAsync (over-count truncation and the aggregate
+    // stop), Android-only code the test project can't reference — that path stays on-device verification.
+    [Fact]
+    public void Share_intake_caps_hold_their_values()
+    {
+        Assert.Equal(10, PendingSharedReceiptsService.MaxUrisPerShare);
+        Assert.Equal(100L * 1024 * 1024, PendingSharedReceiptsService.MaxAggregateBytes);
+        Assert.Equal(TimeSpan.FromMinutes(2), PendingSharedReceiptsService.CopyDeadline);
+        Assert.Equal(128, PendingSharedReceiptsService.MaxDisplayNameChars);
+    }
 }
 

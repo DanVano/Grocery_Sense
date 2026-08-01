@@ -54,6 +54,29 @@ public class DiResolutionSmokeTests
             provider.GetRequiredService(descriptor.ServiceType);
     }
 
+    // Both gates are load-bearing and both work ONLY as singletons: OcrGate (P0-3) is the one paid-OCR
+    // call in flight app-wide — it can't live inside the Azure clients because the App head builds a new
+    // client per call — and FlyerMutationGate (P1-4) is the single flyer-write lock shared by scheduler
+    // resume, manual sync, and manual import. Each service takes its gate by constructor injection, so an
+    // AddSingleton -> AddTransient slip would hand every consumer a private semaphore, serializing nothing,
+    // with no other test failing. Resolving twice and comparing identity is what catches that.
+    [Fact]
+    public void Paid_ocr_and_flyer_write_gates_are_singletons_so_the_services_share_them()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"gs_gates_{Guid.NewGuid():N}.db");
+        var services = new ServiceCollection();
+        services.AddGrocerySenseCore(dbPath);
+        services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
+        services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
+        services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
+        services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
+
+        using var provider = services.BuildServiceProvider(validateScopes: true);
+
+        Assert.Same(provider.GetRequiredService<OcrGate>(), provider.GetRequiredService<OcrGate>());
+        Assert.Same(provider.GetRequiredService<FlyerMutationGate>(), provider.GetRequiredService<FlyerMutationGate>());
+    }
+
     [Fact]
     public async Task SyncCompleted_wiring_refreshes_price_drop_alerts()
     {
