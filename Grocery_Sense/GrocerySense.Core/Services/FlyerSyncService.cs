@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
@@ -46,10 +45,8 @@ public sealed class FlyerSyncService
     private readonly ConfigStore _config;
     private readonly IngredientMappingService _mapper;
     private readonly DealEnricher _enricher;
-    private readonly FlyersRepo _repo = new();
-    private readonly string _metaPath;
 
-    private static readonly Regex IsoDate = new(@"^\d{4}-\d{2}-\d{2}$");
+    private readonly string _metaPath;
 
     public FlyerSyncService(IFlyerProvider provider, SqliteConnectionFactory factory, ConfigStore config,
         IngredientMappingService mapper, UnitNormalizationService unitNorm, MultiBuyDealService multibuy)
@@ -156,16 +153,16 @@ public sealed class FlyerSyncService
                 // A valid EMPTY result also lands here — stale deals must not outlive the sync that found
                 // nothing. Manual batches (other source_type) are untouched, and prices.flyer_source_id
                 // points at flyer_sources, a different table — price history cannot be affected.
-                _repo.DeleteBatchesForStore(conn, store.Id, AutoSourceType, tx);
+                FlyersRepo.DeleteBatchesForStore(conn, store.Id, AutoSourceType, tx);
 
                 if (rawDeals.Count > 0)
                 {
                     var validFrom = rawDeals.Select(d => IsoOr(defaultFrom, GetStr(d, "valid_from"))).Min() ?? defaultFrom;
                     var validTo = rawDeals.Select(d => IsoOr(defaultTo, GetStr(d, "valid_to"))).Max() ?? defaultTo;
-                    var flyerId = _repo.CreateFlyerBatch(conn, store.Id, validFrom, validTo,
+                    var flyerId = FlyersRepo.CreateFlyerBatch(conn, store.Id, validFrom, validTo,
                         sourceType: AutoSourceType, sourceRef: $"auto_sync_{defaultFrom}", note: $"Auto-sync {defaultFrom}", tx: tx);
                     var rows = rawDeals.Select(d => EnrichDeal(conn, tx, MapDeal(flyerId, store.Id, d))).ToList();
-                    dealsInserted += _repo.AddDeals(conn, rows, tx);
+                    dealsInserted += FlyersRepo.AddDeals(conn, rows, tx);
                 }
 
                 tx.Commit();
@@ -288,7 +285,9 @@ public sealed class FlyerSyncService
 
     // ---------------- dict/value helpers (plain CLR or JsonElement) ----------------
 
-    private static string IsoOr(string fallback, string? v) => v is not null && IsoDate.IsMatch(v.Trim()) ? v.Trim() : fallback;
+    private static string IsoOr(string fallback, string? v) =>
+        v is not null && DateOnly.TryParseExact(v.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out _) ? v.Trim() : fallback;
 
     private static decimal? Dec(double? v) => v is { } x ? (decimal)x : null;
 

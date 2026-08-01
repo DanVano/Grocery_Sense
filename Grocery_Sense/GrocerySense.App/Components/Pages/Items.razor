@@ -158,7 +158,7 @@ else
             var (aliases, profile) = await Task.Run(() =>
             {
                 using var conn = Db.Open();
-                return (new ItemAliasesRepo().ListByItem(conn, itemId),
+                return (ItemAliasesRepo.ListByItem(conn, itemId),
                         PriceHistory.GetItemPriceProfile(itemId));
             });
             _aliases[itemId] = aliases;

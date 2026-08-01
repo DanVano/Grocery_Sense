@@ -156,7 +156,8 @@ internal sealed class ReceiptDocument
         return present.Count == 0 ? null : present.Average();
     }
 
-    private static bool IsIsoDate(string s) => Regex.IsMatch(s.Trim(), @"^\d{4}-\d{2}-\d{2}$");
+    private static bool IsIsoDate(string s) =>
+        DateOnly.TryParseExact(s.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 }

@@ -75,6 +75,6 @@ public sealed class ItemManagerServiceTests
             $"SELECT item_id FROM receipt_line_items WHERE id = {lineId}")));
         Assert.Equal(right, Convert.ToInt32(ExecScalar(db.Conn,
             $"SELECT item_id FROM prices WHERE receipt_id = {receipt} AND raw_name = 'margerine tub'")));
-        Assert.Equal(right, new ItemAliasesRepo().GetByAlias(db.Conn, "margerine tub")!.ItemId);
+        Assert.Equal(right, ItemAliasesRepo.GetByAlias(db.Conn, "margerine tub")!.ItemId);
     }
 }

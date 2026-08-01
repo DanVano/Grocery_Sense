@@ -195,7 +195,7 @@ else
                 var eff = Prefs.ComputeEffectivePreferences();
                 using var conn = Db.Open();
                 var storeNames = StoresRepo.ListStores(conn).ToDictionary(s => s.Id, s => s.Name);
-                var deals = new FlyersRepo().ListActiveDeals(conn);
+                var deals = FlyersRepo.ListActiveDeals(conn);
 
                 // Usual (receipt-median) prices for mapped deals so the multi-buy label can carry a verdict.
                 var mappedIds = deals.Where(d => d.ItemId is not null).Select(d => d.ItemId!.Value).Distinct().ToList();

@@ -4,10 +4,10 @@ using Microsoft.Data.Sqlite;
 namespace GrocerySense.Data.Repositories;
 
 // Port of reference-python/src/Grocery_Sense/data/repositories/item_aliases_repo.py
-// Kept instance-based (the Phase-3 IngredientMappingService composes it). Stateless: the caller always
-// supplies the connection (+ tx for the buffered-write flush), so the Python optional-conn-or-open-own
-// behavior collapses to a required connection.
-public sealed class ItemAliasesRepo
+// Static like every other repo (it was always stateless): the caller supplies the connection (+ tx for
+// the buffered-write flush), so the Python optional-conn-or-open-own behavior collapses to a required
+// connection.
+public static class ItemAliasesRepo
 {
     private const string SelectCols =
         "id, alias_text, item_id, confidence, source, created_at, last_seen_at, times_seen";
@@ -22,7 +22,7 @@ public sealed class ItemAliasesRepo
         LastSeenAt: r.GetStringOrNull(6),
         TimesSeen: r.GetInt32(7));
 
-    public ItemAlias? GetByAlias(SqliteConnection conn, string aliasText, SqliteTransaction? tx = null)
+    public static ItemAlias? GetByAlias(SqliteConnection conn, string aliasText, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM item_aliases WHERE alias_text = $alias");
         cmd.Parameters.AddWithValue("$alias", aliasText.Trim().ToLowerInvariant());
@@ -30,7 +30,7 @@ public sealed class ItemAliasesRepo
         return r.Read() ? Map(r) : null;
     }
 
-    public void UpsertAlias(SqliteConnection conn, string aliasText, int itemId, double confidence = 1.0,
+    public static void UpsertAlias(SqliteConnection conn, string aliasText, int itemId, double confidence = 1.0,
         string source = "manual", SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
@@ -53,7 +53,7 @@ public sealed class ItemAliasesRepo
         cmd.ExecuteNonQuery();
     }
 
-    public void MarkSeen(SqliteConnection conn, string aliasText, SqliteTransaction? tx = null)
+    public static void MarkSeen(SqliteConnection conn, string aliasText, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
             "UPDATE item_aliases SET last_seen_at = $now, times_seen = times_seen + 1 WHERE alias_text = $alias");
@@ -63,7 +63,7 @@ public sealed class ItemAliasesRepo
     }
 
     // Aliases for a single item (uses idx_item_aliases_item_id) — avoids loading the whole table to filter.
-    public IReadOnlyList<ItemAlias> ListByItem(SqliteConnection conn, int itemId, SqliteTransaction? tx = null)
+    public static IReadOnlyList<ItemAlias> ListByItem(SqliteConnection conn, int itemId, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
             $"SELECT {SelectCols} FROM item_aliases WHERE item_id = $item ORDER BY times_seen DESC, alias_text ASC");

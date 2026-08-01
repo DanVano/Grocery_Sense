@@ -126,7 +126,7 @@ public sealed class ItemsAdminRepoTests
         Assert.NotNull(ItemsRepo.GetItemById(db.Conn, target));
         // 7 seeded rows moved; the source name is now also an alias of the target (+1 alias row).
         Assert.Equal(8, CountItemIdRows(db.Conn, target));
-        Assert.Equal(target, new ItemAliasesRepo().GetByAlias(db.Conn, "2% milk")!.ItemId);
+        Assert.Equal(target, ItemAliasesRepo.GetByAlias(db.Conn, "2% milk")!.ItemId);
     }
 
     [Fact]

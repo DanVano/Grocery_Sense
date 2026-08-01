@@ -18,7 +18,7 @@ public sealed class DealEnricherTests
         using var db = new TempDb();
         var item = ItemsRepo.CreateItem(db.Conn, "Apples").Id;
         var normalized = new IngredientMappingService(db.Factory).MapToItem("Apples Apples").NormalizedInput;
-        new ItemAliasesRepo().UpsertAlias(db.Conn, normalized, item, 1.0);
+        ItemAliasesRepo.UpsertAlias(db.Conn, normalized, item, 1.0);
 
         var e = Build(db).Enrich(db.Conn, "Apples", null, "2/$5.00", unitPrice: null, dealTotal: null)!;
 

@@ -111,9 +111,8 @@ public sealed class DbMaintenanceServiceTests : IDisposable
             cmd.Parameters.AddWithValue("$p", referencedReceipt);
             cmd.ExecuteNonQuery();
         }
-        var repo = new FlyersRepo();
-        var flyerId = repo.CreateFlyerBatch(db.Conn, store, "2026-06-01", "2026-06-08");
-        repo.AddAsset(db.Conn, flyerId, "image", referencedFlyer);
+        var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, store, "2026-06-01", "2026-06-08");
+        FlyersRepo.AddAsset(db.Conn, flyerId, "image", referencedFlyer);
 
         var removed = new DbMaintenanceService(db.Factory)
             .SweepUnreferencedIntakeFiles(receiptsDir, flyersDir, DateTime.UtcNow.AddHours(-24));

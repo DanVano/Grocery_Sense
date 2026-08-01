@@ -37,7 +37,6 @@ public sealed class FlyerIngestService
     private readonly SqliteConnectionFactory _factory;
     private readonly IngredientMappingService _mapper;
     private readonly DealEnricher _enricher;
-    private readonly FlyersRepo _repo = new();
 
     public FlyerIngestService(IFlyerLayoutClient layout, OcrGate gate, FlyerMutationGate flyerGate,
         SqliteConnectionFactory factory, IngredientMappingService mapper, UnitNormalizationService unitNorm,
@@ -128,22 +127,22 @@ public sealed class FlyerIngestService
         using (var conn = _factory.Open())
         using (var tx = conn.BeginTransaction())
         {
-            var flyerId = _repo.CreateFlyerBatch(conn, storeId, validFrom, validTo, sourceType, sourceRef, note, tx: tx);
+            var flyerId = FlyersRepo.CreateFlyerBatch(conn, storeId, validFrom, validTo, sourceType, sourceRef, note, tx: tx);
 
             var assetsCount = 0;
             var rawCount = 0;
             var dealRows = new List<FlyerDeal>();
             foreach (var a in staged)
             {
-                var assetId = _repo.AddAsset(conn, flyerId, a.AssetType, a.Path, a.Sha, tx);
+                var assetId = FlyersRepo.AddAsset(conn, flyerId, a.AssetType, a.Path, a.Sha, tx);
                 assetsCount++;
-                _repo.AddRawJson(conn, flyerId, a.RawJson, a.RawSha, tx);
+                FlyersRepo.AddRawJson(conn, flyerId, a.RawJson, a.RawSha, tx);
                 rawCount++;
                 foreach (var d in a.Deals)
                     dealRows.Add(d with { FlyerId = flyerId, AssetId = assetId });
             }
 
-            var dealsCount = _repo.AddDeals(conn, dealRows, tx);
+            var dealsCount = FlyersRepo.AddDeals(conn, dealRows, tx);
             tx.Commit();
             return new FlyerIngestResult(flyerId, assetsCount, dealsCount, rawCount);
         }

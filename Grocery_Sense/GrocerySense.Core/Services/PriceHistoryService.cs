@@ -123,7 +123,7 @@ public sealed class PriceHistoryService
                 $"No price history for '{itemName}'. You can start building history by scanning receipts or entering prices.");
 
         var rates = _configStore?.Load().FoodInflationByYear ?? InflationRates.Seed;
-        var points = PricesRepo.GetPricesForItem(conn, item.Id, storeId: null, sinceDays: windowDays);
+        var points = PricesRepo.GetPricesForItem(conn, item.Id, sinceDays: windowDays);
 
         // Dated points only — inflation adjustment needs a real date; never fabricate one for an undated row.
         var dated = new List<(DateOnly Date, double Price)>();

@@ -61,18 +61,16 @@ public static class PricesRepo
 
     // Price points for an item, oldest-first. With limit set, fetches the most-recent N (DESC+LIMIT) then
     // reverses to preserve the no-limit ASC contract.
-    public static IReadOnlyList<PricePoint> GetPricesForItem(SqliteConnection conn, int itemId, int? storeId = null,
+    public static IReadOnlyList<PricePoint> GetPricesForItem(SqliteConnection conn, int itemId,
         int sinceDays = 365, int? limit = null, SqliteTransaction? tx = null)
     {
         var cutoff = CutoffIso(sinceDays);
         var sql = $"SELECT {PriceCols} FROM prices WHERE item_id = $item AND date >= $cutoff";
-        if (storeId is not null) sql += " AND store_id = $store";
         sql += limit is null ? " ORDER BY date ASC" : " ORDER BY date DESC LIMIT $limit";
 
         using var cmd = Db.Command(conn, tx, sql);
         cmd.Parameters.AddWithValue("$item", itemId);
         cmd.Parameters.AddWithValue("$cutoff", cutoff);
-        if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
         if (limit is not null) cmd.Parameters.AddWithValue("$limit", limit.Value);
 
         using var r = cmd.ExecuteReader();
@@ -134,7 +132,7 @@ public static class PricesRepo
 
     // unit_price history for an item (newest-first). receiptOnly filters to receipt line-items; otherwise
     // sources (if given) narrows the source list. Uses COALESCE(date, created_at) for the time window.
-    public static IReadOnlyList<double> ListUnitPrices(SqliteConnection conn, int itemId, int? storeId = null,
+    private static IReadOnlyList<double> ListUnitPrices(SqliteConnection conn, int itemId, int? storeId = null,
         int sinceDays = 180, IReadOnlyList<string>? sources = null, bool receiptOnly = false, int? limit = null,
         SqliteTransaction? tx = null)
     {

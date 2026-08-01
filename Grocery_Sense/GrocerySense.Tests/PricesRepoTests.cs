@@ -183,11 +183,11 @@ public sealed class PricesRepoTests
     // ---- GetActiveFlyerPricesBatch reads flyer_deals/flyer_batches (the populated family) ----
 
     private static int MakeBatch(TempDb db, int store, string? from, string? to, string status = "active")
-        => new FlyersRepo().CreateFlyerBatch(db.Conn, store, from, to, status: status);
+        => FlyersRepo.CreateFlyerBatch(db.Conn, store, from, to, status: status);
 
     private static void MakeDeal(TempDb db, int flyerId, int store, int? item, decimal? unitPrice,
         decimal? normUnitPrice = null, string? normUnit = null)
-        => new FlyersRepo().AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
+        => FlyersRepo.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
             Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
             Title: "t", Description: null, PriceText: null, DealQty: null, DealTotal: null,
             UnitPrice: unitPrice, Unit: "each", NormUnitPrice: normUnitPrice, NormUnit: normUnit,

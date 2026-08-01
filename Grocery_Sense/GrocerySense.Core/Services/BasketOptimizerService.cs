@@ -340,19 +340,11 @@ public sealed class BasketOptimizerService
     private static bool IsHardExcluded(EffectivePreferences eff, string itemName) =>
         eff.HardExcludes.Any(tok => PhraseSafeHit(itemName, tok));
 
-    // Whole-word match so "olive" doesn't hit "olive oil". safePhrases (if given) are contexts where the
-    // term is acceptable — a hit inside only a safe phrase is suppressed.
-    public static bool PhraseSafeHit(string text, string term, IReadOnlyList<string>? safePhrases = null)
+    // Whole-word match so "olive" doesn't hit "olive oil".
+    public static bool PhraseSafeHit(string text, string term)
     {
         var t = (text ?? "").ToLowerInvariant();
         var tm = (term ?? "").Trim().ToLowerInvariant();
-        if (tm.Length == 0) return false;
-        if (safePhrases is not null)
-            foreach (var sp in safePhrases)
-            {
-                var s = sp.ToLowerInvariant();
-                if (s.Contains(tm) && t.Contains(s)) return false;
-            }
-        return Regex.IsMatch(t, $@"\b{Regex.Escape(tm)}\b");
+        return tm.Length > 0 && Regex.IsMatch(t, $@"\b{Regex.Escape(tm)}\b");
     }
 }

@@ -41,7 +41,7 @@ public sealed class IngredientMappingService
     private static readonly Regex Spaces = new(@"\s+");
 
     private readonly SqliteConnectionFactory _factory;
-    private readonly ItemAliasesRepo _aliases = new();
+    
     private readonly object _sync = new();
 
     // Candidate-name list, loaded once per run (callers map many strings against the same catalog).
@@ -78,10 +78,10 @@ public sealed class IngredientMappingService
             // which the normalize pipeline strips (% / stopwords / abbrevs) — so a normalized-only lookup would
             // never find them. Whichever key hit is the one we mark as seen.
             var matchedKey = normalized;
-            var alias = normalized.Length > 0 ? _aliases.GetByAlias(conn, normalized, tx) : null;
+            var alias = normalized.Length > 0 ? ItemAliasesRepo.GetByAlias(conn, normalized, tx) : null;
             if (alias is null && rawKey.Length > 0 && rawKey != normalized)
             {
-                alias = _aliases.GetByAlias(conn, rawKey, tx);
+                alias = ItemAliasesRepo.GetByAlias(conn, rawKey, tx);
                 matchedKey = rawKey;
             }
             if (alias is not null)
@@ -130,9 +130,9 @@ public sealed class IngredientMappingService
             using var conn = _factory.Open();
             using var tx = conn.BeginTransaction();
             foreach (var (aliasText, itemId, confidence, source) in learns)
-                _aliases.UpsertAlias(conn, aliasText, itemId, confidence, source, tx);
+                ItemAliasesRepo.UpsertAlias(conn, aliasText, itemId, confidence, source, tx);
             foreach (var aliasText in touches)
-                _aliases.MarkSeen(conn, aliasText, tx);
+                ItemAliasesRepo.MarkSeen(conn, aliasText, tx);
             tx.Commit();
         }
     }

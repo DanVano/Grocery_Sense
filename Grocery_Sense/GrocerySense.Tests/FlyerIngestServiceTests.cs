@@ -213,7 +213,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
         // (title + extracted description, which here is "$5.99/kg Fresh Apples").
         var normalized = new IngredientMappingService(db.Factory)
             .MapToItem("Fresh Apples $5.99/kg Fresh Apples").NormalizedInput;
-        new ItemAliasesRepo().UpsertAlias(db.Conn, normalized, item, 1.0);
+        ItemAliasesRepo.UpsertAlias(db.Conn, normalized, item, 1.0);
         var svc = Build(db, CannedLayout());
 
         await svc.IngestAssetsAsync(storeId, null, null, new[] { WriteAsset("flyer-bytes") });
@@ -254,17 +254,16 @@ public sealed class FlyerIngestServiceTests : IDisposable
     public void Flyer_write_is_atomic_no_partial_rows_after_failure()
     {
         using var db = new TempDb();
-        var repo = new FlyersRepo();
         var storeId = StoresRepo.CreateStore(db.Conn, "Mart").Id;
 
         using (var tx = db.Conn.BeginTransaction())
         {
-            var flyerId = repo.CreateFlyerBatch(db.Conn, storeId, "2026-06-20", "2026-06-27", tx: tx);
-            repo.AddAsset(db.Conn, flyerId, "image", "/tmp/f.png", "sha", tx);
+            var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, "2026-06-20", "2026-06-27", tx: tx);
+            FlyersRepo.AddAsset(db.Conn, flyerId, "image", "/tmp/f.png", "sha", tx);
             // deal pointing at a non-existent flyer_id -> FK violation on flyer_deals.flyer_id.
             var poisoned = new FlyerDeal(0, 999999, null, storeId, 0, "X", null, "$1", null, 1m, 1m, "each",
                 null, null, null, null, null, null, null);
-            Assert.ThrowsAny<SqliteException>(() => repo.AddDeals(db.Conn, new[] { poisoned }, tx));
+            Assert.ThrowsAny<SqliteException>(() => FlyersRepo.AddDeals(db.Conn, new[] { poisoned }, tx));
             tx.Rollback();
         }
 

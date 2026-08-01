@@ -10,11 +10,10 @@ public sealed class ItemAliasesRepoTests
     {
         using var db = new TempDb();
         var item = ItemsRepo.CreateItem(db.Conn, "chicken breast");
-        var repo = new ItemAliasesRepo();
 
-        repo.UpsertAlias(db.Conn, "BP CHK BRST", item.Id, confidence: 0.95, source: "manual");
+        ItemAliasesRepo.UpsertAlias(db.Conn, "BP CHK BRST", item.Id, confidence: 0.95, source: "manual");
 
-        var got = repo.GetByAlias(db.Conn, "bp chk brst");
+        var got = ItemAliasesRepo.GetByAlias(db.Conn, "bp chk brst");
         Assert.NotNull(got);
         Assert.Equal(item.Id, got!.ItemId);
         Assert.Equal(0.95, got.Confidence);
@@ -26,13 +25,12 @@ public sealed class ItemAliasesRepoTests
     {
         using var db = new TempDb();
         var item = ItemsRepo.CreateItem(db.Conn, "rice");
-        var repo = new ItemAliasesRepo();
 
-        repo.UpsertAlias(db.Conn, "rice", item.Id);
-        repo.UpsertAlias(db.Conn, "rice", item.Id, confidence: 0.5, source: "auto");
-        repo.MarkSeen(db.Conn, "rice");
+        ItemAliasesRepo.UpsertAlias(db.Conn, "rice", item.Id);
+        ItemAliasesRepo.UpsertAlias(db.Conn, "rice", item.Id, confidence: 0.5, source: "auto");
+        ItemAliasesRepo.MarkSeen(db.Conn, "rice");
 
-        var got = repo.GetByAlias(db.Conn, "rice")!;
+        var got = ItemAliasesRepo.GetByAlias(db.Conn, "rice")!;
         Assert.Equal(3, got.TimesSeen);     // insert(1) + upsert(+1) + mark_seen(+1)
         Assert.Equal("auto", got.Source);
         Assert.Equal(0.5, got.Confidence);
@@ -43,12 +41,11 @@ public sealed class ItemAliasesRepoTests
     {
         using var db = new TempDb();
         var item = ItemsRepo.CreateItem(db.Conn, "milk");
-        var repo = new ItemAliasesRepo();
-        repo.UpsertAlias(db.Conn, "rare", item.Id);
-        repo.UpsertAlias(db.Conn, "common", item.Id);
-        repo.MarkSeen(db.Conn, "common");
+        ItemAliasesRepo.UpsertAlias(db.Conn, "rare", item.Id);
+        ItemAliasesRepo.UpsertAlias(db.Conn, "common", item.Id);
+        ItemAliasesRepo.MarkSeen(db.Conn, "common");
 
-        var all = repo.ListByItem(db.Conn, item.Id);
+        var all = ItemAliasesRepo.ListByItem(db.Conn, item.Id);
         Assert.Equal(2, all.Count);
         Assert.Equal("common", all[0].AliasText); // higher times_seen first
     }

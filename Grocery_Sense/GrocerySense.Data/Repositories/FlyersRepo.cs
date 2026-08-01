@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 
 namespace GrocerySense.Data.Repositories;
 
-public sealed class FlyersRepo
+public static class FlyersRepo
 {
     private const string DealCols =
         "id, flyer_id, asset_id, store_id, page_index, title, description, price_text, deal_qty, deal_total, " +
@@ -17,7 +17,7 @@ public sealed class FlyersRepo
         NormUnit: r.GetStringOrNull(13), NormNote: r.GetStringOrNull(14), ItemId: r.GetIntOrNull(15),
         MappingConfidence: r.GetDoubleOrNull(16), Confidence: r.GetDoubleOrNull(17), CreatedAt: r.GetStringOrNull(18));
 
-    public int CreateFlyerBatch(SqliteConnection conn, int storeId, string? validFrom, string? validTo,
+    public static int CreateFlyerBatch(SqliteConnection conn, int storeId, string? validFrom, string? validTo,
         string? sourceType = null, string? sourceRef = null, string? note = null, string status = "active",
         SqliteTransaction? tx = null)
     {
@@ -41,7 +41,7 @@ public sealed class FlyersRepo
     // P1-4 retention: delete a store's batches of ONE source type (e.g. flipp_api auto-sync batches),
     // leaving manual batches alone. Deals/assets/raw_json cascade via their FKs (foreign_keys=ON per
     // connection) — do not add redundant child deletes. Runs in the caller's transaction.
-    public int DeleteBatchesForStore(SqliteConnection conn, int storeId, string sourceType, SqliteTransaction? tx = null)
+    public static int DeleteBatchesForStore(SqliteConnection conn, int storeId, string sourceType, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
             "DELETE FROM flyer_batches WHERE store_id = $store AND source_type = $stype");
@@ -50,7 +50,7 @@ public sealed class FlyersRepo
         return cmd.ExecuteNonQuery();
     }
 
-    public int AddAsset(SqliteConnection conn, int flyerId, string assetType, string path, string? sha256 = null,
+    public static int AddAsset(SqliteConnection conn, int flyerId, string assetType, string path, string? sha256 = null,
         SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
@@ -64,7 +64,7 @@ public sealed class FlyersRepo
         return (int)Db.LastRowId(conn, tx);
     }
 
-    public int AddRawJson(SqliteConnection conn, int flyerId, string rawJson, string? sha256 = null,
+    public static int AddRawJson(SqliteConnection conn, int flyerId, string rawJson, string? sha256 = null,
         SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
@@ -77,7 +77,7 @@ public sealed class FlyersRepo
         return (int)Db.LastRowId(conn, tx);
     }
 
-    public int AddDeals(SqliteConnection conn, IReadOnlyList<FlyerDeal> deals, SqliteTransaction? tx = null)
+    public static int AddDeals(SqliteConnection conn, IReadOnlyList<FlyerDeal> deals, SqliteTransaction? tx = null)
     {
         var now = Db.NowIso();
         foreach (var d in deals)
@@ -115,7 +115,7 @@ public sealed class FlyersRepo
 
     // COUNT twin of ListActiveDeals (same predicate) for dashboards — the Home screen must not
     // materialize 5 000 deal rows to show a number.
-    public int CountActiveDeals(SqliteConnection conn, string? onDate = null, SqliteTransaction? tx = null)
+    public static int CountActiveDeals(SqliteConnection conn, string? onDate = null, SqliteTransaction? tx = null)
     {
         onDate ??= DateTime.UtcNow.ToString("yyyy-MM-dd");
         using var cmd = Db.Command(conn, tx,
@@ -127,32 +127,21 @@ public sealed class FlyersRepo
         return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
-    public IReadOnlyList<FlyerDeal> ListActiveDeals(SqliteConnection conn, int? storeId = null,
-        IReadOnlyList<int>? storeIds = null, string? onDate = null, int limit = 5000, SqliteTransaction? tx = null)
+    public static IReadOnlyList<FlyerDeal> ListActiveDeals(SqliteConnection conn, int? storeId = null,
+        string? onDate = null, int limit = 5000, SqliteTransaction? tx = null)
     {
-        if (storeIds is { Count: 0 }) return Array.Empty<FlyerDeal>();
-
         onDate ??= DateTime.UtcNow.ToString("yyyy-MM-dd");
         var sql =
             $"SELECT {PrefixCols("d")} FROM flyer_deals d JOIN flyer_batches b ON b.id = d.flyer_id " +
             "WHERE b.status = 'active' " +
             "AND (b.valid_from IS NULL OR b.valid_from <= $onDate) " +
             "AND (b.valid_to IS NULL OR b.valid_to >= $onDate)";
-
-        var inParams = new List<string>();
         if (storeId is not null) sql += " AND d.store_id = $store";
-        else if (storeIds is { Count: > 0 })
-        {
-            for (var i = 0; i < storeIds.Count; i++) inParams.Add($"$s{i}");
-            sql += $" AND d.store_id IN ({string.Join(",", inParams)})";
-        }
         sql += " ORDER BY d.id DESC LIMIT $limit";
 
         using var cmd = Db.Command(conn, tx, sql);
         cmd.Parameters.AddWithValue("$onDate", onDate);
         if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
-        else if (storeIds is { Count: > 0 })
-            for (var i = 0; i < storeIds.Count; i++) cmd.Parameters.AddWithValue(inParams[i], storeIds[i]);
         cmd.Parameters.AddWithValue("$limit", limit);
 
         using var r = cmd.ExecuteReader();

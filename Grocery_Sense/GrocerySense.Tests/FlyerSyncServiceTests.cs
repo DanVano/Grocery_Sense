@@ -100,7 +100,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         Assert.Single(result.Errors);
         Assert.Contains("Store A", result.Errors[0]);
 
-        var deals = new FlyersRepo().ListActiveDeals(conn, storeId: storeB);
+        var deals = FlyersRepo.ListActiveDeals(conn, storeId: storeB);
         Assert.Equal(2, deals.Count);
         Assert.Contains(deals, d => d.Title == "Apples" && d.UnitPrice == 2.50m);
     }
@@ -116,7 +116,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         var item = ItemsRepo.CreateItem(conn, "Apples").Id;
         // Alias keyed by the mapper's own normalization of the deal text (title doubles as description).
         var normalized = new IngredientMappingService(_factory).MapToItem("Apples Apples").NormalizedInput;
-        new ItemAliasesRepo().UpsertAlias(conn, normalized, item, 1.0);
+        ItemAliasesRepo.UpsertAlias(conn, normalized, item, 1.0);
 
         var provider = new FuncProvider(_ => new[]
         {
@@ -126,7 +126,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         var result = await Build(provider).RunSyncAsync(force: true);
 
         Assert.Equal(1, result.DealsInserted);
-        var deal = Assert.Single(new FlyersRepo().ListActiveDeals(conn, storeId: store));
+        var deal = Assert.Single(FlyersRepo.ListActiveDeals(conn, storeId: store));
         Assert.Equal(item, deal.ItemId);
         Assert.Equal(2.50m, deal.UnitPrice); // "2/$5" -> $2.50 effective unit price
         Assert.NotNull(deal.NormUnitPrice);
@@ -143,7 +143,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         var store = StoresRepo.CreateStore(conn, "Mart").Id;
         var item = ItemsRepo.CreateItem(conn, "Apples").Id;
         var normalized = new IngredientMappingService(_factory).MapToItem("Apples Apples").NormalizedInput;
-        new ItemAliasesRepo().UpsertAlias(conn, normalized, item, 1.0);
+        ItemAliasesRepo.UpsertAlias(conn, normalized, item, 1.0);
 
         var provider = new FuncProvider(_ => new[] { Deal("Apples", 2.50) });
         await Build(provider).RunSyncAsync(force: true);
@@ -166,8 +166,8 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         var result = await Build(provider).RunSyncAsync(force: true);
 
         Assert.Equal(1, result.StoresSynced);
-        Assert.Single(new FlyersRepo().ListActiveDeals(conn, storeId: shop));
-        Assert.Empty(new FlyersRepo().ListActiveDeals(conn, storeId: skip));
+        Assert.Single(FlyersRepo.ListActiveDeals(conn, storeId: shop));
+        Assert.Empty(FlyersRepo.ListActiveDeals(conn, storeId: skip));
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         var provider = new FuncProvider(_ => new[] { Deal("Zorbulon Crisps", 3.99) });
         await Build(provider).RunSyncAsync(force: true);
 
-        var deal = Assert.Single(new FlyersRepo().ListActiveDeals(conn, storeId: store));
+        var deal = Assert.Single(FlyersRepo.ListActiveDeals(conn, storeId: store));
         Assert.Null(deal.ItemId); // flyers never auto-create items
         Assert.Equal(3.99m, deal.UnitPrice);
     }

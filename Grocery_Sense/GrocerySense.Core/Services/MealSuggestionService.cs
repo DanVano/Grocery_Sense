@@ -39,8 +39,9 @@ public sealed class MealSuggestionService
             ? _engine.FilterByIngredientsAndProfile(targets, profile, maxResults: 200)
             : _engine.LoadAllRecipes();
 
-        // Safety net: re-check hard constraints even if the candidate came through the filter.
-        var filtered = candidates.Where(r => !HasDisallowedIngredients(r, profile)).ToList();
+        // Safety net: re-check hard constraints (allergies / avoid_ingredients / no_<x>) even if the
+        // candidate came through the filter — same shared ProfileFilter the RecipeEngine's own filter uses.
+        var filtered = candidates.Where(r => !ProfileFilter.Violates(r.Ingredients, profile)).ToList();
         if (filtered.Count == 0) return Array.Empty<SuggestedMeal>();
 
         var allIngredients = CollectAllIngredients(filtered);
@@ -227,11 +228,6 @@ public sealed class MealSuggestionService
 
     private static double VarietyScore(Recipe recipe, IReadOnlySet<int>? recentlyUsedRecipeIds) =>
         recipe.Id is int id && recentlyUsedRecipeIds is not null && recentlyUsedRecipeIds.Contains(id) ? -0.2 : 0.0;
-
-    // Hard filter (safety net): allergies / avoid_ingredients / no_<x> restrictions. Delegates to the shared
-    // ProfileFilter (token/plural aware) so the safety net matches the RecipeEngine's own hard filter exactly.
-    internal static bool HasDisallowedIngredients(Recipe recipe, MealProfile profile) =>
-        ProfileFilter.Violates(recipe.Ingredients, profile);
 
     // ---- flyer-deal lookup ----
 

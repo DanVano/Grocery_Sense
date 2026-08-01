@@ -31,7 +31,6 @@ public static class ItemsAdminRepo
     internal static readonly ImmutableArray<string> ItemIdTables =
         ["prices", "receipt_line_items", "shopping_list", "flyer_deals", "price_drop_alerts", "item_aliases"];
 
-    private static readonly ItemAliasesRepo Aliases = new();
 
     // Items with light price stats, newest-tracked first. Optional case-insensitive name filter.
     public static IReadOnlyList<ItemAdminRow> SearchItems(SqliteConnection conn, string query = "",
@@ -128,7 +127,7 @@ public static class ItemsAdminRepo
 
         // Keep the source name discoverable: its canonical name becomes an alias of the target.
         if (keepSourceAsAlias && !string.IsNullOrWhiteSpace(source.CanonicalName))
-            Aliases.UpsertAlias(conn, source.CanonicalName, targetItemId, 1.0, "merge", tx);
+            ItemAliasesRepo.UpsertAlias(conn, source.CanonicalName, targetItemId, 1.0, "merge", tx);
 
         Exec(conn, tx, "DELETE FROM items WHERE id = $id", ("$id", sourceItemId));
     }
@@ -175,7 +174,7 @@ public static class ItemsAdminRepo
                 """,
                 ("$new", newItemId), ("$rid", receiptId), ("$raw", description), ("$old", old));
 
-        Aliases.UpsertAlias(conn, description, newItemId, 1.0, "manual_correction", tx);
+        ItemAliasesRepo.UpsertAlias(conn, description, newItemId, 1.0, "manual_correction", tx);
     }
 
     // Escape LIKE wildcards for use with ESCAPE '\'. Backslash first so we don't double-escape our own escapes.

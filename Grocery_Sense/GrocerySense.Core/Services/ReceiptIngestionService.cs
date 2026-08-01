@@ -34,7 +34,7 @@ public sealed class ReceiptIngestionService
     private readonly IngredientMappingService _mapper;
     private readonly UnitNormalizationService _unitNorm;
     private readonly MultiBuyDealService _multibuy;
-    private readonly ItemAliasesRepo _aliases = new();
+    
 
     private const int StoreMatchThreshold = 85;
 
@@ -351,7 +351,7 @@ public sealed class ReceiptIngestionService
         var cleaned = desc.Trim();
         if (cleaned.Length == 0) cleaned = "Unknown Item";
         var item = ItemsRepo.CreateItem(conn, cleaned);
-        try { _aliases.UpsertAlias(conn, desc, item.Id, 0.60, "receipt_auto"); } catch { /* best-effort */ }
+        try { ItemAliasesRepo.UpsertAlias(conn, desc, item.Id, 0.60, "receipt_auto"); } catch { /* best-effort */ }
         return (item.Id, 2);
     }
 

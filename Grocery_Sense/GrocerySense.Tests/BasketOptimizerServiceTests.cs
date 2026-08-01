@@ -366,9 +366,8 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         var milk = Listed(db, "milk");
         Price(db, milk, store, 10.0); // recent non-flyer price
 
-        var flyers = new FlyersRepo();
-        var flyerId = flyers.CreateFlyerBatch(db.Conn, store, Today, Today);
-        flyers.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
+        var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, store, Today, Today);
+        FlyersRepo.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
             Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
             Title: "Milk", Description: null, PriceText: null, DealQty: null, DealTotal: null,
             UnitPrice: 7.0m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,

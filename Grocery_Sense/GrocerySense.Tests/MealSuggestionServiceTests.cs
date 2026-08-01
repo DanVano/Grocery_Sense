@@ -141,11 +141,10 @@ public sealed class MealSuggestionServiceTests
     {
         using var db = new TempDb();
         var store = StoresRepo.CreateStore(db.Conn, "Deal Mart").Id;
-        var repo = new FlyersRepo();
         var today = DateTime.Now;
-        var batch = repo.CreateFlyerBatch(db.Conn, store,
+        var batch = FlyersRepo.CreateFlyerBatch(db.Conn, store,
             today.AddDays(-1).ToString("yyyy-MM-dd"), today.AddDays(6).ToString("yyyy-MM-dd"), sourceType: "test");
-        repo.AddDeals(db.Conn, new[]
+        FlyersRepo.AddDeals(db.Conn, new[]
         {
             new FlyerDeal(0, batch, null, store, null, "chicken thighs", "family pack", "$5.99/kg",
                 null, null, 5.99m, "kg", null, null, null, null, null, null, null),

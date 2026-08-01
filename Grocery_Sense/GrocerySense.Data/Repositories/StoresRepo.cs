@@ -58,20 +58,12 @@ public static class StoresRepo
         return r.Read() ? Map(r) : null;
     }
 
-    public static IReadOnlyList<Store> ListStores(SqliteConnection conn, bool onlyFavorites = false,
-        bool orderByPriority = true, int? limit = null, bool includeArchived = false, SqliteTransaction? tx = null)
+    public static IReadOnlyList<Store> ListStores(SqliteConnection conn, bool includeArchived = false,
+        SqliteTransaction? tx = null)
     {
-        var conditions = new List<string>();
-        if (onlyFavorites) conditions.Add("is_favorite = 1");
-        if (!includeArchived) conditions.Add("is_active = 1");
-
-        var where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
-        var order = orderByPriority ? "ORDER BY priority DESC, name ASC" : "ORDER BY name ASC";
-        var limitClause = limit is not null ? " LIMIT $limit" : "";
-
-        using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM stores {where} {order}{limitClause}");
-        if (limit is not null) cmd.Parameters.AddWithValue("$limit", limit.Value);
-
+        var where = includeArchived ? "" : "WHERE is_active = 1";
+        using var cmd = Db.Command(conn, tx,
+            $"SELECT {SelectCols} FROM stores {where} ORDER BY priority DESC, name ASC");
         using var r = cmd.ExecuteReader();
         var stores = new List<Store>();
         while (r.Read()) stores.Add(Map(r));

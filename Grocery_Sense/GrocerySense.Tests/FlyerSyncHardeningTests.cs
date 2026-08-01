@@ -133,14 +133,13 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     public async Task Sync_replaces_prior_auto_batches_in_the_same_tx_and_leaves_manual_batches_alone()
     {
         int store;
-        var repo = new FlyersRepo();
         using (var conn = _factory.Open())
         {
             store = StoresRepo.CreateStore(conn, "Mart").Id;
-            var oldAuto = repo.CreateFlyerBatch(conn, store, "2026-07-01", "2026-07-08", sourceType: "flipp_api");
-            repo.AddDeals(conn, new[] { NewDealRow(oldAuto, store, "Stale Apples") });
-            var manual = repo.CreateFlyerBatch(conn, store, "2026-07-01", "2026-07-08", sourceType: "manual_upload");
-            repo.AddDeals(conn, new[] { NewDealRow(manual, store, "Manual Bread") });
+            var oldAuto = FlyersRepo.CreateFlyerBatch(conn, store, "2026-07-01", "2026-07-08", sourceType: "flipp_api");
+            FlyersRepo.AddDeals(conn, new[] { NewDealRow(oldAuto, store, "Stale Apples") });
+            var manual = FlyersRepo.CreateFlyerBatch(conn, store, "2026-07-01", "2026-07-08", sourceType: "manual_upload");
+            FlyersRepo.AddDeals(conn, new[] { NewDealRow(manual, store, "Manual Bread") });
         }
 
         await Build(new FuncProvider(_ => new[] { Deal("Fresh Apples", 2.50) })).RunSyncAsync(force: true);
@@ -157,12 +156,11 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     public async Task Valid_empty_result_removes_the_prior_auto_batch()
     {
         int store;
-        var repo = new FlyersRepo();
         using (var conn = _factory.Open())
         {
             store = StoresRepo.CreateStore(conn, "Mart").Id;
-            var oldAuto = repo.CreateFlyerBatch(conn, store, "2026-07-01", "2026-07-08", sourceType: "flipp_api");
-            repo.AddDeals(conn, new[] { NewDealRow(oldAuto, store, "Stale Apples") });
+            var oldAuto = FlyersRepo.CreateFlyerBatch(conn, store, "2026-07-01", "2026-07-08", sourceType: "flipp_api");
+            FlyersRepo.AddDeals(conn, new[] { NewDealRow(oldAuto, store, "Stale Apples") });
         }
 
         var result = await Build(new FuncProvider(_ => Array.Empty<Dictionary<string, object?>>()))

@@ -20,7 +20,7 @@ public static class RestoreStaging
     private const string MarkerName = "restore_pending";
     private const string PreRestoreSuffix = ".pre-restore";
 
-    public static string StagedPath(string dbPath) => Path.Combine(DirOf(dbPath), StagedName);
+    private static string StagedPath(string dbPath) => Path.Combine(DirOf(dbPath), StagedName);
     public static string MarkerPath(string dbPath) => Path.Combine(DirOf(dbPath), MarkerName);
     public static string PreRestorePath(string dbPath) => dbPath + PreRestoreSuffix;
 
@@ -49,7 +49,7 @@ public static class RestoreStaging
     }
 
     // The four checks a candidate must pass before it may ever replace the live DB.
-    public static void ValidateBackupCopy(string candidatePath)
+    private static void ValidateBackupCopy(string candidatePath)
     {
         var connString = new SqliteConnectionStringBuilder
         {

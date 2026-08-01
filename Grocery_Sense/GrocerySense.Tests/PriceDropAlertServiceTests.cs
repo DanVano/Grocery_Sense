@@ -156,9 +156,8 @@ public sealed class PriceDropAlertServiceTests
             var rid = AddReceipt(db.Conn, store, DaysAgo(d));
             PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "receipt", date: DaysAgo(d), receiptId: rid);
         }
-        var flyers = new FlyersRepo();
-        var flyerId = flyers.CreateFlyerBatch(db.Conn, store, DaysAgo(1), DaysAgo(-6));
-        flyers.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
+        var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, store, DaysAgo(1), DaysAgo(-6));
+        FlyersRepo.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
             Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
             Title: "Milk", Description: null, PriceText: null, DealQty: null, DealTotal: null,
             UnitPrice: 7.0m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,
