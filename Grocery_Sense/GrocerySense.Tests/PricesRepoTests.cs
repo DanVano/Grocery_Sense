@@ -2,13 +2,13 @@ using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class PricesRepoTests
 {
     private static string Today => DateTime.UtcNow.ToString("yyyy-MM-dd");
-    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
 
     private static (int item, int store) Seed(TempDb db, string item = "Milk", string store = "Loblaws")
         => (ItemsRepo.CreateItem(db.Conn, item).Id, StoresRepo.CreateStore(db.Conn, store).Id);
@@ -171,8 +171,8 @@ public sealed class PricesRepoTests
         using var db = new TempDb();
         var (item, store) = Seed(db);
         // Two receipts 10 days apart, qty 1 and 3 -> interval 10, typical qty 2.
-        AddReceiptRow(db.Conn, item, store, 3.0, qty: 1, date: DaysAgo(10), receiptId: MakeReceipt(db.Conn, store, DaysAgo(10)));
-        AddReceiptRow(db.Conn, item, store, 3.0, qty: 3, date: Today, receiptId: MakeReceipt(db.Conn, store, Today));
+        AddReceiptRow(db.Conn, item, store, 3.0, qty: 1, date: DaysAgo(10), receiptId: AddReceipt(db.Conn, store, DaysAgo(10)));
+        AddReceiptRow(db.Conn, item, store, 3.0, qty: 3, date: Today, receiptId: AddReceipt(db.Conn, store, Today));
 
         var cadence = PricesRepo.GetPurchaseCadenceBatch(db.Conn, new[] { item });
         var (interval, qty) = cadence[item];
@@ -253,18 +253,6 @@ public sealed class PricesRepoTests
         // Ceiling 4.50: rows at/below are the 4.00 (d-10) and 5.00 is above; newest qualifying is d-10.
         var map = PricesRepo.GetLastSeenAtOrBelowBatch(db.Conn, new Dictionary<int, double> { [item] = 4.50 });
         Assert.Equal(DaysAgo(10), map[item]);
-    }
-
-    // --- raw helpers for receipt_id FK rows the repo doesn't create ---
-
-    private static int MakeReceipt(SqliteConnection conn, int storeId, string date)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
     }
 
     private static void AddReceiptRow(SqliteConnection conn, int item, int store, double price, double qty,

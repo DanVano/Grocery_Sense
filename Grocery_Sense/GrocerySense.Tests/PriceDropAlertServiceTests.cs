@@ -2,22 +2,12 @@ using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class PriceDropAlertServiceTests
 {
-    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
-
-    private static int AddReceipt(SqliteConnection conn, int storeId, string date)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
 
     // Staple item: 4 receipts @ $10 (the usual), plus a recent $7 (30% below). Returns (item, store).
     private static (int Item, int Store) SeedStapleWithDrop(TempDb db)

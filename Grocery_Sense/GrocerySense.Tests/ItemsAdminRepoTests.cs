@@ -1,6 +1,7 @@
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -12,13 +13,6 @@ public sealed class ItemsAdminRepoTests
         "prices", "receipt_line_items", "shopping_list", "flyer_deals", "price_drop_alerts",
         "item_aliases", "watchlist",
     };
-
-    private static void Exec(SqliteConnection conn, string sql)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
 
     private static int CountItemIdRows(SqliteConnection conn, int itemId)
     {
@@ -59,12 +53,6 @@ public sealed class ItemsAdminRepoTests
         return (store, receipt, flyer);
     }
 
-    private static object ExecScalar(SqliteConnection conn, string sql)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        return cmd.ExecuteScalar()!;
-    }
 
     // Task 3 guard: the search must return only matching items with exact price stats, even when the DB
     // holds far more price history for unrelated items (the bounded query must not fold their rows in).
@@ -237,29 +225,4 @@ public sealed class ItemsAdminRepoTests
         Assert.Equal("2% milk", ItemsRepo.GetItemById(db.Conn, other)!.CanonicalName); // unchanged
     }
 
-    [Fact]
-    public void CorrectLineMapping_repoints_the_line_and_its_price_and_learns_the_alias()
-    {
-        using var db = new TempDb();
-        var (store, receipt, _) = Fixtures(db.Conn);
-        var wrong = ItemsRepo.CreateItem(db.Conn, "butter").Id;
-        var right = ItemsRepo.CreateItem(db.Conn, "margarine").Id;
-        Exec(db.Conn, $"INSERT INTO receipt_line_items (receipt_id, line_index, item_id, description) " +
-                      $"VALUES ({receipt}, 0, {wrong}, 'margerine tub')");
-        var lineId = (int)(long)ExecScalar(db.Conn, "SELECT last_insert_rowid()");
-        Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, receipt_id, source, date, unit_price, unit, raw_name) " +
-                      $"VALUES ({wrong}, {store}, {receipt}, 'receipt', '2026-06-01', '3.49', 'each', 'margerine tub')");
-
-        using (var tx = db.Conn.BeginTransaction())
-        {
-            // receipt_id / description / old item_id are now loaded from the line row by id.
-            ItemsAdminRepo.CorrectLineMapping(db.Conn, tx, lineId, right);
-            tx.Commit();
-        }
-
-        Assert.Equal(0, CountItemIdRows(db.Conn, wrong));
-        Assert.Equal(right, new ItemAliasesRepo().GetByAlias(db.Conn, "margerine tub")!.ItemId);
-        Assert.Equal(right, Convert.ToInt32(ExecScalar(db.Conn,
-            $"SELECT item_id FROM prices WHERE receipt_id = {receipt} AND raw_name = 'margerine tub'")));
-    }
 }

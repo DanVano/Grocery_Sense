@@ -3,6 +3,7 @@ using GrocerySense.Core.Abstractions;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -21,17 +22,6 @@ public sealed class ScanAlertNotificationServiceTests
         }
     }
 
-    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
-
-    private static int AddReceipt(SqliteConnection conn, int storeId, string date)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
 
     // Establish a receipt-median `usual` (4 receipts) for an item; returns the item id.
     private static int SeedUsual(TempDb db, int store, string name, double usual)

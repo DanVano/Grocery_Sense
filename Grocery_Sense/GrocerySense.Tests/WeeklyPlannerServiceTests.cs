@@ -1,6 +1,7 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -120,17 +121,6 @@ public sealed class WeeklyPlannerServiceTests
 
     // ---- pantry inference (LikelyHave) ----
 
-    private static int AddReceipt(TempDb db, int storeId, string date)
-    {
-        using var cmd = db.Conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
-
-    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
 
     // Receipt purchases of "rice" spaced 10 days apart, ending `lastDaysAgo` ago (cadence interval = 10d).
     private static void SeedRiceCadence(TempDb db, int lastDaysAgo)

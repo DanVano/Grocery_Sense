@@ -10,15 +10,6 @@ public class IngredientMappingFixtureTests
     public static IEnumerable<object[]> NormalizeCases() =>
         Fixtures.Rows<NormalizeCase>("ingredient_normalize_pipeline.json");
 
-    [Fact]
-    public void Normalize_fixtures_load()
-    {
-        var cases = Fixtures.Load<NormalizeCase>("ingredient_normalize_pipeline.json");
-        Assert.NotEmpty(cases);
-        Assert.Contains(cases, c => c.Raw == "GRND BF" && c.Expected == "ground beef");
-        Assert.Contains(cases, c => c.Raw == "" && c.Expected == "");
-    }
-
     [Theory]
     [MemberData(nameof(NormalizeCases), DisableDiscoveryEnumeration = true)]
     public void NormalizePipeline_matches_python(NormalizeCase c)
@@ -47,17 +38,6 @@ public class IngredientMappingFixtureTests
 
     public static IEnumerable<object[]> AmbiguityCases() =>
         Fixtures.Rows<AmbiguityCase>("alias_ambiguity.json");
-
-    [Fact]
-    public void Ambiguity_fixtures_load()
-    {
-        var cases = Fixtures.Load<AmbiguityCase>("alias_ambiguity.json");
-        Assert.NotEmpty(cases);
-        var oil = cases.Single(c => c.Case == "collision_oil_vs_olive_oil");
-        Assert.Equal("none", oil.ExpectedMethod);
-        Assert.Null(oil.ExpectedCanonical);
-        Assert.Contains(cases, c => c.Case == "exact_match" && c.Canonicals.Length == 2);
-    }
 
     // Python-parity regression: rapidfuzz lowercases both sides (default_process); the FuzzySharp scorer is
     // case-sensitive, so without lowercased choices "milk" vs "Milk" scores 0.75 and misses the 0.78 gate.

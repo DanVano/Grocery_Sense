@@ -1,6 +1,7 @@
 using GrocerySense.Data;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -45,12 +46,6 @@ public class SqliteConnectionFactoryTests
         return cmd.ExecuteScalar();
     }
 
-    private static void Exec(SqliteConnection c, string sql)
-    {
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
 
     private static void TryDelete(string path)
     {

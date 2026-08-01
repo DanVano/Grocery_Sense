@@ -5,6 +5,7 @@ using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.OcrFixtures;
 
 namespace GrocerySense.Tests;
 
@@ -14,28 +15,12 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
     public ReceiptIngestionServiceTests() => Directory.CreateDirectory(_dir);
     public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
-    // Returns a fixed canned AnalyzeResult regardless of file (so two different files dedupe by signature).
-    private sealed class FakeOcr(Dictionary<string, object?> raw, string op = "op-1") : IReceiptOcrClient
-    {
-        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
-            string filePath, CancellationToken ct = default) => Task.FromResult((op, raw));
-    }
-
-    // Dequeues one canned AnalyzeResult per call so a multi-file batch gets distinct receipts.
-    private sealed class SeqOcr(Queue<Dictionary<string, object?>> raws) : IReceiptOcrClient
-    {
-        private int _n;
-        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
-            string filePath, CancellationToken ct = default) =>
-            Task.FromResult(($"op-{++_n}", raws.Dequeue()));
-    }
-
     private ReceiptIngestionService Build(TempDb db, Dictionary<string, object?> raw) =>
         new(new FakeOcr(raw), new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
 
-    private ReceiptIngestionService BuildSeq(TempDb db, params Dictionary<string, object?>[] raws) =>
-        new(new SeqOcr(new Queue<Dictionary<string, object?>>(raws)), new OcrGate(), db.Factory,
+    private ReceiptIngestionService BuildSeq(TempDb db, params Dictionary<string, object?>?[] raws) =>
+        new(new SeqOcr(new Queue<Dictionary<string, object?>?>(raws)), new OcrGate(), db.Factory,
             new IngredientMappingService(db.Factory), new UnitNormalizationService(), new MultiBuyDealService());
 
     private static string? PriceDate(TempDb db, int itemId)
@@ -51,44 +36,6 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
         var path = Path.Combine(_dir, $"{Guid.NewGuid():N}.jpg");
         File.WriteAllText(path, content);
         return path;
-    }
-
-    private static Dictionary<string, object?> Str(string v) => new() { ["valueString"] = v, ["confidence"] = 0.9 };
-    private static Dictionary<string, object?> Num(double v) => new() { ["valueNumber"] = v, ["confidence"] = 0.9 };
-    private static Dictionary<string, object?> Money(double amount) =>
-        new() { ["valueCurrency"] = new Dictionary<string, object?> { ["amount"] = amount }, ["confidence"] = 0.9 };
-
-    private static Dictionary<string, object?> Raw(string merchant, string date, double total,
-        params (string Desc, double Qty, double Unit, double Line)[] items)
-    {
-        var arr = items.Select(it => (object?)new Dictionary<string, object?>
-        {
-            ["valueObject"] = new Dictionary<string, object?>
-            {
-                ["Description"] = Str(it.Desc),
-                ["Quantity"] = Num(it.Qty),
-                ["UnitPrice"] = Money(it.Unit),
-                ["TotalPrice"] = Money(it.Line),
-            },
-        }).ToList();
-
-        var raw = new Dictionary<string, object?>
-        {
-            ["documents"] = new List<object?>
-            {
-                new Dictionary<string, object?>
-                {
-                    ["fields"] = new Dictionary<string, object?>
-                    {
-                        ["MerchantName"] = Str(merchant),
-                        ["TransactionDate"] = new Dictionary<string, object?> { ["valueDate"] = date, ["confidence"] = 0.9 },
-                        ["Total"] = Money(total),
-                        ["Items"] = new Dictionary<string, object?> { ["valueArray"] = arr },
-                    },
-                },
-            },
-        };
-        return JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(raw))!;
     }
 
     [Fact]

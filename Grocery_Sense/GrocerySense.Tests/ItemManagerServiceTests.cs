@@ -2,6 +2,7 @@ using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -10,19 +11,6 @@ namespace GrocerySense.Tests;
 // invalidation fires — observed through mapping behaviour, not private state.
 public sealed class ItemManagerServiceTests
 {
-    private static void Exec(SqliteConnection conn, string sql)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
-
-    private static object ExecScalar(SqliteConnection conn, string sql)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        return cmd.ExecuteScalar()!;
-    }
 
     [Fact]
     public void MergeItems_commits_the_repoint_and_delete_with_no_caller_transaction()

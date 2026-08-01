@@ -16,8 +16,12 @@ internal static class Fixtures
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
         using var stream = File.OpenRead(path);
-        return JsonSerializer.Deserialize<List<T>>(stream, Opts)
+        var rows = JsonSerializer.Deserialize<List<T>>(stream, Opts)
             ?? throw new InvalidOperationException($"Fixture '{fileName}' deserialized to null.");
+        // Fail loud here instead of per-file "*_fixtures_load" facts: an empty fixture would otherwise
+        // silently shrink every [Theory] fed from it to zero cases.
+        return rows.Count > 0 ? rows
+            : throw new InvalidOperationException($"Fixture '{fileName}' is empty.");
     }
 
     public static IEnumerable<object[]> Rows<T>(string fileName) =>

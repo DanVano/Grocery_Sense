@@ -2,6 +2,7 @@ using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -14,17 +15,6 @@ public sealed class ShoppingInsightsServiceTests : IDisposable
 
     public void Dispose() { try { Directory.Delete(_cfgDir, recursive: true); } catch { /* temp */ } }
 
-    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
-
-    private static int AddReceipt(SqliteConnection conn, int storeId, string date)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
 
     // Usual = receipt median $10 (4 samples, satisfies MinReceiptSamplesForUsual), quantity=1 per receipt
     // so purchase cadence is computable (interval 10 days).

@@ -8,15 +8,6 @@ public class MultiBuyFixtureTests
     public static IEnumerable<object[]> Phrases() =>
         Fixtures.Rows<MultiBuyCase>("multibuy_phrases.json");
 
-    [Fact]
-    public void Phrase_fixtures_load()
-    {
-        var cases = Fixtures.Load<MultiBuyCase>("multibuy_phrases.json");
-        Assert.NotEmpty(cases);
-        Assert.Contains(cases, c => c.Case == "gap_was_now" && c.ExpectedUnitPrice is null);
-        Assert.Contains(cases, c => c.Case == "bundle_slash" && c.ExpectedUnitPrice == 2.50);
-    }
-
     [Theory]
     [MemberData(nameof(Phrases), DisableDiscoveryEnumeration = true)]
     public void Adjust_matches_python(MultiBuyCase c)

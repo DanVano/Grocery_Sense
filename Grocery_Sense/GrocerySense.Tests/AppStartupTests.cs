@@ -43,7 +43,6 @@ public sealed class AppStartupTests
             await startup.EnsureStartedAsync();
 
             Assert.Equal(StartupStatus.Error, startup.Status);
-            Assert.NotEqual(StartupStatus.Loading, startup.Status); // must not get stuck pretending to load
             Assert.False(string.IsNullOrWhiteSpace(startup.Error)); // the failure is shown, not swallowed
         }
         finally { TryDelete(path); }

@@ -1,22 +1,12 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class StapleRestockServiceTests
 {
-    private static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
-
-    private static int AddReceipt(TempDb db, int storeId, string date)
-    {
-        using var cmd = db.Conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
 
     // 4 receipt purchases spaced 10 days apart, most recent `lastDaysAgo` ago.
     // Qualifies as a staple (>=3 distinct receipts in 90d) with a 10-day cadence.

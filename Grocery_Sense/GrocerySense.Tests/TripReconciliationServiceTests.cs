@@ -1,6 +1,7 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -8,15 +9,6 @@ public sealed class TripReconciliationServiceTests
 {
     private static string Today => DateTime.UtcNow.ToString("yyyy-MM-dd");
 
-    private static int AddReceipt(TempDb db, int storeId, string date)
-    {
-        using var cmd = db.Conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", date);
-        return (int)(long)cmd.ExecuteScalar()!;
-    }
 
     private static void AddLine(TempDb db, int receiptId, int lineIndex, int? itemId, string desc,
         string unitPrice, double qty = 1, string? lineTotal = null)
