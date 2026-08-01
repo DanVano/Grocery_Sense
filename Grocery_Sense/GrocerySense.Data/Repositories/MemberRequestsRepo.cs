@@ -42,15 +42,6 @@ public static class MemberRequestsRepo
         return ReadAll(cmd);
     }
 
-    public static IReadOnlyList<MemberRequestRow> ListAll(SqliteConnection conn, int? limit = null,
-        SqliteTransaction? tx = null)
-    {
-        var sql = $"SELECT {Cols} FROM member_requests ORDER BY id DESC" + (limit is not null ? " LIMIT $limit" : "");
-        using var cmd = Db.Command(conn, tx, sql);
-        if (limit is not null) cmd.Parameters.AddWithValue("$limit", limit.Value);
-        return ReadAll(cmd);
-    }
-
     public static int CountUnreviewed(SqliteConnection conn, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx, "SELECT COUNT(*) FROM member_requests WHERE reviewed = 0");
@@ -61,12 +52,6 @@ public static class MemberRequestsRepo
     {
         using var cmd = Db.Command(conn, tx, "UPDATE member_requests SET reviewed = 1 WHERE id = $id");
         cmd.Parameters.AddWithValue("$id", requestId);
-        cmd.ExecuteNonQuery();
-    }
-
-    public static void MarkAllReviewed(SqliteConnection conn, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx, "UPDATE member_requests SET reviewed = 1 WHERE reviewed = 0");
         cmd.ExecuteNonQuery();
     }
 

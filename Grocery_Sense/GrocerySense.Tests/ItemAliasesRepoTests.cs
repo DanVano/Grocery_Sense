@@ -39,7 +39,7 @@ public sealed class ItemAliasesRepoTests
     }
 
     [Fact]
-    public void ListAll_orders_by_times_seen_desc()
+    public void ListByItem_orders_by_times_seen_desc()
     {
         using var db = new TempDb();
         var item = ItemsRepo.CreateItem(db.Conn, "milk");
@@ -48,7 +48,7 @@ public sealed class ItemAliasesRepoTests
         repo.UpsertAlias(db.Conn, "common", item.Id);
         repo.MarkSeen(db.Conn, "common");
 
-        var all = repo.ListAll(db.Conn);
+        var all = repo.ListByItem(db.Conn, item.Id);
         Assert.Equal(2, all.Count);
         Assert.Equal("common", all[0].AliasText); // higher times_seen first
     }

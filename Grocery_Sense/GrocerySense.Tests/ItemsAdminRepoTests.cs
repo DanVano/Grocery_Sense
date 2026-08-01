@@ -147,8 +147,8 @@ public sealed class ItemsAdminRepoTests
         using var db = new TempDb();
         var target = ItemsRepo.CreateItem(db.Conn, "milk").Id;
         var source = ItemsRepo.CreateItem(db.Conn, "2% milk").Id;
-        ItemsRepo.SetItemTracked(db.Conn, target, false);
-        ItemsRepo.SetItemTracked(db.Conn, source, true);
+        Exec(db.Conn, $"UPDATE items SET is_tracked = 0 WHERE id = {target}");
+        Exec(db.Conn, $"UPDATE items SET is_tracked = 1 WHERE id = {source}");
         Exec(db.Conn, $"UPDATE items SET default_unit = 'lb' WHERE id = {source}");
 
         using (var tx = db.Conn.BeginTransaction())

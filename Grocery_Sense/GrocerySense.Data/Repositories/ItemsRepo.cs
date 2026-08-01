@@ -86,23 +86,14 @@ public static class ItemsRepo
         return names;
     }
 
-    public static IReadOnlyList<Item> ListItems(SqliteConnection conn, bool includeUntracked = false,
-        SqliteTransaction? tx = null)
+    public static IReadOnlyList<Item> ListItems(SqliteConnection conn, SqliteTransaction? tx = null)
     {
-        var where = includeUntracked ? "" : "WHERE is_tracked = 1";
-        using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM items {where} ORDER BY canonical_name ASC");
+        using var cmd = Db.Command(conn, tx,
+            $"SELECT {SelectCols} FROM items WHERE is_tracked = 1 ORDER BY canonical_name ASC");
         using var r = cmd.ExecuteReader();
         var items = new List<Item>();
         while (r.Read()) items.Add(Map(r));
         return items;
-    }
-
-    public static void SetItemTracked(SqliteConnection conn, int itemId, bool isTracked, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx, "UPDATE items SET is_tracked = $v WHERE id = $id");
-        cmd.Parameters.AddWithValue("$v", isTracked ? 1 : 0);
-        cmd.Parameters.AddWithValue("$id", itemId);
-        cmd.ExecuteNonQuery();
     }
 
     public static IReadOnlyDictionary<int, Item> GetItemsByIds(SqliteConnection conn, IReadOnlyList<int> itemIds,

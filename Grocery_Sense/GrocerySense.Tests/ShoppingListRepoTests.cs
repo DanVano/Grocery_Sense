@@ -62,7 +62,6 @@ public sealed class ShoppingListRepoTests
         Assert.Equal(keep, active[0].Id);
 
         Assert.Equal(2, ShoppingListRepo.ListActiveItems(db.Conn, includeCheckedOff: true).Count);
-        Assert.Equal(2, ShoppingListRepo.ListAllItems(db.Conn).Count); // deleted excluded, checked kept
     }
 
     [Fact]

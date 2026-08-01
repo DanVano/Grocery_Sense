@@ -210,21 +210,6 @@ public sealed class WeeklyPlannerService
             .ToList();
     }
 
-    public static List<string> SummarizeWeeklyPlan(WeeklyPlan plan)
-    {
-        var lines = new List<string> { $"Weekly plan: {plan.Suggestions.Count} recipes" };
-        var i = 1;
-        foreach (var s in plan.Suggestions)
-        {
-            var name = s.Recipe.Name.Length > 0 ? s.Recipe.Name : $"Recipe {i}";
-            lines.Add($"{i}. {name} (score={s.TotalScore.ToString("0.00", CultureInfo.InvariantCulture)})");
-            i++;
-        }
-        if (plan.PlannedIngredients.Count > 0)
-            lines.Add($"Planned ingredients: {plan.PlannedIngredients.Count} unique items");
-        return lines;
-    }
-
     private static string NormalizeName(string name) =>
         string.Join(" ", name.Trim().ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }

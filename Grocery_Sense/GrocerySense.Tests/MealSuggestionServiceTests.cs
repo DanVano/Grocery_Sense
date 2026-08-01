@@ -174,42 +174,6 @@ public sealed class MealSuggestionServiceTests
         Assert.Empty(empty.SuggestMealsForWeek(new MealProfile(), maxRecipes: 3));
     }
 
-    // ---- explanation ----
-
-    [Fact]
-    public void Explain_includes_recipe_name()
-    {
-        using var db = new TempDb();
-        var s = Svc(db).SuggestMealsForWeek(new MealProfile(), maxRecipes: 1);
-        Assert.Contains(s[0].Recipe.Name, MealSuggestionService.ExplainSuggestedMeal(s[0]));
-    }
-
-    [Fact]
-    public void Format_high_scores_produces_summary_bits()
-    {
-        var text = MealSuggestionService.FormatMealExplanation("X", 0.8, 0.5, 0.4, 0.5, new[] { "cheap chicken" });
-        Assert.Contains("preferences", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("sale", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cheaper", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("variety", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cheap chicken", text);
-    }
-
-    [Fact]
-    public void Format_low_scores_falls_back_to_generic_summary() =>
-        Assert.Contains("reasonable match",
-            MealSuggestionService.FormatMealExplanation("X", 0.0, 0.0, 0.0, 0.0, Array.Empty<string>()));
-
-    [Fact]
-    public void Format_respects_max_reasons()
-    {
-        var reasons = Enumerable.Range(0, 10).Select(i => $"r{i}").ToArray();
-        var text = MealSuggestionService.FormatMealExplanation("X", 0.5, 0.5, 0.5, 0.5, reasons, maxReasons: 3);
-        Assert.Contains("r0", text);
-        Assert.Contains("r2", text);
-        Assert.DoesNotContain("r3", text);
-    }
-
     // ---- cost estimate (test_recipes_catalog #2) ----
 
     private static Recipe Recipe(int? servings, params string[] ingredients) =>

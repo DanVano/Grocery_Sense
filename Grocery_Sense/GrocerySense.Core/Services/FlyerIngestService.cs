@@ -271,7 +271,5 @@ public sealed class FlyerIngestService
 
     private static string Sha256(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
-    private static decimal? Dec(double? v) => v is { } x ? (decimal)x : null;
-
     private static string Trunc(string s, int max) => s.Length <= max ? s : s[..max];
 }

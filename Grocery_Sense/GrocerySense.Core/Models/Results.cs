@@ -239,8 +239,8 @@ public sealed record TripReconciliation(
 public sealed record BudgetedWeeklyPlan(WeeklyPlan Plan, double BudgetCap, double EstimatedTotal,
     int SkippedOverBudget, int SkippedNoEstimate, double AvgCostKnownRatio);
 
-// A kid-pickable recipe with a one-glance deal flag (Family page). OnSaleThisWeek mirrors the
-// "uses ingredients that are on sale this week" line in FormatMealExplanation (DealScore > 0.2).
+// A kid-pickable recipe with a one-glance deal flag (Family page). OnSaleThisWeek = "uses ingredients
+// that are on sale this week": DealScore > 0.2, i.e. >20% of ingredients have a live priced deal.
 public sealed record PickableRecipe(string Name, bool OnSaleThisWeek);
 
 // One overdue staple on the restock draft (StapleRestockService). No quantity suggestion on purpose:

@@ -5,7 +5,7 @@ namespace GrocerySense.Core;
 
 // Port (Replace -> single-profile) of reference-python/.../services/preferences_service.py.
 // v1 reads ONE profile (the household's single master member) into EffectivePreferences for the deal filter:
-// hard = allergies + hard_excludes; soft = soft_excludes; proteins/oils/weights from the profile. The Python
+// hard = allergies + hard_excludes; soft = soft_excludes; proteins/weights from the profile. The Python
 // multi-member merge (secondary soft-downgrade, strong-soft consensus, star annotations, meal profile,
 // member edit-state/validate/reset) is v2-deferred and intentionally not ported here.
 //
@@ -65,10 +65,9 @@ public sealed class PreferencesService
         var soft = new HashSet<string>(NormList(Get(profile, "soft_excludes")));
         var proteinsHard = new HashSet<string>(NormList(Get(profile, "excluded_proteins")));
         var cuisines = new HashSet<string>(NormList(Get(profile, "favorite_cuisines")));
-        var oils = new HashSet<string>(NormList(Get(profile, "oils_allowed")));
         var weights = NormWeights(Get(profile, "preferred_protein_weights"));
 
-        return new EffectivePreferences(hard, soft, proteinsHard, weights, cuisines, oils);
+        return new EffectivePreferences(hard, soft, proteinsHard, weights, cuisines);
     }
 
     private static object? Get(IReadOnlyDictionary<string, object?> profile, string key) =>

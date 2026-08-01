@@ -221,22 +221,4 @@ public sealed class WeeklyPlannerServiceTests
         }
     }
 
-    // ---- summarize ----
-
-    [Fact]
-    public void Summarize_includes_count_scores_and_unique_items()
-    {
-        var suggestions = new[] { Meal("A", new[] { "rice" }, 1), Meal("B", new[] { "beef" }, 2) };
-        var plan = new WeeklyPlan(suggestions, WeeklyPlannerService.AggregateIngredients(suggestions));
-        var lines = WeeklyPlannerService.SummarizeWeeklyPlan(plan);
-        Assert.Equal("Weekly plan: 2 recipes", lines[0]);
-        Assert.Contains(lines, l => l.Contains("A") && l.Contains("score"));
-        Assert.Contains(lines, l => l.Contains("B"));
-        Assert.Contains(lines, l => l.Contains("unique items"));
-    }
-
-    [Fact]
-    public void Summarize_handles_empty_plan() =>
-        Assert.Equal("Weekly plan: 0 recipes",
-            WeeklyPlannerService.SummarizeWeeklyPlan(new WeeklyPlan(Array.Empty<SuggestedMeal>(), Array.Empty<PlannedIngredient>()))[0]);
 }

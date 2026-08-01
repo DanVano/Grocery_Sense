@@ -59,17 +59,4 @@ public sealed class StoresRepoTests
         Assert.False(got.ShopHere);
     }
 
-    [Fact]
-    public void UpsertFromFlipp_creates_then_updates_existing()
-    {
-        using var db = new TempDb();
-        var first = StoresRepo.UpsertStoreFromFlipp(db.Conn, "Sobeys", "flipp-7", city: "Edmonton");
-        var second = StoresRepo.UpsertStoreFromFlipp(db.Conn, "Sobeys Urban", "flipp-7", city: "Calgary");
-
-        Assert.Equal(first.Id, second.Id); // same flipp id -> same row
-        var got = StoresRepo.GetStoreById(db.Conn, first.Id)!;
-        Assert.Equal("Sobeys Urban", got.Name);
-        Assert.Equal("Calgary", got.City);
-        Assert.Single(StoresRepo.ListStores(db.Conn, includeArchived: true));
-    }
 }

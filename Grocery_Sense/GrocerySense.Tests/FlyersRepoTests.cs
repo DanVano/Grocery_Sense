@@ -28,7 +28,7 @@ public sealed class FlyersRepoTests
                 ItemId: null, MappingConfidence: 0.8, Confidence: 0.9, CreatedAt: null),
         });
 
-        var deals = repo.ListDealsForFlyer(db.Conn, batch);
+        var deals = repo.ListActiveDeals(db.Conn);
         var deal = Assert.Single(deals);
         Assert.Equal(3.99m, deal.DealTotal);
         Assert.Equal(9.98m, deal.UnitPrice);

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
@@ -64,7 +63,7 @@ public sealed class MealSuggestionService
             var (costTotal, costPerServing, costRatio) = CostEstimate(r, baselineMap);
 
             // total intentionally excludes dealScore: flyer value already flows through priceScore. dealScore
-            // is explanatory only (drives the "on sale this week" line in FormatMealExplanation).
+            // is explanatory only (drives the Family page's OnSaleThisWeek flag at DealScore > 0.2).
             var total = (0.5 * priceScore) + (0.3 * preferenceScore) + (0.2 * varietyScore);
 
             if (preferenceScore > 0.5) reasons.Add("Matches your meat or tag preferences.");
@@ -236,7 +235,7 @@ public sealed class MealSuggestionService
 
     // ---- flyer-deal lookup ----
 
-    internal sealed record Deal(string Name, string Store, double? Price, string Unit);
+    internal sealed record Deal(string Name, string Store, double? Price);
 
     private IReadOnlyDictionary<string, List<Deal>> FetchDealsForIngredients(IReadOnlyList<string> ingredients)
     {
@@ -256,7 +255,7 @@ public sealed class MealSuggestionService
             cmd.CommandText = """
                 SELECT d.title, d.description,
                        CAST(COALESCE(d.unit_price, d.norm_unit_price, d.deal_total) AS REAL) AS price,
-                       d.unit, s.name AS store_name
+                       s.name AS store_name
                 FROM flyer_deals d
                 JOIN flyer_batches b ON b.id = d.flyer_id
                 LEFT JOIN stores s ON s.id = d.store_id
@@ -274,9 +273,8 @@ public sealed class MealSuggestionService
                 title = title.ToLowerInvariant().Trim();
                 if (title.Length == 0) continue;
                 var price = r.IsDBNull(2) ? (double?)null : r.GetDouble(2);
-                var unit = (r.IsDBNull(3) ? null : r.GetString(3))?.Trim() ?? "each";
-                var store = (r.IsDBNull(4) ? null : r.GetString(4)) ?? "";
-                deals.Add(new Deal(title, store, price, unit.Length == 0 ? "each" : unit));
+                var store = (r.IsDBNull(3) ? null : r.GetString(3)) ?? "";
+                deals.Add(new Deal(title, store, price));
             }
         }
         catch (SqliteException) { return empty; } // no flyer tables / transient read issue -> no deals
@@ -314,55 +312,6 @@ public sealed class MealSuggestionService
                 if (seen.Add(low)) result.Add(low);
             }
         return result;
-    }
-
-    // ---- explanation (static; ported verbatim) ----
-
-    public static string FormatMealExplanation(string recipeName, double preferenceScore, double dealScore,
-        double priceScore, double varietyScore, IReadOnlyList<string> reasons, int maxReasons = 4)
-    {
-        var lines = new List<string> { $"Why we suggested '{recipeName}':" };
-
-        var bits = new List<string>();
-        if (preferenceScore > 0.3) bits.Add("matches your eating preferences");
-        if (dealScore > 0.2) bits.Add("uses ingredients that are on sale this week");
-        if (priceScore > 0.2) bits.Add("is cheaper than your usual prices");
-        if (varietyScore > 0.2) bits.Add("adds variety compared to your recent meals");
-
-        lines.Add(bits.Count > 0
-            ? " • " + string.Join("; ", bits) + "."
-            : " • Overall a reasonable match based on your profile and history.");
-
-        if (reasons.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("Details:");
-            foreach (var r in reasons.Take(maxReasons)) lines.Add($" • {r}");
-        }
-        return string.Join("\n", lines);
-    }
-
-    public static string ExplainSuggestedMeal(SuggestedMeal meal)
-    {
-        var name = meal.Recipe.Name.Length > 0 ? meal.Recipe.Name : "Unknown recipe";
-        var sb = new StringBuilder(FormatMealExplanation(name, meal.PreferenceScore, meal.DealScore,
-            meal.PriceScore, meal.VarietyScore, meal.Reasons));
-
-        if (meal.CostPerServing is not null)
-        {
-            var pct = (int)(meal.CostKnownRatio * 100);
-            var servings = meal.Recipe.Servings?.ToString() ?? "?";
-            sb.Append(CultureInfo.InvariantCulture,
-                $"\n\nEst. cost: ≈ ${meal.CostPerServing:0.00}/serving (${meal.CostTotal:0.00} total, {servings} servings)" +
-                $" — {pct}% of ingredients priced from your receipt history.");
-            if (meal.CostKnownRatio < 1.0)
-                sb.Append("\n(Partial estimate — some ingredients have no price history.)");
-        }
-        else
-        {
-            sb.Append("\n\nEst. cost: unknown — no receipt history for these ingredients.");
-        }
-        return sb.ToString();
     }
 
     private static IEnumerable<string> Lower(IEnumerable<string> values) =>

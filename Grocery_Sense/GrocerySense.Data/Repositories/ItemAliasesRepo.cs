@@ -62,16 +62,6 @@ public sealed class ItemAliasesRepo
         cmd.ExecuteNonQuery();
     }
 
-    public IReadOnlyList<ItemAlias> ListAll(SqliteConnection conn, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx,
-            $"SELECT {SelectCols} FROM item_aliases ORDER BY times_seen DESC, alias_text ASC");
-        using var r = cmd.ExecuteReader();
-        var aliases = new List<ItemAlias>();
-        while (r.Read()) aliases.Add(Map(r));
-        return aliases;
-    }
-
     // Aliases for a single item (uses idx_item_aliases_item_id) — avoids loading the whole table to filter.
     public IReadOnlyList<ItemAlias> ListByItem(SqliteConnection conn, int itemId, SqliteTransaction? tx = null)
     {

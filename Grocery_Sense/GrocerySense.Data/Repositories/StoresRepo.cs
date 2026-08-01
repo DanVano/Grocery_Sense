@@ -142,31 +142,4 @@ public static class StoresRepo
         cmd.ExecuteNonQuery();
     }
 
-    public static Store UpsertStoreFromFlipp(SqliteConnection conn, string name, string flippStoreId,
-        string? address = null, string? city = null, string? postalCode = null, SqliteTransaction? tx = null)
-    {
-        Store? existing;
-        using (var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM stores WHERE flipp_store_id = $flipp"))
-        {
-            cmd.Parameters.AddWithValue("$flipp", flippStoreId);
-            using var r = cmd.ExecuteReader();
-            existing = r.Read() ? Map(r) : null;
-        }
-
-        if (existing is not null)
-        {
-            if (existing.Name != name || existing.Address != address
-                || existing.City != city || existing.PostalCode != postalCode)
-            {
-                UpdateStoreAddress(conn, existing.Id, address, city, postalCode, tx);
-                using var upd = Db.Command(conn, tx, "UPDATE stores SET name = $name WHERE id = $id");
-                upd.Parameters.AddWithValue("$name", name);
-                upd.Parameters.AddWithValue("$id", existing.Id);
-                upd.ExecuteNonQuery();
-            }
-            return existing with { Name = name, Address = address, City = city, PostalCode = postalCode };
-        }
-
-        return CreateStore(conn, name, address, city, postalCode, flippStoreId, tx: tx);
-    }
 }

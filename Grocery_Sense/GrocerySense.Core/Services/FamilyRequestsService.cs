@@ -109,7 +109,7 @@ public sealed class FamilyRequestsService
         return names
             .OrderByDescending(n => byName.TryGetValue(n, out var s) ? s.TotalScore : double.MinValue)
             .Select(n => new PickableRecipe(n,
-                byName.TryGetValue(n, out var s) && s.DealScore > 0.2)) // 0.2 = FormatMealExplanation's on-sale bar
+                byName.TryGetValue(n, out var s) && s.DealScore > 0.2)) // 0.2 = the on-sale bar (see PickableRecipe)
             .ToList();
     }
 

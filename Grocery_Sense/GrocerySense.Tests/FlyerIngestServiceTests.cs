@@ -191,8 +191,12 @@ public sealed class FlyerIngestServiceTests : IDisposable
         Assert.Equal(1, result.RawJsonCount);
         Assert.Equal(5, result.DealsCount); // five price anchors in the canned layout
 
-        var repo = new FlyersRepo();
-        Assert.Equal(5, repo.ListDealsForFlyer(db.Conn, result.FlyerId).Count);
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM flyer_deals WHERE flyer_id = $f";
+            cmd.Parameters.AddWithValue("$f", result.FlyerId);
+            Assert.Equal(5L, cmd.ExecuteScalar());
+        }
         // Raw JSON is persisted to SQLite only (RawJsonCount above) — no plaintext copy on disk.
         Assert.Empty(Directory.GetFiles(_rawDir, "*.json"));
     }

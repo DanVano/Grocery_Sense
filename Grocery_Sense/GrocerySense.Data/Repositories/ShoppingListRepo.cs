@@ -47,13 +47,6 @@ public static class ShoppingListRepo
         return ReadAll(cmd);
     }
 
-    public static IReadOnlyList<ShoppingListRow> ListAllItems(SqliteConnection conn, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx,
-            $"SELECT {SelectCols} FROM shopping_list WHERE is_deleted = 0 ORDER BY id DESC");
-        return ReadAll(cmd);
-    }
-
     public static ShoppingListRow? GetItem(SqliteConnection conn, int rowId, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx, $"SELECT {SelectCols} FROM shopping_list WHERE id = $id");
@@ -142,12 +135,6 @@ public static class ShoppingListRepo
         cmd.ExecuteNonQuery();
     }
 
-    public static void ClearAllItems(SqliteConnection conn, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx, "UPDATE shopping_list SET is_deleted = 1");
-        cmd.ExecuteNonQuery();
-    }
-
     public static void ClearCheckedOffItems(SqliteConnection conn, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx,
@@ -171,15 +158,6 @@ public static class ShoppingListRepo
         cmd.Parameters.AddWithValue("$store", Db.OrNull(plannedStoreId));
         cmd.Parameters.AddWithValue("$id", itemId);
         cmd.ExecuteNonQuery();
-    }
-
-    // Keyed by shopping_list.id.
-    public static int BulkSetPlannedStoreIds(SqliteConnection conn,
-        IReadOnlyList<(int RowId, int? StoreId)> assignments, SqliteTransaction? tx = null)
-    {
-        foreach (var (rowId, storeId) in assignments)
-            SetPlannedStoreId(conn, rowId, storeId, tx);
-        return assignments.Count;
     }
 
     // Keyed by canonical items.id (what an optimizer result holds). Returns rows actually updated.

@@ -21,7 +21,7 @@ public sealed class PricesRepoTests
         PricesRepo.AddPricePoint(db.Conn, item, store, 3.49, "each", source: "receipt", date: DaysAgo(2));
         PricesRepo.AddPricePoint(db.Conn, item, store, 4.99, "each", source: "receipt", date: Today);
 
-        var latest = PricesRepo.GetMostRecentPrice(db.Conn, item)!;
+        var latest = PricesRepo.GetMostRecentPricesGlobalBatch(db.Conn, new[] { item })[item];
         Assert.Equal(4.99, latest.UnitPrice);
         Assert.Equal("each", latest.Unit);
         Assert.Equal("receipt", latest.Source);
@@ -36,7 +36,7 @@ public sealed class PricesRepoTests
         foreach (var p in new[] { 9.5, 10.0, 100.0 })
             PricesRepo.AddPricePoint(db.Conn, item, store, p, "each", source: "receipt", date: DaysAgo(5));
 
-        var (price, when) = PricesRepo.GetSixMonthLowUnitPrice(db.Conn, item);
+        var (price, when) = PricesRepo.GetSixMonthLowBatch(db.Conn, new[] { item })[item];
         Assert.Equal(9.5, price);
         Assert.NotNull(when);
     }
@@ -251,7 +251,8 @@ public sealed class PricesRepoTests
         PricesRepo.AddPricePoint(db.Conn, item, store, 9.00, "each", source: "receipt", date: DaysAgo(1));
 
         // Ceiling 4.50: rows at/below are the 4.00 (d-10) and 5.00 is above; newest qualifying is d-10.
-        Assert.Equal(DaysAgo(10), PricesRepo.GetLastSeenAtOrBelow(db.Conn, item, 4.50, store));
+        var map = PricesRepo.GetLastSeenAtOrBelowBatch(db.Conn, new Dictionary<int, double> { [item] = 4.50 });
+        Assert.Equal(DaysAgo(10), map[item]);
     }
 
     // --- raw helpers for receipt_id FK rows the repo doesn't create ---

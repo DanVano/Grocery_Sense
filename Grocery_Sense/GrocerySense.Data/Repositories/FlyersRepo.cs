@@ -161,19 +161,6 @@ public sealed class FlyersRepo
         return rows;
     }
 
-    public IReadOnlyList<FlyerDeal> ListDealsForFlyer(SqliteConnection conn, int flyerId, int limit = 5000,
-        SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx,
-            $"SELECT {DealCols} FROM flyer_deals WHERE flyer_id = $f ORDER BY id ASC LIMIT $limit");
-        cmd.Parameters.AddWithValue("$f", flyerId);
-        cmd.Parameters.AddWithValue("$limit", limit);
-        using var r = cmd.ExecuteReader();
-        var rows = new List<FlyerDeal>();
-        while (r.Read()) rows.Add(MapDeal(r));
-        return rows;
-    }
-
     private static string PrefixCols(string alias) =>
         string.Join(", ", DealCols.Split(", ").Select(c => $"{alias}.{c}"));
 }

@@ -33,10 +33,6 @@ public sealed class MemberRequestsRepoTests
         MemberRequestsRepo.MarkReviewed(db.Conn, a);
         Assert.Equal(1, MemberRequestsRepo.CountUnreviewed(db.Conn));
         Assert.Single(MemberRequestsRepo.ListUnreviewed(db.Conn));
-
-        MemberRequestsRepo.MarkAllReviewed(db.Conn);
-        Assert.Equal(0, MemberRequestsRepo.CountUnreviewed(db.Conn));
-        Assert.Equal(2, MemberRequestsRepo.ListAll(db.Conn).Count); // history retained
     }
 
     [Fact]
@@ -50,7 +46,7 @@ public sealed class MemberRequestsRepoTests
                 "VALUES (2, 'Kid', 'meal', 'X', 'not-json')";
             cmd.ExecuteNonQuery();
         }
-        var row = Assert.Single(MemberRequestsRepo.ListAll(db.Conn));
+        var row = Assert.Single(MemberRequestsRepo.ListUnreviewed(db.Conn));
         Assert.Empty(row.ItemRowIds);
     }
 }

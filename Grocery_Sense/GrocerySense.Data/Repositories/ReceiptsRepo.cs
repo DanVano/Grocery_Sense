@@ -107,16 +107,6 @@ public static class ReceiptsRepo
         return rows;
     }
 
-    public static (string? RawJson, string? JsonPath) GetReceiptRawJson(SqliteConnection conn, int receiptId,
-        SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx,
-            "SELECT raw_json, json_path FROM receipt_raw_json WHERE receipt_id = $id");
-        cmd.Parameters.AddWithValue("$id", receiptId);
-        using var r = cmd.ExecuteReader();
-        return r.Read() ? (r.GetStringOrNull(0), r.GetStringOrNull(1)) : (null, null);
-    }
-
     public static MonthSpend GetMonthSpend(SqliteConnection conn, string yearMonth, SqliteTransaction? tx = null)
     {
         // Parse "yyyy-MM" into a half-open [start, end) date range so the query can seek
@@ -335,9 +325,6 @@ public static class ReceiptsRepo
     }
 
     private static decimal? Dec(double? v) => v is { } x ? (decimal)x : null;
-
-    public static void DeleteReceiptCascade(SqliteConnection conn, int receiptId, SqliteTransaction? tx = null)
-        => InTransaction(conn, tx, t => DeleteReceiptRows(conn, t, receiptId));
 
     public static int DeleteReceiptWithBackup(SqliteConnection conn, int receiptId, SqliteTransaction? tx = null)
     {
@@ -675,7 +662,4 @@ public static class ReceiptsRepo
         local.Commit();
         return result;
     }
-
-    private static void InTransaction(SqliteConnection conn, SqliteTransaction? tx, Action<SqliteTransaction> body)
-        => InTransaction<object?>(conn, tx, t => { body(t); return null; });
 }

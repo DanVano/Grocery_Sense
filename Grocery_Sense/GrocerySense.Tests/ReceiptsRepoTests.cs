@@ -16,7 +16,6 @@ public sealed class ReceiptsRepoTests
         var rid = InsertReceipt(db.Conn, store.Id, "2026-06-10", 12.34m, 11.00m, 1.34m);
         InsertLineItem(db.Conn, rid, 0, item.Id, "MILK 2L", 1, 5.00m, 5.00m);
         InsertLineItem(db.Conn, rid, 1, null, "BAGS", 1, 0.10m, 0.10m);
-        InsertRawJson(db.Conn, rid, "op-1", "{\"x\":1}");
 
         var summary = Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn));
         Assert.Equal(rid, summary.Id);
@@ -32,9 +31,6 @@ public sealed class ReceiptsRepoTests
         Assert.Equal(2, lines.Count);
         Assert.Equal("Milk", lines[0].CanonicalName); // joined from items
         Assert.Equal(5.00m, lines[0].UnitPrice);
-
-        var (raw, _) = ReceiptsRepo.GetReceiptRawJson(db.Conn, rid);
-        Assert.Equal("{\"x\":1}", raw);
     }
 
     [Fact]
@@ -59,23 +55,6 @@ public sealed class ReceiptsRepoTests
     }
 
     [Fact]
-    public void CascadeDelete_removes_receipt_and_children()
-    {
-        using var db = new TempDb();
-        var store = StoresRepo.CreateStore(db.Conn, "Store");
-        var item = ItemsRepo.CreateItem(db.Conn, "Eggs");
-        var rid = InsertReceipt(db.Conn, store.Id, "2026-06-01", 4.00m, null, null);
-        InsertLineItem(db.Conn, rid, 0, item.Id, "EGGS", 1, 4.00m, 4.00m);
-        InsertPrice(db.Conn, rid, item.Id, store.Id, "2026-06-01", 4.00m, "dozen");
-
-        ReceiptsRepo.DeleteReceiptCascade(db.Conn, rid);
-
-        Assert.Null(ReceiptsRepo.GetReceipt(db.Conn, rid));
-        Assert.Equal(0, Count(db.Conn, "receipt_line_items"));
-        Assert.Equal(0, Count(db.Conn, "prices"));
-    }
-
-    [Fact]
     public void DeleteWithBackup_then_restore_recreates_the_graph()
     {
         using var db = new TempDb();
@@ -88,6 +67,8 @@ public sealed class ReceiptsRepoTests
 
         var backupId = ReceiptsRepo.DeleteReceiptWithBackup(db.Conn, rid);
         Assert.Null(ReceiptsRepo.GetReceipt(db.Conn, rid));
+        Assert.Equal(0, Count(db.Conn, "receipt_line_items")); // children cascade with the receipt
+        Assert.Equal(0, Count(db.Conn, "prices"));
         Assert.Contains(ReceiptsRepo.ListDeletedBackups(db.Conn), b => b.BackupId == backupId && b.OriginalReceiptId == rid);
 
         var (newId, conflicts) = ReceiptsRepo.RestoreReceiptFromBackup(db.Conn, backupId);
@@ -314,16 +295,6 @@ public sealed class ReceiptsRepoTests
         cmd.Parameters.AddWithValue("$d", date);
         cmd.Parameters.AddWithValue("$p", unitPrice);
         cmd.Parameters.AddWithValue("$u", unit);
-        cmd.ExecuteNonQuery();
-    }
-
-    private static void InsertRawJson(SqliteConnection conn, int receiptId, string op, string raw)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO receipt_raw_json (receipt_id, operation_id, raw_json) VALUES ($r, $o, $j)";
-        cmd.Parameters.AddWithValue("$r", receiptId);
-        cmd.Parameters.AddWithValue("$o", op);
-        cmd.Parameters.AddWithValue("$j", raw);
         cmd.ExecuteNonQuery();
     }
 

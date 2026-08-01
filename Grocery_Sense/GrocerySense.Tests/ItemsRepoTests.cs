@@ -40,16 +40,24 @@ public sealed class ItemsRepoTests
     }
 
     [Fact]
-    public void ListItems_respects_tracked_flag()
+    public void ListItems_returns_tracked_only()
     {
         using var db = new TempDb();
         var tracked = ItemsRepo.CreateItem(db.Conn, "Apples");
         var untracked = ItemsRepo.CreateItem(db.Conn, "Caviar");
-        ItemsRepo.SetItemTracked(db.Conn, untracked.Id, isTracked: false);
+        SetTracked(db.Conn, untracked.Id, tracked: false);
 
-        Assert.Single(ItemsRepo.ListItems(db.Conn));                      // tracked only
-        Assert.Equal(2, ItemsRepo.ListItems(db.Conn, includeUntracked: true).Count);
-        _ = tracked;
+        var only = Assert.Single(ItemsRepo.ListItems(db.Conn));
+        Assert.Equal(tracked.Id, only.Id);
+    }
+
+    private static void SetTracked(Microsoft.Data.Sqlite.SqliteConnection conn, int itemId, bool tracked)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET is_tracked = $v WHERE id = $id";
+        cmd.Parameters.AddWithValue("$v", tracked ? 1 : 0);
+        cmd.Parameters.AddWithValue("$id", itemId);
+        cmd.ExecuteNonQuery();
     }
 
     [Fact]

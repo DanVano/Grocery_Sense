@@ -59,21 +59,6 @@ public static class PricesRepo
         return (int)Db.LastRowId(conn, tx);
     }
 
-    // Bulk insert (executemany port). Wraps a local transaction when the caller supplies none.
-    public static void AddPricePoints(SqliteConnection conn, IReadOnlyList<PricePoint> rows, SqliteTransaction? tx = null)
-    {
-        if (rows.Count == 0) return;
-        var local = tx is null ? conn.BeginTransaction() : null;
-        try
-        {
-            foreach (var p in rows)
-                AddPricePoint(conn, p.ItemId, p.StoreId, p.UnitPrice, p.Unit, p.Quantity, p.TotalPrice,
-                    p.RawName, p.Confidence, p.Source, p.Date, p.ReceiptId, p.FlyerSourceId, tx ?? local);
-            local?.Commit();
-        }
-        finally { local?.Dispose(); }
-    }
-
     // Price points for an item, oldest-first. With limit set, fetches the most-recent N (DESC+LIMIT) then
     // reverses to preserve the no-limit ASC contract.
     public static IReadOnlyList<PricePoint> GetPricesForItem(SqliteConnection conn, int itemId, int? storeId = null,
@@ -124,20 +109,6 @@ public static class PricesRepo
             }
         }
         return rows.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<PricePoint>)kv.Value);
-    }
-
-    public static PricePoint? GetMostRecentPrice(SqliteConnection conn, int itemId, int? storeId = null,
-        SqliteTransaction? tx = null)
-    {
-        var sql = $"SELECT {PriceCols} FROM prices WHERE item_id = $item";
-        if (storeId is not null) sql += " AND store_id = $store";
-        sql += " ORDER BY date DESC, id DESC LIMIT 1";
-
-        using var cmd = Db.Command(conn, tx, sql);
-        cmd.Parameters.AddWithValue("$item", itemId);
-        if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
-        using var r = cmd.ExecuteReader();
-        return r.Read() ? MapPricePoint(r) : null;
     }
 
     public static PriceStats GetPriceStatsForItem(SqliteConnection conn, int itemId, int? storeId = null,
@@ -212,46 +183,6 @@ public static class PricesRepo
             if (fallback.Count > 0) return (Median(fallback), fallback.Count, "estimated_median");
         }
         return (null, prices.Count, "unknown");
-    }
-
-    // (lowest_unit_price, when_iso) within the lookback window.
-    public static (double? Price, string? WhenIso) GetSixMonthLowUnitPrice(SqliteConnection conn, int itemId,
-        int? storeId = null, int sinceDays = 183, SqliteTransaction? tx = null)
-    {
-        var sql =
-            "SELECT unit_price, COALESCE(date, created_at) AS when_iso FROM prices WHERE item_id = $item " +
-            "AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 " +
-            "AND date(COALESCE(date, created_at)) >= date('now', $since)";
-        if (storeId is not null) sql += " AND store_id = $store";
-        sql += " ORDER BY CAST(unit_price AS REAL) ASC, when_iso ASC LIMIT 1";
-
-        using var cmd = Db.Command(conn, tx, sql);
-        cmd.Parameters.AddWithValue("$item", itemId);
-        cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
-        if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
-        using var r = cmd.ExecuteReader();
-        if (!r.Read()) return (null, null);
-        return (r.GetDouble(0), r.IsDBNull(1) ? null : r.GetString(1));
-    }
-
-    // Most recent date we saw unit_price <= priceCeiling within the lookback.
-    public static string? GetLastSeenAtOrBelow(SqliteConnection conn, int itemId, double priceCeiling,
-        int? storeId = null, int sinceDays = 183, SqliteTransaction? tx = null)
-    {
-        var sql =
-            "SELECT COALESCE(date, created_at) AS when_iso FROM prices WHERE item_id = $item " +
-            "AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 AND CAST(unit_price AS REAL) <= $ceil " +
-            "AND date(COALESCE(date, created_at)) >= date('now', $since)";
-        if (storeId is not null) sql += " AND store_id = $store";
-        sql += " ORDER BY when_iso DESC LIMIT 1";
-
-        using var cmd = Db.Command(conn, tx, sql);
-        cmd.Parameters.AddWithValue("$item", itemId);
-        cmd.Parameters.AddWithValue("$ceil", priceCeiling);
-        cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
-        if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
-        using var r = cmd.ExecuteReader();
-        return r.Read() && !r.IsDBNull(0) ? r.GetString(0) : null;
     }
 
     // Likely staples from receipt history: (item_id, line_count, distinct_receipt_count).
