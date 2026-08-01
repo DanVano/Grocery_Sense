@@ -1,9 +1,38 @@
 # Grocery Sense v2 — Follow-ups, Known Gaps & Bug-fixing Landmines
 
-Refreshed **2026-07-11**. v2 feature code (Phases 1/2/4/5/6), the July code-review/security fix pass,
+Refreshed **2026-07-11**; status lines + §3/§4 rewritten **2026-08-01** for the hardening/feature work.
+v2 feature code (Phases 1/2/4/5/6), the July code-review/security fix pass,
 **and all nine food-savings recommendations** (`Grocery_Sense/brainstorms/2026-07-09-family-food-savings.md`)
-are done on `V2_Features_Implementation_Phase2` (**19 commits ahead of origin, not pushed**).
-State at write time: **416 tests green, 0 skipped; Windows head builds 0/0; Integrations builds 0/0.**
+are done and merged to `main`.
+
+> ## ⚠ Read this before trusting §3 / §4 on `main`
+>
+> **The code these sections describe is NOT on `main` yet.** `main` is at `b8c47ab` (the v2
+> baseline). All of the work below sits on **`refactor/ponytail-audit`, 31 commits ahead of `main`
+> and 0 behind** — a clean fast-forward whenever you want it. This doc is deliberately kept current
+> on `main` so the tracker doesn't go stale, which means **§3's limitations and §4's landmines
+> describe branch code**. On `main` itself, receipt replacement still deletes at Prepare, the flyer
+> sync still throttles on attempts, and there is no restore path.
+
+**Branch state (verified 2026-08-01 on `refactor/ponytail-audit`): 578 tests green, 0 skipped;
+Windows head 0 errors; Android head builds Debug AND Release, 0 errors; not pushed.** The branch
+carries, in order:
+
+- **The full hardening plan (rev 3.1, now complete)** — P0-1 atomic receipt replacement · P0-2
+  bounded share intake + orphan sweep · P0-3 Azure spend/resource bounds + OCR gate · P1-4 Flipp
+  sync semantics · P1-5 staged restore + schema guard · P1-6 CI + full-history secret scan.
+  *(`HARDENING_PLAN.md` and its superseded rev-2 sibling were deleted 2026-08-01: the plan is
+  executed, and its durable output — the invariants — is §4.16–4.23 below. Its §0 evidence table
+  cited file:line coordinates that the later refactor pass invalidated, so keeping it would have
+  been worse than deleting it.)*
+- **Seven UI/workflow features** — receipt restore · item price history · budget by-store ·
+  watch-hit add · list row edit · add autocomplete · share list as text.
+- **A bugfix/security/perf/refactor pass** and **three architecture deepenings** (`DealEnricher`,
+  `ScanIngestService.ImportSharedBatchAsync`, `ReceiptDocument`).
+- **A seven-commit ponytail refactor pass** (`ponytail-1`…`ponytail-7`) that deleted zero-caller
+  Core/Data surface, consolidated test fixtures, merged the twin Azure DocInt clients, and removed
+  `PlanningService` + the History-plan tab. **This is why the test count fell from 608 to 578 —
+  deleted code taking its tests with it, not lost coverage.**
 
 **Product targets (decided 2026-07-11): Android + iOS ONLY.** All new features, updates, and bug
 fixes target the mobile apps. The Windows head stays only as a dev harness (build checks + fixture
@@ -114,17 +143,33 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
   good enough for ranking; it is not the full Python multi-field meal profile.
 - **Backfill Prepare writes items/aliases before the date confirm.** If the user cancels at the confirm
   dialog, any items/aliases the mapper created during Prepare persist (harmless, matches v1 single-scan
-  behavior) — only the receipt/price rows are gated on Commit.
+  behavior) — only the receipt/price rows are gated on Commit. This catalog-pollution divergence was
+  re-examined during the P0-1 hardening work and **deliberately kept** (deferring catalog creates into
+  the commit transaction is a large `BuildIngest` refactor that fixes pollution, not data loss).
+  What P0-1 *did* change: Prepare no longer **deletes** anything — see §4.16.
 - **Sync-on-resume is ALREADY BUILT — do not re-propose or rebuild it.** `App.CreateWindow` wires
-  `window.Resumed → FlyerSyncScheduler.CheckOnResumeAsync`, which is single-flighted (semaphore, second
-  caller gets `"busy"`) and throttled by `FlyerSyncService.NeedsSync()` to **at most twice a week
-  (every 3.5 days)**, with the last-sync timestamp persisted atomically beside the DB and clock-skew
-  treated as overdue. The documented ceiling: **deals can be up to 3.5 days stale** between manual
+  `window.Resumed → FlyerSyncScheduler.CheckOnResumeAsync`, throttled to **at most twice a week
+  (every 3.5 days)**. The documented ceiling: **deals can be up to 3.5 days stale** between manual
   syncs. This caught out a 2026-07-19 mobile-workflow analysis that proposed building resume-sync from
   scratch with a 12–24h TTL — the feature existed, and the shipped interval is deliberately *more*
   conservative (locked 2026-06-24, mobile background-execution limits). Tightening it is a product
   decision, not a tuning knob. A metered/cellular guard was considered and **rejected as YAGNI**: at
   twice a week the data cost is negligible.
+  **Semantics rewritten by P1-4 (2026-07-23) — the pre-hardening description of this entry is void:**
+  - Single-flight is now the **shared `FlyerMutationGate`** (scheduler resume + manual sync + manual
+    flyer import), not a scheduler-private semaphore. There is deliberately no second lock.
+  - The meta file is a **keyed text ledger** (`attempt=` · `success=` · `retry_not_before=` ·
+    `failure=`; legacy single-timestamp files migrate on read), not a bare timestamp. The 3.5-day
+    freshness check keys off **`success` — a COMMITTED store transaction** — so an all-fail sync no
+    longer buys a 3.5-day silent blackout.
+  - A 10-minute **attempt cooldown** and any server `retry_not_before` (429/403 →
+    `FlyerProviderThrottledException`, Retry-After honoured) bind **manual sync too**; `force` bypasses
+    only the freshness check.
+  - **Clock skew is no longer "treated as overdue"** — a future timestamp yields a visible
+    `clock_skew` result instead of syncing, so a bad device clock can't drive a resume-loop storm.
+  - Each sync **retires that store's previous `flipp_api` auto batch inside the same transaction**,
+    including when the provider legitimately returns nothing (stale deals must not outlive the sync
+    that found none). Manual batches are untouched.
 
 ---
 
@@ -178,6 +223,61 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
     receipt produce identical price rows; an unbounded UPDATE would move both when fixing the first line.
     There is deliberately no `line_item_id` column on `prices` — add one only if that pairing ever has to be
     exact (see the ponytail comment at the call site).
+
+### Added by the hardening / feature branch (2026-07-23 → 07-31)
+
+16. **Replace-mode Prepare OBSERVES; only Commit deletes.** `PrepareReceiptFileAsync` records
+    `FileHashOwnerId` + `SignatureOwnerId` and deletes nothing; the commit transaction re-reads both,
+    backup-deletes the confirmed owner, and inserts — all in one transaction. Never reintroduce a
+    delete at Prepare: an OCR failure, a cancel, or a **backfill date-skip** after it would destroy the
+    original with nothing written (that was the original bug). Two corollaries that look like tidy-ups
+    but are load-bearing: split owners (file-hash owner ≠ signature owner) **fail closed** as
+    `BatchImportStatus.Conflict` rather than inferring a two-receipt delete; and the SQLite
+    constraint-19 "actually a duplicate" fallback is restricted to commits that deleted **nothing** —
+    on a replace path it would rediscover the rolled-back original and misreport a real insert failure
+    as "duplicate".
+17. **The OCR gate must stay an injected Core singleton.** `OcrGate` serializes every paid Azure call
+    and owns the 90 s deadline → `TimeoutException` (caller cancel stays `OperationCanceledException`).
+    It cannot move into the Azure clients: the App head constructs a **new client per call**
+    (`App/ServiceCollectionExtensions.cs`), so a lock there serializes nothing. Spend caps live at the
+    **Core service boundary** (`ImportBatchAsync`, `IngestAssetsAsync`) for the same reason UI checks
+    can't be trusted — the tests project has no App reference, so only the service boundary is provable.
+18. **The share intake reserves its slot synchronously, before `Task.Run`.** `TryBeginCopy` on the
+    intent thread is what makes two simultaneous `ACTION_SEND` intents impossible to interleave;
+    moving the reservation inside the background copy reopens the race where both observe "nothing
+    pending". Every exit path must `CompleteCopy`/`CompleteImport`/`Discard` or the machine wedges and
+    all later shares are rejected as busy.
+19. **`SqliteConnection.ClearAllPools()` is PROCESS-WIDE — a parallel-test hazard.** The restore
+    cold-swap calls it legitimately (production runs it before any DB consumer exists), but in the
+    xUnit suite it can dispose a pooled handle another test is concurrently fetching →
+    `ObjectDisposedException: SQLitePCL.sqlite3` in an unrelated test. `RestoreStagingTests` is pinned
+    to a `DisableParallelization` collection; any new test that clears pools must join it.
+20. **A restore CONSUMES its backup — but only on success.** `RestoreReceiptFromBackup` deletes the
+    `deleted_receipt_backups` row inside the restore transaction (restoring twice used to insert a
+    second identical receipt whose dedupe keys silently conflicted). A **failed** restore rolls back
+    and keeps the backup for retry — both halves are pinned by tests; keep them that way.
+21. **Restore swaps the DB file only at cold start.** `RestoreStaging.StageRestore` validates a copy
+    (integrity_check · foreign_key_check · `schema_version` **table** ≤ ledger · expected tables) and
+    arms a marker; `AppStartup` completes the swap before migrations, before any consumer exists. Never
+    "simplify" this into a live `File.Replace`: SQLite pooling, WAL sidecars and the per-path integrity
+    cache all make an in-flight swap unsafe. The newer-schema guard in `Database.Initialize` (fail loud
+    with both version numbers) applies at **normal** startup too — never migrate down.
+22. **Enrichment and receipt parsing each have exactly ONE home now.** `DealEnricher` owns the
+    multibuy → unit-guess → map → normalize chain for **both** flyer sync and manual flyer ingest (they
+    were two hand-mirrored copies that could drift into a silent pricing bug); `ReceiptDocument` owns
+    all Azure-JSON field navigation, the P0-3 field/line caps, and price derivation. Don't re-inline
+    either back into a caller. `ReceiptDocument` is deliberately two-phase — the cheap header parses
+    first so a **duplicate still wins over a line-count reject**, and `ParseLines` still runs its count
+    guard before any catalog write. Skipped OCR entries leave **gaps** in `line_index` (survivors keep
+    their original indices, so stored rows stay aligned with the paper receipt).
+23. **`Platforms/Android/` is NOT compiled by the Windows head — build the Android TFM after touching
+    it.** `dotnet test` + the Windows head can be fully green while Android-only source is broken. This
+    bit the P0-2 share-intake work: `MainActivity` has `using Android.OS;`, which ships its **own
+    `OperationCanceledException`**, so the deadline `catch (OperationCanceledException)` was a CS0104
+    ambiguity — invisible for a week of Windows-only verification, and it would have failed CI's Android
+    Release job on the first push. Catch `System.OperationCanceledException` explicitly in that folder
+    (the Android type would never match a `CancellationToken` throw anyway). Build command in
+    `OPEN_ITEMS_0721.md` §"Current state".
 
 ---
 

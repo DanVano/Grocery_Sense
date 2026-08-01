@@ -71,7 +71,10 @@ their `-`). Tests: `Csv_export_neutralizes_formula_injection_in_text_cells`,
 
 # Security Review — V3 Mobile (2026-07-18)
 
-Threat model: local-only, no accounts, BYOK Azure key. No Grocery Sense server exists.
+Threat model: **client-only with no first-party backend** (terminology adopted 2026-07-23 — not
+"local-only": selected receipt/flyer images go to Azure Document Intelligence, the postal code goes to
+Flipp; those are the two disclosed egress points), no accounts, BYOK Azure key. No Grocery Sense server
+exists.
 Source reviews (`security_review_claude_0718.md` findings + `security_review_codex_0718.md` remediation) were condensed into this doc and deleted 2026-07-21.
 Branch: `V3_Mobile_Development`. **No critical/high vulnerability under the current threat model** — this
 round is defense-in-depth, privacy disclosure, resource bounding, and future-regression prevention.
@@ -99,6 +102,22 @@ round is defense-in-depth, privacy disclosure, resource bounding, and future-reg
 - **Local data not additionally encrypted** (SQLite, `user_config.json`, receipt/flyer images). OS sandbox + device data protection are the primary controls. SQLCipher deliberately NOT added (native-dep + key-recovery cost; leaves images/config outside the DB; no protection vs live rooted use). Revisit for regulated data / managed shared devices / explicit rooted-forensic requirement.
 - **No certificate pinning** — platform trust kept; pinning Flipp/Azure is brittle vs cert rotation.
 - **Secure-transport defaults kept** — iOS ATS active (no weakening exception), Android API 36 `usesCleartextTraffic=false`, Azure endpoint guard requires HTTPS+Azure host, Flipp fixed HTTPS base URL.
+
+## Secrets history scan (2026-07-23, hardening branch P1-6)
+
+**Result: no secrets found in the current tree OR the full commit history as of 2026-07-23.**
+
+- Method: full-history dump (`git log --all -p`, all branches, ~35 MB) scanned locally with targeted
+  regexes — key/secret/password/token assignment patterns, 84-char Azure-style base64 keys, private-key
+  PEM headers, GitHub/OpenAI token prefixes, cognitiveservices URLs with embedded keys. One raw match:
+  an inline SVG `data:` URI (base64 `PHN2Zy…` = `<svg`), verified false positive.
+- Honest scope: this was a targeted regex pass, not a full-ruleset scanner (gitleaks is not installed on
+  the dev machine). The CI pipeline (`.github/workflows/ci.yml`, added same day) runs version-pinned
+  gitleaks over the full history (`fetch-depth: 0`) on every push, which is the authoritative scan going
+  forward.
+- If a future scan hits: rotate the key at Azure (Portal → the Document Intelligence resource → Keys →
+  Regenerate), update SecureStorage on devices via Preferences, then rewrite/invalidate the leaked
+  commits before any push to a shared remote.
 
 ## Conditional release gate — SEC-06 (developer-owned shared Azure key)
 
