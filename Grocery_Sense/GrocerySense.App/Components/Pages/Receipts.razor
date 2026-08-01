@@ -1,9 +1,5 @@
 @page "/receipts"
-@using GrocerySense.App.Services
-@using GrocerySense.Core
-@using GrocerySense.Data
-@using GrocerySense.Data.Repositories
-@using GrocerySense.Domain
+@inherits BusyComponent
 @implements IDisposable
 @inject ReceiptIngestionService Ingest
 @inject ScanIngestService ScanIngest
@@ -211,12 +207,9 @@ else
     private int? _filterStoreId;
     private DateRange? _filterRange;
     private bool _anyReceiptsExist;
-    private bool _busy;
     private bool _replaceDuplicates;
     private string _stage = "";
     private string? _batchProgress;
-    private string? _message;
-    private Severity _messageSeverity = Severity.Info;
     private CancellationTokenSource? _cts;
     private List<string> _sharedPaths = [];
     private List<string> _sharedErrors = [];
@@ -357,7 +350,7 @@ else
 
             _stage = "Copying…";
             StateHasChanged();
-            copyPath = await CopyPickToAppDataAsync(pick, _cts.Token);
+            copyPath = await ReceiptFilePolicy.CopyPickAsync(pick, _cts.Token);
 
             _stage = "Reading receipt (OCR + parsing)…";
             StateHasChanged();
@@ -369,14 +362,14 @@ else
 
             if (ingest.ReplaceConflict)
             {
-                TryDeleteReceiptFile(copyPath); // fail-closed: nothing committed, the copy is unreferenced
+                ReceiptFilePolicy.TryDelete(copyPath); // fail-closed: nothing committed, the copy is unreferenced
                 _messageSeverity = Severity.Warning;
                 _message = $"Replace conflict — nothing was imported or deleted: {ingest.ConflictDetail}. " +
                            "Delete the duplicate you don't want first, then rescan.";
             }
             else if (ingest.WasDuplicate)
             {
-                TryDeleteReceiptFile(copyPath); // original receipt keeps its own image
+                ReceiptFilePolicy.TryDelete(copyPath); // original receipt keeps its own image
                 _messageSeverity = Severity.Info;
                 _message = $"Duplicate of receipt #{ingest.ReceiptId} ({ingest.DuplicateReason}) — not re-imported. " +
                            "Turn on Replace duplicates to re-ingest.";
@@ -406,13 +399,13 @@ else
         }
         catch (OperationCanceledException)
         {
-            TryDeleteReceiptFile(copyPath);
+            ReceiptFilePolicy.TryDelete(copyPath);
             _messageSeverity = Severity.Info;
             _message = "Import cancelled.";
         }
         catch (Exception ex)
         {
-            TryDeleteReceiptFile(copyPath);
+            ReceiptFilePolicy.TryDelete(copyPath);
             Fail($"Import failed: {ex.Message}");
         }
         finally
@@ -423,11 +416,6 @@ else
             _cts = null;
         }
     }
-
-    // Bounded copy of a picker/camera stream into app-data. The ceiling, allowlist and destination live
-    // in ReceiptFilePolicy so this page and the global Scan FAB cannot drift apart.
-    private static Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct) =>
-        ReceiptFilePolicy.CopyPickAsync(pick, ct);
 
     // Backfill on-ramp: multi-pick from the gallery, copy all, then import with a per-receipt date confirm.
     // Alerts are not scanned here — correctly-dated old receipts fall outside the recent-scan window.
@@ -463,7 +451,7 @@ else
             foreach (var pick in picked)
             {
                 _cts.Token.ThrowIfCancellationRequested();
-                copied.Add(await CopyPickToAppDataAsync(pick, _cts.Token));
+                copied.Add(await ReceiptFilePolicy.CopyPickAsync(pick, _cts.Token));
             }
 
             var total = copied.Count;
@@ -479,7 +467,7 @@ else
             // (duplicates, skips, failures, cancellations).
             foreach (var item in summary.Items)
                 if (item.Status != BatchImportStatus.Imported)
-                    TryDeleteReceiptFile(item.FilePath);
+                    ReceiptFilePolicy.TryDelete(item.FilePath);
 
             _messageSeverity = summary.Failed > 0 || summary.Conflicts > 0 ? Severity.Warning : Severity.Success;
             _message = $"Backfill done — {summary.Imported} imported, {summary.Duplicates} duplicate(s), " +
@@ -492,13 +480,13 @@ else
         {
             // Cancellation here means we stopped during the pick/copy phase (the batch itself records
             // per-file Cancelled rather than throwing) — nothing was imported yet, so drop every copy.
-            foreach (var p in copied) TryDeleteReceiptFile(p);
+            foreach (var p in copied) ReceiptFilePolicy.TryDelete(p);
             _messageSeverity = Severity.Info;
             _message = "Backfill cancelled.";
         }
         catch (Exception ex)
         {
-            foreach (var p in copied) TryDeleteReceiptFile(p);
+            foreach (var p in copied) ReceiptFilePolicy.TryDelete(p);
             Fail($"Backfill failed: {ex.Message}");
         }
         finally
@@ -568,7 +556,7 @@ else
                 using var conn = Db.Open();
                 ReceiptsRepo.DeleteReceiptWithBackup(conn, receipt.Id);
             });
-            if (receipt.FilePath is { Length: > 0 } fp) TryDeleteReceiptFile(fp);
+            if (receipt.FilePath is { Length: > 0 } fp) ReceiptFilePolicy.TryDelete(fp);
             _messageSeverity = Severity.Success;
             _message = $"Receipt #{receipt.Id} deleted. Rows are backed up; the image file is gone for good.";
             await ReloadAsync();
@@ -636,7 +624,7 @@ else
     {
         if (receipt.FilePath is { Length: > 0 } fp)
         {
-            if (TryDeleteReceiptFile(fp))
+            if (ReceiptFilePolicy.TryDelete(fp))
             {
                 _messageSeverity = Severity.Success;
                 _message = $"Image for receipt #{receipt.Id} deleted; parsed data kept.";
@@ -646,12 +634,8 @@ else
         return Task.CompletedTask;
     }
 
-    private static string ReceiptsDir() => ReceiptFilePolicy.ReceiptsDir();
-
     private static bool CanDeleteReceiptFile(string path) =>
-        PathSafety.IsUnderDirectory(ReceiptsDir(), path) && File.Exists(path);
-
-    private static bool TryDeleteReceiptFile(string? path) => ReceiptFilePolicy.TryDelete(path);
+        PathSafety.IsUnderDirectory(ReceiptFilePolicy.ReceiptsDir(), path) && File.Exists(path);
 
     // Import the shared receipt(s) the user just confirmed. The whole workflow — atomic claim, per-file
     // single-scan ingest, which copies to delete, batch release — lives in
@@ -666,7 +650,7 @@ else
             _stage = "Reading receipt (OCR + parsing)…";
             StateHasChanged();
             var summary = await ScanIngest.ImportSharedBatchAsync(
-                PendingShared, _replaceDuplicates, p => TryDeleteReceiptFile(p), _cts.Token);
+                PendingShared, _replaceDuplicates, p => ReceiptFilePolicy.TryDelete(p), _cts.Token);
             if (summary is null) return; // nothing claimable — another import holds the batch
 
             if (summary.Cancelled)
@@ -703,14 +687,8 @@ else
     // is hoarded.
     private void DiscardShared()
     {
-        foreach (var path in PendingShared.Discard()) TryDeleteReceiptFile(path);
+        foreach (var path in PendingShared.Discard()) ReceiptFilePolicy.TryDelete(path);
         RefreshShared();
-    }
-
-    private void Fail(string message)
-    {
-        _messageSeverity = Severity.Error;
-        _message = message;
     }
 
     private void CancelIngest() => _cts?.Cancel();

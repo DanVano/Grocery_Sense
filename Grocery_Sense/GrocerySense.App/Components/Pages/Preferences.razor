@@ -1,6 +1,6 @@
 @page "/preferences"
+@inherits BusyComponent
 @using System.Text.Json
-@using GrocerySense.Core
 @using static GrocerySense.App.ServiceCollectionExtensions
 @inject ConfigStore Config
 @inject ISnackbar Snackbar
@@ -161,9 +161,7 @@ else
 
 @code {
     private bool _loaded;
-    private bool _busy;
     private bool _saved;
-    private string? _error;
 
     private string _postal = "";
     private string _city = "";
@@ -401,19 +399,14 @@ else
 
     private Task DeleteMemberAsync(int memberId) => MemberOp(() => Config.DeleteMember(memberId));
 
-    private async Task MemberOp(Action op, Action? afterSuccess = null)
-    {
-        _busy = true;
-        _error = null;
-        try
+    // Errors surface in the alert — e.g. can't delete the master/last member.
+    private Task MemberOp(Action op, Action? afterSuccess = null) =>
+        GuardAsync(op, () =>
         {
-            await Task.Run(op);
             afterSuccess?.Invoke();
             _members = Config.Load().Household.Members;
-        }
-        catch (Exception ex) { _error = ex.Message; }   // e.g. can't delete the master/last member
-        finally { _busy = false; }
-    }
+            return Task.CompletedTask;
+        });
 
     // preferred_protein_weights is a {protein: weight} map; surface proteins weighted above 1.0 as a comma list.
     private static string AsWeightKeys(object? value)

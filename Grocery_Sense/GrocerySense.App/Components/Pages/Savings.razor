@@ -1,6 +1,5 @@
 @page "/savings"
-@using GrocerySense.Core
-@using GrocerySense.Domain
+@inherits BusyComponent
 @inject WatchlistService Watchlist
 @inject PriceDropAlertService Alerts
 @inject ShoppingListService Shopping
@@ -148,10 +147,7 @@
     private IReadOnlyList<(int Id, string Name)> _items = Array.Empty<(int, string)>();
     private string? _pickName;
     private double? _target;
-    private bool _busy;
-    private string? _error;
 
-    private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
     private static string KindLabel(string kind) => kind switch
     {

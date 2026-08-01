@@ -1,8 +1,4 @@
 @page "/deals"
-@using GrocerySense.Core
-@using GrocerySense.Data
-@using GrocerySense.Data.Repositories
-@using GrocerySense.Domain
 @implements IDisposable
 @inject SqliteConnectionFactory Db
 @inject PreferencesService Prefs
@@ -351,7 +347,7 @@ else
 
             var ct = _syncCts.Token;
             foreach (var pick in picked)
-                copied.Add(await CopyPickToAppDataAsync(pick, ct));
+                copied.Add(await FlyerFilePolicy.CopyPickAsync(pick, ct));
 
             var result = await FlyerIngest.IngestAssetsAsync(choice.StoreId, choice.ValidFrom, choice.ValidTo,
                 copied, sourceType: "manual_upload", ct: ct);
@@ -375,22 +371,12 @@ else
         {
             if (!imported)
                 foreach (var path in copied)
-                    TryDeleteFlyerFile(path);
+                    FlyerFilePolicy.TryDelete(path);
             _importing = false;
             _syncCts?.Dispose();
             _syncCts = null;
         }
     }
-
-    // Picker streams are copied into app-data before ingest (mirrors Receipts.razor — source paths expire).
-    // The ceiling, allowlist and destination live in FlyerFilePolicy so this page, the orphan sweep and any
-    // future entry point cannot drift apart.
-    private static Task<string> CopyPickToAppDataAsync(FileResult pick, CancellationToken ct) =>
-        GrocerySense.App.Services.FlyerFilePolicy.CopyPickAsync(pick, ct);
-
-    // Deletes a copied flyer asset (only inside the flyers dir) when an import fails before the DB references it.
-    private static void TryDeleteFlyerFile(string path) =>
-        GrocerySense.App.Services.FlyerFilePolicy.TryDelete(path);
 
     // Add a deal to the active shopping list. Mapped deals land under their store with price intel; unmapped
     // deals land as a disclosed text row (see ShoppingListService.AddDealToList). List is user-managed —

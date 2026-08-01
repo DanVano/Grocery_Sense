@@ -1,4 +1,5 @@
 @page "/family"
+@inherits BusyComponent
 @inject FamilyRequestsService Picks
 @inject ConfigStore Config
 @inject ISnackbar Snackbar
@@ -92,8 +93,6 @@ else
     private IReadOnlyList<PickableRecipe>? _pickable;
     private IReadOnlyList<MemberRequestRow>? _unreviewed;
     private string _quickItem = "";
-    private bool _busy;
-    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -154,16 +153,5 @@ else
     private Task KeepAsync(int requestId) => ReviewAsync(() => Picks.MarkReviewed(requestId));
     private Task RemoveAsync(int requestId) => ReviewAsync(() => Picks.RemoveRequest(requestId));
 
-    private async Task ReviewAsync(Action review)
-    {
-        _busy = true;
-        _error = null;
-        try
-        {
-            await Task.Run(review);
-            await ReloadAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-        finally { _busy = false; }
-    }
+    private Task ReviewAsync(Action review) => GuardAsync(review, ReloadAsync);
 }

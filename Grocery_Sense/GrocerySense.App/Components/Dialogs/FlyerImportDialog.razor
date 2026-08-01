@@ -1,7 +1,6 @@
 @* Manual flyer import confirmation: the ingest service requires a store, so Import stays disabled until
    one is picked. Validity dates prefill today/+7 (the same defaults FlyerSyncService uses) and are
    clearable — a cleared date ingests as NULL = open-ended, matching FlyersRepo.ListActiveDeals. *@
-@using GrocerySense.Domain
 
 <MudDialog>
     <DialogContent>

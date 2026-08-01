@@ -3,15 +3,4 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:local="clr-namespace:GrocerySense.App"
              x:Class="GrocerySense.App.App">
-    <Application.Resources>
-        <ResourceDictionary>
-
-        <!--
-            For information about styling .NET MAUI pages
-            please refer to the documentation:
-            https://go.microsoft.com/fwlink/?linkid=2282329
-        -->
-
-        </ResourceDictionary>
-    </Application.Resources>
 </Application>

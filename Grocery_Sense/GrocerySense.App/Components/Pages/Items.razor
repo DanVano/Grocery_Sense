@@ -1,4 +1,5 @@
 @page "/items"
+@inherits BusyComponent
 @inject SqliteConnectionFactory Db
 @inject IDialogService DialogService
 @inject ItemManagerService ItemManager
@@ -127,9 +128,6 @@ else
     private string _query = "";
     private int? _renamingId;
     private string _renameText = "";
-    private bool _busy;
-    private string? _message;
-    private Severity _messageSeverity = Severity.Info;
 
     protected override Task OnInitializedAsync() => SearchAsync();
 
@@ -235,9 +233,4 @@ else
         finally { _busy = false; }
     }
 
-    private void Fail(string message)
-    {
-        _messageSeverity = Severity.Error;
-        _message = message;
-    }
 }

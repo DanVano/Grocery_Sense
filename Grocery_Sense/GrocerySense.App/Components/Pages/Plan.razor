@@ -1,6 +1,5 @@
 @page "/plan"
-@using GrocerySense.Core
-@using GrocerySense.Domain
+@inherits BusyComponent
 @inject BasketOptimizerService Optimizer
 @inject PlanningService Planning
 @inject ShoppingListService Shopping
@@ -177,15 +176,11 @@
 
 @code {
     private string _mode = "best_savings";
-    private bool _busy;
-    private string? _error;
     private BasketOptimizationResult? _optimized;
     private ApplyPlanResult? _applied;
     private StorePlanResult? _plan;
     private BudgetStatus? _budget;
     private List<string> _deferCandidates = [];
-
-    private static string F2(double v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task OptimizeAsync()
     {
@@ -235,21 +230,4 @@
 
     private async Task BuildPlanAsync() =>
         _plan = await GuardAsync(() => Planning.BuildPlanForActiveList());
-
-    // Run sync service work off the UI thread; errors land in the alert, result is null on failure.
-    private async Task<T?> GuardAsync<T>(Func<T> work) where T : class
-    {
-        _busy = true;
-        try
-        {
-            _error = null;
-            return await Task.Run(work);
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-            return null;
-        }
-        finally { _busy = false; }
-    }
 }

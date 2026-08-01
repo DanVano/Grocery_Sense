@@ -1,7 +1,5 @@
 @page "/stores"
-@using GrocerySense.Data
-@using GrocerySense.Data.Repositories
-@using GrocerySense.Domain
+@inherits BusyComponent
 @inject SqliteConnectionFactory Db
 
 <MudText Typo="Typo.h5" GutterBottom="true">Stores</MudText>
@@ -77,8 +75,6 @@ else
 @code {
     private IReadOnlyList<Store>? _stores;
     private string _newName = "";
-    private bool _busy;
-    private string? _error;
 
     // Pending edits per store id, applied on Save (fields write here, not to the record).
     private sealed class PendingEdit
@@ -143,20 +139,6 @@ else
     private Task ArchiveAsync(int storeId) => RunAsync(conn =>
         StoresRepo.SetStoreActive(conn, storeId, false));
 
-    private async Task RunAsync(Action<Microsoft.Data.Sqlite.SqliteConnection> work)
-    {
-        _busy = true;
-        try
-        {
-            _error = null;
-            await Task.Run(() =>
-            {
-                using var conn = Db.Open();
-                work(conn);
-            });
-            await ReloadAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-        finally { _busy = false; }
-    }
+    private Task RunAsync(Action<Microsoft.Data.Sqlite.SqliteConnection> work) =>
+        GuardAsync(() => { using var conn = Db.Open(); work(conn); }, ReloadAsync);
 }

@@ -1,4 +1,5 @@
 @page "/meals"
+@inherits BusyComponent
 @inject WeeklyPlannerService Planner
 @inject UserRecipeService Recipes
 @inject IDialogService DialogService
@@ -135,9 +136,6 @@ else if (_myRecipes is not null)
     private WeeklyPlan? _plan;
     private bool _persisted;
     private int _numRecipes = 6;
-    private bool _busy;
-    private string? _message;
-    private Severity _messageSeverity = Severity.Info;
     private IReadOnlyList<UserRecipeRow>? _myRecipes;
 
     protected override async Task OnInitializedAsync() => await ReloadRecipesAsync();
@@ -259,9 +257,4 @@ else if (_myRecipes is not null)
         ? $" · ≈ ${c:0.00}/serving{(meal.CostKnownRatio < 1.0 ? " (partial)" : "")}"
         : "";
 
-    private void Fail(string message)
-    {
-        _messageSeverity = Severity.Error;
-        _message = message;
-    }
 }
