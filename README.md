@@ -5,8 +5,11 @@ reads the prices, and over time it learns what you normally pay for things. From
 build a smarter shopping list, catch real flyer deals, plan a trip across a few stores, track a
 budget, and plan meals around what's actually on sale.
 
-It's a C# rewrite of an earlier Python/Tkinter version I built. Everything runs on your phone — no
-accounts, no sign-in, no server. Your data stays local. Prices are in Canadian dollars (en-CA).
+It's a C# rewrite of an earlier Python/Tkinter version I built. There are no accounts, no sign-in,
+and no server of mine sitting in the middle. Two things do leave your phone: the receipt and flyer
+photos you pick are sent to Azure Document Intelligence to be read, and your postal code is sent to
+Flipp to look up local flyers. Everything else — your prices, your history, your lists — stays on
+the device. Prices are in Canadian dollars (en-CA).
 
 It's built with .NET 10, C#, and a MAUI Blazor Hybrid front end (MudBlazor). Android and iOS are the
 only real targets. There is a Windows build, but I only use it as a dev harness to run the tests and

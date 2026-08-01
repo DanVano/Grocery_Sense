@@ -9,11 +9,17 @@ which were fully or ~fully executed (verified against the code, 2026-07-21).
 (PR #1). **The Android head BUILDS** (JDK 17 + API 36 installed; `dotnet build GrocerySense.App
 -f net10.0-android` → 0 errors, 7 pre-existing CS8602 nullable warnings in `AndroidLocalNotifier.cs`).
 
-**Unpushed work sits on `feat/feature-pack-1` (15 commits, off the `hardening/p0-intake-replace-ocr`
-tip, which is off `feat/family-food-features`): 608 tests green; Windows + Integrations build 0-error.**
-It carries the full `HARDENING_PLAN.md` rev 3.1 (P0-1…P1-6), seven UI/workflow features, a
-bugfix/security/perf/refactor pass, and three architecture deepenings. **Push + PR is a [USER]
-decision — not done.** The first push also gives the new CI workflow its first run.
+**Unpushed work sits on `refactor/ponytail-audit` — 31 commits ahead of `main`, 0 behind (a clean
+fast-forward). Verified 2026-08-01: 578 tests green; Windows head 0 errors; Android head builds
+Debug AND Release, 0 errors.** It carries the completed hardening plan (P0-1…P1-6), seven
+UI/workflow features, a bugfix/security/perf/refactor pass, three architecture deepenings, and a
+seven-commit ponytail refactor pass. The 608→578 test change is deleted code taking its tests with
+it, not lost coverage.
+
+**`main` has none of that code** — `main` is still the v2 baseline (`b8c47ab`). Only the docs are
+kept current here, so a doc section may describe behaviour `main` does not have yet; see the banner
+at the top of `V2_FOLLOWUPS.md`. **Merging (or fast-forwarding) `main` is a [USER] decision — not
+done.** The CI workflow also lives only on the branch, so it has still never executed.
 
 Everything still open below is **on-device / user / hardware-gated** — no service or data code blocks
 release. **The Android head builds in BOTH configurations (verified 2026-07-31): Debug and Release,
@@ -103,7 +109,7 @@ valid recorded outcome. Record every verdict in `IMPLEMENTATION_NOTES.md`.
 
 ## 4. On-device UI verification debt — [DEVICE]
 
-608 tests pass but **none exercise Razor or the Android platform layer** — all UI + intent behaviour is
+578 tests pass but **none exercise Razor or the Android platform layer** — all UI + intent behaviour is
 unproven at runtime. Verify on device (blocker = crash / data loss / feature unusable / silent-degradation;
 degraded = log to a device-polish backlog, doesn't block):
 
@@ -173,8 +179,8 @@ Dan wants to revisit. Gate: physical Mac (used M-series class) + Stages 2 & 4 co
 ## 6. Security — on-device verification + standing gate
 
 Feature/hardening code done (SEC-01…05, 2026-07-18); details in `SECURITY_REVIEW_FUTURE_WORK.md`.
-**Second hardening pass done 2026-07-23** on `feat/feature-pack-1` — the full `HARDENING_PLAN.md`
-rev 3.1: atomic receipt replacement · bounded share intake + DB-aware orphan sweep · Azure
+**Second hardening pass done 2026-07-23** (now on `refactor/ponytail-audit`) — the full rev-3.1
+hardening plan: atomic receipt replacement · bounded share intake + DB-aware orphan sweep · Azure
 spend/resource bounds (page caps, batch caps, one-at-a-time OCR gate, response + field guards) ·
 correct Flipp sync semantics (committed-success throttle, Retry-After, per-store retention) · staged
 cold-start restore + newer-schema guard · CI (unpiped `dotnet test` + unsigned Android Release compile

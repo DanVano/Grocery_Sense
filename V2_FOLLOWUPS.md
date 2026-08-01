@@ -1,18 +1,38 @@
 # Grocery Sense v2 — Follow-ups, Known Gaps & Bug-fixing Landmines
 
-Refreshed **2026-07-11**; status lines + §3/§4 updated **2026-07-31** for the hardening/feature branch.
+Refreshed **2026-07-11**; status lines + §3/§4 rewritten **2026-08-01** for the hardening/feature work.
 v2 feature code (Phases 1/2/4/5/6), the July code-review/security fix pass,
 **and all nine food-savings recommendations** (`Grocery_Sense/brainstorms/2026-07-09-family-food-savings.md`)
 are done and merged to `main`.
 
-**Current state (2026-07-31): `feat/feature-pack-1`, 15 commits, 608 tests green, 0 skipped; Windows
-head + Integrations build 0/0; not pushed.** That branch carries, in order: the full
-`HARDENING_PLAN.md` rev 3.1 (P0-1 atomic receipt replacement · P0-2 bounded share intake + orphan
-sweep · P0-3 Azure spend/resource bounds + OCR gate · P1-4 Flipp sync semantics · P1-5 staged restore
-+ schema guard · P1-6 CI + secret scan), seven UI/workflow features (receipt restore · item price
-history · budget by-store · watch-hit add · list row edit · add autocomplete · share list as text),
-a bugfix/security/perf/refactor pass, and three architecture deepenings (`DealEnricher`,
-`ScanIngestService.ImportSharedBatchAsync`, `ReceiptDocument`). §3 and §4 below are current for it.
+> ## ⚠ Read this before trusting §3 / §4 on `main`
+>
+> **The code these sections describe is NOT on `main` yet.** `main` is at `b8c47ab` (the v2
+> baseline). All of the work below sits on **`refactor/ponytail-audit`, 31 commits ahead of `main`
+> and 0 behind** — a clean fast-forward whenever you want it. This doc is deliberately kept current
+> on `main` so the tracker doesn't go stale, which means **§3's limitations and §4's landmines
+> describe branch code**. On `main` itself, receipt replacement still deletes at Prepare, the flyer
+> sync still throttles on attempts, and there is no restore path.
+
+**Branch state (verified 2026-08-01 on `refactor/ponytail-audit`): 578 tests green, 0 skipped;
+Windows head 0 errors; Android head builds Debug AND Release, 0 errors; not pushed.** The branch
+carries, in order:
+
+- **The full hardening plan (rev 3.1, now complete)** — P0-1 atomic receipt replacement · P0-2
+  bounded share intake + orphan sweep · P0-3 Azure spend/resource bounds + OCR gate · P1-4 Flipp
+  sync semantics · P1-5 staged restore + schema guard · P1-6 CI + full-history secret scan.
+  *(`HARDENING_PLAN.md` and its superseded rev-2 sibling were deleted 2026-08-01: the plan is
+  executed, and its durable output — the invariants — is §4.16–4.23 below. Its §0 evidence table
+  cited file:line coordinates that the later refactor pass invalidated, so keeping it would have
+  been worse than deleting it.)*
+- **Seven UI/workflow features** — receipt restore · item price history · budget by-store ·
+  watch-hit add · list row edit · add autocomplete · share list as text.
+- **A bugfix/security/perf/refactor pass** and **three architecture deepenings** (`DealEnricher`,
+  `ScanIngestService.ImportSharedBatchAsync`, `ReceiptDocument`).
+- **A seven-commit ponytail refactor pass** (`ponytail-1`…`ponytail-7`) that deleted zero-caller
+  Core/Data surface, consolidated test fixtures, merged the twin Azure DocInt clients, and removed
+  `PlanningService` + the History-plan tab. **This is why the test count fell from 608 to 578 —
+  deleted code taking its tests with it, not lost coverage.**
 
 **Product targets (decided 2026-07-11): Android + iOS ONLY.** All new features, updates, and bug
 fixes target the mobile apps. The Windows head stays only as a dev harness (build checks + fixture
@@ -124,8 +144,8 @@ Windows host can't click dialogs / share sheets / pickers). Verify these on-devi
 - **Backfill Prepare writes items/aliases before the date confirm.** If the user cancels at the confirm
   dialog, any items/aliases the mapper created during Prepare persist (harmless, matches v1 single-scan
   behavior) — only the receipt/price rows are gated on Commit. This catalog-pollution divergence was
-  re-examined and **deliberately kept** by `HARDENING_PLAN.md` P0-1 (deferring catalog creates into the
-  commit transaction is a large `BuildIngest` refactor that fixes pollution, not data loss).
+  re-examined during the P0-1 hardening work and **deliberately kept** (deferring catalog creates into
+  the commit transaction is a large `BuildIngest` refactor that fixes pollution, not data loss).
   What P0-1 *did* change: Prepare no longer **deletes** anything — see §4.16.
 - **Sync-on-resume is ALREADY BUILT — do not re-propose or rebuild it.** `App.CreateWindow` wires
   `window.Resumed → FlyerSyncScheduler.CheckOnResumeAsync`, throttled to **at most twice a week
