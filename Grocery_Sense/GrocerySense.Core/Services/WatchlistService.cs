@@ -69,42 +69,10 @@ public sealed class WatchlistService
         {
             // Cheapest current price across shop-here stores: active flyer first, else most-recent store price;
             // else the global most-recent fallback.
-            double? bestUnit = null;
-            var bestStoreId = 0;
-            var bestSource = "unknown";
-            foreach (var s in stores)
-            {
-                double unit;
-                string source;
-                if (flyerQuotes.TryGetValue((w.ItemId, s.Id), out var fq))
-                {
-                    unit = fq.UnitPrice;
-                    source = string.IsNullOrEmpty(fq.Source) ? "flyer" : fq.Source;
-                }
-                else if (storeQuotes.TryGetValue((w.ItemId, s.Id), out var pp) && pp.UnitPrice > 0)
-                {
-                    unit = pp.UnitPrice;
-                    source = string.IsNullOrEmpty(pp.Source) ? "latest" : pp.Source;
-                }
-                else continue;
-
-                if (unit <= 0) continue;
-                if (bestUnit is null || unit < bestUnit)
-                {
-                    bestUnit = unit;
-                    bestStoreId = s.Id;
-                    bestSource = source;
-                }
-            }
-
-            if (bestUnit is null && globalQuotes.TryGetValue(w.ItemId, out var gl) && gl.UnitPrice > 0)
-            {
-                bestUnit = gl.UnitPrice;
-                bestStoreId = gl.StoreId;
-                bestSource = string.IsNullOrEmpty(gl.Source) ? "global_latest" : gl.Source;
-            }
-
-            if (bestUnit is null || bestUnit <= 0) continue;
+            var quote = PriceQuoteLadder.BestStoreQuote(w.ItemId, stores, flyerQuotes, storeQuotes)
+                        ?? PriceQuoteLadder.GlobalFallback(w.ItemId, globalQuotes);
+            if (quote is not { UnitPrice: > 0 } q) continue;
+            var (bestUnit, bestStoreId, bestSource) = ((double?)q.UnitPrice, q.StoreId, q.Source);
 
             var (usual, _, _) = usualMap.GetValueOrDefault(w.ItemId, (null, 0, "unknown"));
             double? pctBelow = usual is > 0 ? (usual.Value - bestUnit.Value) / usual.Value * 100.0 : null;

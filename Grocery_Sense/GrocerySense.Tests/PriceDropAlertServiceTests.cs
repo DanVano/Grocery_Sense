@@ -9,8 +9,9 @@ namespace GrocerySense.Tests;
 public sealed class PriceDropAlertServiceTests
 {
 
-    // Staple item: 4 receipts @ $10 (the usual), plus a recent $7 (30% below). Returns (item, store).
-    private static (int Item, int Store) SeedStapleWithDrop(TempDb db)
+    // Staple item: 4 receipts @ $10 (the usual), plus a recent $7 (30% below).
+    // Returns (item, store, id of the recent cheap receipt).
+    private static (int Item, int Store, int RecentReceipt) SeedStapleWithDrop(TempDb db)
     {
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
@@ -21,7 +22,7 @@ public sealed class PriceDropAlertServiceTests
         }
         var recent = AddReceipt(db.Conn, store, DaysAgo(0));
         PricesRepo.AddPricePoint(db.Conn, item, store, 7.0, "each", source: "receipt", date: DaysAgo(0), receiptId: recent);
-        return (item, store);
+        return (item, store, recent);
     }
 
     private static (int Item, int Store) SeedNonStapleManualDrop(TempDb db)
@@ -68,13 +69,13 @@ public sealed class PriceDropAlertServiceTests
     }
 
     [Fact]
-    public void ScanRecentReceipts_opens_one_alert_per_item_store_for_cheap_lines()
+    public void ScanReceipt_opens_one_alert_per_item_store_for_cheap_lines()
     {
         using var db = new TempDb();
-        SeedStapleWithDrop(db);
+        var (_, _, recent) = SeedStapleWithDrop(db);
         var svc = new PriceDropAlertService(db.Factory);
 
-        Assert.Equal(1, svc.ScanRecentReceipts(21));
+        Assert.Equal(1, svc.ScanReceipt(recent));
 
         var a = Assert.Single(svc.GetAlerts(0));
         Assert.Equal("below_usual", a.AlertKind);
@@ -83,14 +84,14 @@ public sealed class PriceDropAlertServiceTests
     }
 
     [Fact]
-    public void ScanRecentReceipts_does_not_duplicate_existing_open_receipt_alert()
+    public void ScanReceipt_does_not_duplicate_existing_open_receipt_alert()
     {
         using var db = new TempDb();
-        SeedStapleWithDrop(db);
+        var (_, _, recent) = SeedStapleWithDrop(db);
         var svc = new PriceDropAlertService(db.Factory);
 
-        Assert.Equal(1, svc.ScanRecentReceipts(21));
-        Assert.Equal(0, svc.ScanRecentReceipts(21));
+        Assert.Equal(1, svc.ScanReceipt(recent));
+        Assert.Equal(0, svc.ScanReceipt(recent));
 
         Assert.Single(svc.GetAlerts(0));
     }
@@ -102,9 +103,10 @@ public sealed class PriceDropAlertServiceTests
         SeedNonStapleManualDrop(db);
         var svc = new PriceDropAlertService(db.Factory);
 
-        Assert.Empty(svc.ComputeEngineAlerts(staplesOnly: true));
+        Assert.Equal(0, svc.RefreshEngineAlerts(staplesOnly: true));
 
-        var alert = Assert.Single(svc.ComputeEngineAlerts(staplesOnly: false));
+        Assert.Equal(1, svc.RefreshEngineAlerts(staplesOnly: false));
+        var alert = Assert.Single(svc.GetAlerts());
         Assert.False(alert.IsStaple);
         Assert.Equal("below_usual", alert.AlertKind);
     }
@@ -113,7 +115,7 @@ public sealed class PriceDropAlertServiceTests
     public void No_stores_yields_no_alerts()
     {
         using var db = new TempDb();
-        Assert.Empty(new PriceDropAlertService(db.Factory).ComputeEngineAlerts());
+        Assert.Equal(0, new PriceDropAlertService(db.Factory).RefreshEngineAlerts());
     }
 
     // Stock-up suggested qty is persisted (migration 6) and survives the write -> read-back round-trip.

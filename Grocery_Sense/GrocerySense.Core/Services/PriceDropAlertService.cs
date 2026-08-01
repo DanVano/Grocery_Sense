@@ -36,12 +36,11 @@ public sealed class PriceDropAlertService
 
     // ----------------------- public API -----------------------
 
-    public int RefreshEngineAlerts(bool staplesOnly = true) => PersistEngineAlerts(ComputeEngineAlerts(staplesOnly));
-
-    public IReadOnlyList<PriceDropAlert> ComputeEngineAlerts(bool staplesOnly = true)
+    public int RefreshEngineAlerts(bool staplesOnly = true)
     {
-        using var conn = _factory.Open();
-        return ComputeEngineAlerts(conn, staplesOnly);
+        IReadOnlyList<PriceDropAlert> alerts;
+        using (var conn = _factory.Open()) alerts = ComputeEngineAlerts(conn, staplesOnly);
+        return PersistEngineAlerts(alerts);
     }
 
     public IReadOnlyList<PriceDropAlert> GetAlerts(int limit = 250)
@@ -103,53 +102,16 @@ public sealed class PriceDropAlertService
 
         foreach (var itemId in itemIds)
         {
-            double? bestUnit = null;
-            var bestStoreId = 0;
-            var bestStoreName = "";
-            var bestSource = "unknown";
-
-            foreach (var s in stores)
-            {
-                double unit;
-                string source;
-                if (flyerQuotes.TryGetValue((itemId, s.Id), out var fq))
-                {
-                    unit = fq.UnitPrice;
-                    source = string.IsNullOrEmpty(fq.Source) ? "flyer" : fq.Source;
-                }
-                else if (storeQuotes.TryGetValue((itemId, s.Id), out var pr) && pr.UnitPrice > 0)
-                {
-                    unit = pr.UnitPrice;
-                    source = string.IsNullOrEmpty(pr.Source) ? "latest" : pr.Source;
-                }
-                else continue;
-
-                if (unit <= 0) continue;
-                if (bestUnit is null || unit < bestUnit)
-                {
-                    bestUnit = unit;
-                    bestStoreId = s.Id;
-                    bestStoreName = s.Name;
-                    bestSource = source;
-                }
-            }
-
-            if (bestUnit is null && globalQuotes.TryGetValue(itemId, out var gl) && gl.UnitPrice > 0)
-            {
-                bestUnit = gl.UnitPrice;
-                bestStoreId = gl.StoreId;
-                bestStoreName = storeNameMap.GetValueOrDefault(gl.StoreId, "Unknown");
-                bestSource = string.IsNullOrEmpty(gl.Source) ? "global_latest" : gl.Source;
-            }
-
-            if (bestUnit is null || bestUnit <= 0) continue;
-            bestPrices[itemId] = (bestUnit.Value, bestStoreId, bestStoreName, bestSource);
+            var quote = PriceQuoteLadder.BestStoreQuote(itemId, stores, flyerQuotes, storeQuotes)
+                        ?? PriceQuoteLadder.GlobalFallback(itemId, globalQuotes);
+            if (quote is not { UnitPrice: > 0 } q) continue;
+            bestPrices[itemId] = (q.UnitPrice, q.StoreId, storeNameMap.GetValueOrDefault(q.StoreId, "Unknown"), q.Source);
 
             var (sixLow, _) = sixLowMap.GetValueOrDefault(itemId, (null, null));
             if (sixLow is > 0)
             {
                 var nearThreshold = sixLow.Value * (1.0 + NearSixMonthLowThresholdPct / 100.0);
-                if (bestUnit.Value <= nearThreshold) nearLowCeilings[itemId] = bestUnit.Value;
+                if (q.UnitPrice <= nearThreshold) nearLowCeilings[itemId] = q.UnitPrice;
             }
         }
 
@@ -206,32 +168,10 @@ public sealed class PriceDropAlertService
         return outAlerts;
     }
 
-    // Optional helper: scan recent receipt lines and open below-usual alerts for prices far under usual.
-    public int ScanRecentReceipts(int days = 21)
-    {
-        var since = DateTime.UtcNow.AddDays(-Math.Max(1, days)).ToString("yyyy-MM-dd");
-        using var conn = _factory.Open();
-
-        var rows = new List<(int ItemId, int StoreId, double Paid)>();
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText =
-                "SELECT item_id, store_id, CAST(unit_price AS REAL) AS paid, COALESCE(date, created_at) AS when_iso " +
-                "FROM prices WHERE (source = 'receipt' OR receipt_id IS NOT NULL) AND item_id IS NOT NULL " +
-                "AND unit_price IS NOT NULL AND date(COALESCE(date, created_at)) >= date($since) " +
-                "ORDER BY when_iso DESC LIMIT 50000";
-            cmd.Parameters.AddWithValue("$since", since);
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                rows.Add((r.GetInt32(0), r.IsDBNull(1) ? 0 : r.GetInt32(1), r.GetDouble(2)));
-        }
-        return OpenBelowUsualAlertsFromRows(conn, rows);
-    }
-
     // Receipt-SCOPED scan (A7): open below-usual alerts from the lines of ONE receipt only. The single-scan
-    // notification path uses this — a global date-window scan (ScanRecentReceipts) would credit a freshly
-    // scanned receipt with alerts from OTHER recent receipts (e.g. backfilled recent-dated ones), the
-    // misattribution landmine (V2_FOLLOWUPS §4). Returns the number of new alerts opened.
+    // notification path uses this — a global date-window scan would credit a freshly scanned receipt with
+    // alerts from OTHER recent receipts (e.g. backfilled recent-dated ones), the misattribution landmine
+    // (V2_FOLLOWUPS §4; that scan variant was deleted for exactly that reason). Returns new alerts opened.
     public int ScanReceipt(long receiptId)
     {
         using var conn = _factory.Open();
@@ -249,8 +189,8 @@ public sealed class PriceDropAlertService
         return OpenBelowUsualAlertsFromRows(conn, rows);
     }
 
-    // Shared body for both the date-window and receipt-scoped scans: for each (item, store) row priced far
-    // enough below usual, open ONE below-usual alert (strongest per pair), skipping dismissed + already-open.
+    // For each (item, store) row priced far enough below usual, open ONE below-usual alert (strongest per
+    // pair), skipping dismissed + already-open.
     private int OpenBelowUsualAlertsFromRows(SqliteConnection conn, List<(int ItemId, int StoreId, double Paid)> rows)
     {
         var dismissed = LoadRecentDismissedKeys(conn, null);

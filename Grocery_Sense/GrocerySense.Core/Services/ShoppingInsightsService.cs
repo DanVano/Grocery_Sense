@@ -155,24 +155,14 @@ public sealed class ShoppingInsightsService
             return new ListItemInsight(row, null, null, null, null, null, null, Badge: "none");
 
         // Quote at the planned store only; without a planned store, the cheapest shop-here quote.
-        double? current = null;
-        string? source = null;
-        string? unit = null;
+        // No global fallback here — a quote from a store the user doesn't shop at is not actionable.
         var candidates = row.PlannedStoreId is { } planned
             ? shopHere.Where(s => s.Id == planned)
             : shopHere;
-        foreach (var s in candidates)
-        {
-            double price;
-            string src, un;
-            if (flyerQuotes.TryGetValue((itemId, s.Id), out var fq))
-                (price, src, un) = (fq.UnitPrice, string.IsNullOrEmpty(fq.Source) ? "flyer" : fq.Source, fq.Unit ?? "each");
-            else if (storeQuotes.TryGetValue((itemId, s.Id), out var pp) && pp.UnitPrice > 0)
-                (price, src, un) = (pp.UnitPrice, string.IsNullOrEmpty(pp.Source) ? "latest" : pp.Source, pp.Unit);
-            else continue;
-            if (price <= 0) continue;
-            if (current is null || price < current) (current, source, unit) = (price, src, un);
-        }
+        var quote = PriceQuoteLadder.BestStoreQuote(itemId, candidates, flyerQuotes, storeQuotes);
+        var (current, source, unit) = quote is { } q
+            ? ((double?)q.UnitPrice, q.Source, q.Unit ?? "each")
+            : (null, null, (string?)null);
 
         var (usual, _, _) = usualMap.GetValueOrDefault(itemId, (null, 0, "unknown"));
         var (sixLow, _) = sixLowMap.GetValueOrDefault(itemId, (null, null));

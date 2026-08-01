@@ -212,7 +212,9 @@ public sealed class ReceiptIngestionService
     // Backfill batch import: prepare each file, ask dateResolver for the confirmed purchase date, then commit.
     // dateResolver returns the ISO date to use, or null to SKIP the receipt (no write) — there is no "default
     // to today" path, so an undated receipt the user declines to date is simply skipped, never mis-stamped.
-    // Alerts are deliberately NOT scanned here (backfill suppression); run ScanRecentReceipts once afterwards.
+    // Alerts are deliberately NOT scanned here (backfill suppression) — the engine pass (RefreshEngineAlerts,
+    // fired post-flyer-sync and on /savings) and the receipt-scoped ScanReceipt (single-scan path) are the
+    // only alert writers.
     // ponytail: sequential — 50-150 receipts, each gated on a human date confirm; concurrency buys nothing.
     public async Task<BatchImportSummary> ImportBatchAsync(IReadOnlyList<string> filePaths,
         Func<ReceiptPrepared, CancellationToken, Task<string?>> dateResolver, bool replaceExisting = false,

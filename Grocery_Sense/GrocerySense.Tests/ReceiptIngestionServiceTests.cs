@@ -271,14 +271,13 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
         Assert.NotEqual(today, receipt.PurchaseDate);          // ...never silently "today"
     }
 
-    // The load-bearing suppression property: correctly-dated old backfill sits outside the recent-receipt
-    // scan window, so a bulk import fires no alerts; a fresh scan afterwards still does.
+    // The load-bearing suppression property: a bulk backfill import never opens alerts (ImportBatchAsync has
+    // no scan path at all); the receipt-scoped scan on a fresh receipt afterwards still does.
     [Fact]
-    public async Task Backfilled_old_receipts_do_not_fire_the_recent_scan_but_a_fresh_one_does()
+    public async Task Backfilled_old_receipts_open_no_alerts_but_a_fresh_scan_does()
     {
         using var db = new TempDb();
-        // Four "usual price" receipts dated 40-55 days ago: within the 180-day usual window, outside the
-        // 21-day recent-scan window.
+        // Four "usual price" receipts dated 40-55 days ago: within the 180-day usual window.
         var old = Enumerable.Range(0, 4)
             .Select(i => Raw($"Loblaws", DateTime.UtcNow.AddDays(-40 - i * 5).ToString("yyyy-MM-dd"), 10.0,
                 ("Milk", 1, 10.0, 10.0)))
@@ -288,13 +287,17 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
 
         await svc.ImportBatchAsync(files, (p, _) => Task.FromResult<string?>(p.OcrDate));
 
-        var alerts = new PriceDropAlertService(db.Factory);
-        Assert.Equal(0, alerts.ScanRecentReceipts()); // nothing recent -> backfill fires no alerts
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM price_drop_alerts";
+            Assert.Equal(0L, cmd.ExecuteScalar()); // backfill wrote zero alert rows, of any status
+        }
 
-        // A fresh receipt today at 20% under the established usual price -> a real alert.
+        // A fresh receipt today at 20% under the established usual price -> the receipt-scoped scan alerts.
+        var alerts = new PriceDropAlertService(db.Factory);
         var fresh = Build(db, Raw("Loblaws", DateTime.UtcNow.ToString("yyyy-MM-dd"), 8.0, ("Milk", 1, 8.0, 8.0)));
-        await fresh.IngestReceiptFileAsync(WriteFile("fresh"));
-        Assert.True(alerts.ScanRecentReceipts() >= 1);
+        var outcome = await fresh.IngestReceiptFileAsync(WriteFile("fresh"));
+        Assert.Equal(1, alerts.ScanReceipt(outcome.ReceiptId!.Value));
     }
 
     private static Dictionary<string, object?> Clone(Dictionary<string, object?> raw) =>
