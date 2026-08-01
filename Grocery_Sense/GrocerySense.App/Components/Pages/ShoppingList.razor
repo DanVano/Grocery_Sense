@@ -31,7 +31,7 @@
 
     @* Plan trip: optimize → preview → confirm → drop into Shop Mode, all on the List page.
        No hop to /plan for the core trip-prep flow (Phase 1b). The /plan page stays for the
-       power path (History plan, budget-defer view). *@
+       power path (budget-defer view). *@
     <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center" Class="mt-3">
         <MudRadioGroup T="string" @bind-Value="_planMode">
             <MudRadio T="string" Value="@("best_savings")" Color="Color.Primary" Dense="true">Best savings</MudRadio>

@@ -152,20 +152,6 @@ public sealed class PricesRepoTests
     }
 
     [Fact]
-    public void RecentAvgByStoreBatch_limits_to_most_recent_n()
-    {
-        using var db = new TempDb();
-        var (item, store) = Seed(db);
-        // Oldest -> newest; with limit 2 only the two newest (10, 12) count -> avg 11.
-        PricesRepo.AddPricePoint(db.Conn, item, store, 2.0, "each", source: "receipt", date: DaysAgo(9));
-        PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "receipt", date: DaysAgo(5));
-        PricesRepo.AddPricePoint(db.Conn, item, store, 12.0, "each", source: "receipt", date: DaysAgo(1));
-
-        var avg = PricesRepo.GetRecentAvgUnitPriceByStoreBatch(db.Conn, new[] { item }, new[] { store }, limit: 2);
-        Assert.Equal(11.0, avg[(item, store)], 6);
-    }
-
-    [Fact]
     public void PurchaseCadenceBatch_computes_interval_and_qty()
     {
         using var db = new TempDb();

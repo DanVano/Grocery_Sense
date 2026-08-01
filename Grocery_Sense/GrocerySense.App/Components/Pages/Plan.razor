@@ -1,7 +1,6 @@
 @page "/plan"
 @inherits BusyComponent
 @inject BasketOptimizerService Optimizer
-@inject PlanningService Planning
 @inject ShoppingListService Shopping
 @inject BudgetService Budget
 
@@ -12,173 +11,115 @@
     <MudAlert Class="mb-2" Severity="Severity.Error">@_error</MudAlert>
 }
 
-<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true">
-    <MudTabPanel Text="Optimize">
-        <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center" Class="mb-2">
-            <MudRadioGroup T="string" @bind-Value="_mode">
-                <MudRadio T="string" Value="@("best_savings")" Color="Color.Primary" Dense="true">Best savings</MudRadio>
-                <MudRadio T="string" Value="@("fewest_stops")" Color="Color.Primary" Dense="true">Fewest stops</MudRadio>
-            </MudRadioGroup>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OptimizeAsync" Disabled="@_busy">
-                Optimize
-            </MudButton>
+<MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center" Class="mb-2">
+    <MudRadioGroup T="string" @bind-Value="_mode">
+        <MudRadio T="string" Value="@("best_savings")" Color="Color.Primary" Dense="true">Best savings</MudRadio>
+        <MudRadio T="string" Value="@("fewest_stops")" Color="Color.Primary" Dense="true">Fewest stops</MudRadio>
+    </MudRadioGroup>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OptimizeAsync" Disabled="@_busy">
+        Optimize
+    </MudButton>
+</MudStack>
+
+@if (_busy)
+{
+    <div class="d-flex justify-center pa-8">
+        <MudProgressCircular Indeterminate="true" aria-label="Working" />
+    </div>
+}
+else if (_optimized is { } opt)
+{
+    @foreach (var warning in opt.Warnings)
+    {
+        <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">@warning</MudAlert>
+    }
+
+    @if (opt.Stores.Count == 0)
+    {
+        <MudText Typo="Typo.body2">Nothing to optimize — add list items and stores first.</MudText>
+    }
+    else
+    {
+        <MudStack Row="true" Spacing="2" Class="mb-2">
+            <MudChip T="string" Color="Color.Primary">Basket est. $@F2(opt.BasketTotalEstimated)</MudChip>
+            @if (opt.SaveVsUsualAvg is double su)
+            {
+                <MudChip T="string" Color="Color.Success">vs usual $@F2(su)</MudChip>
+            }
+            @if (opt.SaveVsLowest is double sl)
+            {
+                <MudChip T="string" Color="Color.Default">vs 6-mo low $@F2(sl)</MudChip>
+            }
+            @if (_budget is { Budget: not null, Remaining: { } left })
+            {
+                <MudChip T="string" Color="@(IsOverRemaining(opt) ? Color.Error : Color.Default)">
+                    $@F2((double)left) left this month
+                </MudChip>
+            }
         </MudStack>
 
-        @if (_busy)
+        @if (IsOverRemaining(opt) && _deferCandidates.Count > 0)
         {
-            <div class="d-flex justify-center pa-8">
-                <MudProgressCircular Indeterminate="true" aria-label="Working" />
-            </div>
+            <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">
+                This basket exceeds what's left of the monthly budget.
+                Consider deferring (not must-have, priciest first): @string.Join(", ", _deferCandidates).
+            </MudAlert>
         }
-        else if (_optimized is { } opt)
+
+        @foreach (var store in opt.Stores)
         {
-            @foreach (var warning in opt.Warnings)
-            {
-                <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">@warning</MudAlert>
-            }
-
-            @if (opt.Stores.Count == 0)
-            {
-                <MudText Typo="Typo.body2">Nothing to optimize — add list items and stores first.</MudText>
-            }
-            else
-            {
-                <MudStack Row="true" Spacing="2" Class="mb-2">
-                    <MudChip T="string" Color="Color.Primary">Basket est. $@F2(opt.BasketTotalEstimated)</MudChip>
-                    @if (opt.SaveVsUsualAvg is double su)
+            <MudPaper Class="pa-3 mb-2" Outlined="true">
+                <MudText Typo="Typo.subtitle1">
+                    @store.StoreName — $@F2(store.TotalEstimated)
+                    @(store.UnknownCount > 0 ? $" ({store.UnknownCount} unpriced)" : "")
+                </MudText>
+                <MudList T="int" Dense="true">
+                    @foreach (var item in store.Items)
                     {
-                        <MudChip T="string" Color="Color.Success">vs usual $@F2(su)</MudChip>
+                        <MudListItem T="int">
+                            <MudText Typo="Typo.body2">
+                                @item.Name
+                                @if (item.HardExcluded)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error">excluded</MudChip>
+                                }
+                                else if (item.PriceUnknown)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">no price</MudChip>
+                                }
+                                else
+                                {
+                                    <span> — $@F2(item.UnitPrice ?? 0) (@item.Source)</span>
+                                }
+                            </MudText>
+                        </MudListItem>
                     }
-                    @if (opt.SaveVsLowest is double sl)
-                    {
-                        <MudChip T="string" Color="Color.Default">vs 6-mo low $@F2(sl)</MudChip>
-                    }
-                    @if (_budget is { Budget: not null, Remaining: { } left })
-                    {
-                        <MudChip T="string" Color="@(IsOverRemaining(opt) ? Color.Error : Color.Default)">
-                            $@F2((double)left) left this month
-                        </MudChip>
-                    }
-                </MudStack>
-
-                @if (IsOverRemaining(opt) && _deferCandidates.Count > 0)
-                {
-                    <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">
-                        This basket exceeds what's left of the monthly budget.
-                        Consider deferring (not must-have, priciest first): @string.Join(", ", _deferCandidates).
-                    </MudAlert>
-                }
-
-                @foreach (var store in opt.Stores)
-                {
-                    <MudPaper Class="pa-3 mb-2" Outlined="true">
-                        <MudText Typo="Typo.subtitle1">
-                            @store.StoreName — $@F2(store.TotalEstimated)
-                            @(store.UnknownCount > 0 ? $" ({store.UnknownCount} unpriced)" : "")
-                        </MudText>
-                        <MudList T="int" Dense="true">
-                            @foreach (var item in store.Items)
-                            {
-                                <MudListItem T="int">
-                                    <MudText Typo="Typo.body2">
-                                        @item.Name
-                                        @if (item.HardExcluded)
-                                        {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Error">excluded</MudChip>
-                                        }
-                                        else if (item.PriceUnknown)
-                                        {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">no price</MudChip>
-                                        }
-                                        else
-                                        {
-                                            <span> — $@F2(item.UnitPrice ?? 0) (@item.Source)</span>
-                                        }
-                                    </MudText>
-                                </MudListItem>
-                            }
-                        </MudList>
-                    </MudPaper>
-                }
-
-                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="ApplyAsync" Disabled="@_busy">
-                    Apply to list
-                </MudButton>
-                @if (_applied is { } ap)
-                {
-                    <MudAlert Class="mt-2" Severity="@(ap.Ok ? Severity.Success : Severity.Warning)" Dense="true">
-                        @(ap.Ok
-                            ? $"{ap.PlanLabel}: {ap.Assigned} assigned, {ap.Unassigned} unassigned."
-                            : ap.Error)
-                    </MudAlert>
-                }
-            }
+                </MudList>
+            </MudPaper>
         }
-        else
-        {
-            <MudText Typo="Typo.body2">Pick a mode and run Optimize.</MudText>
-        }
-    </MudTabPanel>
 
-    <MudTabPanel Text="History plan">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="BuildPlanAsync" Disabled="@_busy" Class="mb-2">
-            Build plan
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="ApplyAsync" Disabled="@_busy">
+            Apply to list
         </MudButton>
-
-        @if (_busy)
+        @if (_applied is { } ap)
         {
-            <div class="d-flex justify-center pa-8">
-                <MudProgressCircular Indeterminate="true" aria-label="Working" />
-            </div>
+            <MudAlert Class="mt-2" Severity="@(ap.Ok ? Severity.Success : Severity.Warning)" Dense="true">
+                @(ap.Ok
+                    ? $"{ap.PlanLabel}: {ap.Assigned} assigned, {ap.Unassigned} unassigned."
+                    : ap.Error)
+            </MudAlert>
         }
-        else if (_plan is { } plan)
-        {
-            <MudStack Row="true" Spacing="2" Class="mb-2">
-                @if (plan.Costs.BasketTotalEstimate is double basket)
-                {
-                    <MudChip T="string" Color="Color.Primary">Basket est. $@F2(basket)</MudChip>
-                }
-                @if (plan.Costs.EstimatedSavings is double savings)
-                {
-                    <MudChip T="string" Color="Color.Success">Savings $@F2(savings)</MudChip>
-                }
-                <MudChip T="string" Color="Color.Default">
-                    @plan.Costs.Coverage.EstimatedItems/@plan.Costs.Coverage.TotalItems priced
-                </MudChip>
-            </MudStack>
-
-            @foreach (var group in plan.Stores.Values)
-            {
-                <MudPaper Class="pa-3 mb-2" Outlined="true">
-                    <MudText Typo="Typo.subtitle1">
-                        @group.Store.Name@(group.Store.IsFavorite ? " ★" : "") —
-                        @(group.EstimatedSubtotal is double sub ? $"${F2(sub)}" : "no estimate")
-                    </MudText>
-                    <MudText Typo="Typo.body2">
-                        @string.Join(", ", group.Items.Select(i => i.DisplayName))
-                    </MudText>
-                </MudPaper>
-            }
-
-            @if (plan.Unassigned.Count > 0)
-            {
-                <MudAlert Severity="Severity.Info" Dense="true">
-                    Unassigned: @string.Join(", ", plan.Unassigned.Select(i => i.DisplayName))
-                </MudAlert>
-            }
-        }
-        else
-        {
-            <MudText Typo="Typo.body2">Builds a store split from your price history.</MudText>
-        }
-    </MudTabPanel>
-</MudTabs>
+    }
+}
+else
+{
+    <MudText Typo="Typo.body2">Pick a mode and run Optimize.</MudText>
+}
 
 @code {
     private string _mode = "best_savings";
     private BasketOptimizationResult? _optimized;
     private ApplyPlanResult? _applied;
-    private StorePlanResult? _plan;
     private BudgetStatus? _budget;
     private List<string> _deferCandidates = [];
 
@@ -227,7 +168,4 @@
         if (_optimized is null) return;
         _applied = await GuardAsync(() => Shopping.ApplyOptimizerPlanToActiveList(_optimized, _mode));
     }
-
-    private async Task BuildPlanAsync() =>
-        _plan = await GuardAsync(() => Planning.BuildPlanForActiveList());
 }

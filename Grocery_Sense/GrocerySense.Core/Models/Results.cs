@@ -65,22 +65,6 @@ public record ApplyPlanResult(
     bool Ok, string Mode, string? PlanLabel, int Cleared, int Attempted, int Updated,
     int Assigned, int Unassigned, int UnassignedHardExcluded, IReadOnlyList<string> Warnings, string? Error);
 
-// PlanningService results — typed port of the dict build_plan_for_active_list returns.
-// EstimatedSubtotal is null when no line in the group could be priced.
-public record PlanStoreGroup(
-    Store Store, IReadOnlyList<ShoppingListRow> Items, double? EstimatedSubtotal,
-    int EstimatedItems, int MissingItems);
-
-public record PlanCoverage(int TotalItems, int EstimatedItems, int MissingItems);
-
-public record PlanCosts(
-    double? BasketTotalEstimate, Store? BaselineStore, double? BaselineTotalEstimate,
-    double? EstimatedSavings, PlanCoverage Coverage);
-
-public record StorePlanResult(
-    IReadOnlyDictionary<int, PlanStoreGroup> Stores, IReadOnlyList<ShoppingListRow> Unassigned,
-    string Summary, PlanCosts Costs);
-
 // Outcome of a manual flyer ingest (one batch per call). Mirrors the Python FlyerIngestResult.
 public record FlyerIngestResult(int FlyerId, int AssetsCount, int DealsCount, int RawJsonCount);
 
