@@ -51,15 +51,16 @@ Legend: **[USER]** = user action (secret/portal/hardware) · **[DEVICE]** = need
 
 The Android head compiles; getting a signed build onto a phone does not.
 
-- [ ] **First CI run** [USER, on push] — `.github/workflows/ci.yml` (test · unsigned Android Release ·
-  full-history gitleaks) **has never executed**; pushing the branch is its first run. The `test` and
-  `secret-scan` jobs are low-risk. **The Android job is the one to watch:** `GrocerySense.App` declares
-  `android;ios;maccatalyst` unconditionally and restore evaluates workloads for every declared TFM —
-  the Windows dev box only builds `-f net10.0-android` cleanly because it *has* the ios + maccatalyst
-  workloads installed, which a Linux runner does not. If it fails with **NETSDK1147**, fix by making
-  ios/maccatalyst conditional on macOS in the csproj (mirrors the existing Windows condition, and
-  would also fix the documented `dotnet build GrocerySense.sln` failure on Windows) or by moving that
-  job to a macOS runner. Both options are written into the workflow's header comment.
+- [x] **First CI run** (2026-08-01) — `.github/workflows/ci.yml` ran on the push of `c0a0643`:
+  **`test` ✅ · `secret-scan` ✅ · `android-release` ❌**. Cause: the App declared
+  `android;ios;maccatalyst` unconditionally, so the Linux runner tried to resolve an iOS pack it cannot
+  have — *"workload packs that do not exist in any of the workloads available in this installation:
+  Microsoft.iOS.Sdk.net10.0_26.5"*. It failed at the **compile** step, not at restore
+  (`dotnet workload restore` exits clean), so NETSDK1147 was the wrong symptom to predict.
+  **Fixed:** the csproj enumerates iOS/macCatalyst **only on macOS** (the same `IsOSPlatform` pattern
+  the Windows head already used); a Mac still gets the full set, so future iOS work is unaffected.
+  Side benefit, verified locally: **`dotnet build GrocerySense.sln` now succeeds on Windows** — that
+  long-standing failure was this same root cause.
 - [ ] **Release keystore** [USER, secret] — `keytool -genkeypair -v -keystore grocerysense-release.keystore
   -alias grocerysense -keyalg RSA -keysize 2048 -validity 10000` in `%USERPROFILE%\keystores\`.
   **Back it up off-machine, and store the keystore recovery info (alias + passwords) with the backup.**

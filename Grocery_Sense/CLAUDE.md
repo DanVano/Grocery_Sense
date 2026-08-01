@@ -46,7 +46,11 @@ dotnet test GrocerySense.Tests                                 # class libs + te
 dotnet build GrocerySense.Integrations                         # optional since Tests refs Integrations (dotnet test builds it); still handy for a fast compile check
 dotnet build GrocerySense.App -f net10.0-windows10.0.19041.0   # Windows head — DEV-ONLY harness, not a product target (retire as a verification target once the Android head builds); exe under bin\Debug\...\win-x64\
 ```
-- `dotnet build GrocerySense.sln` FAILS on Windows (iOS/macCatalyst heads need a Mac) — build per project/TFM as above.
+- `dotnet build GrocerySense.sln` **now works on Windows** (fixed 2026-08-01). The App's iOS/macCatalyst
+  TFMs are enumerated only on macOS, so a non-Mac host no longer tries to resolve iOS workload packs it
+  cannot have. Building per project/TFM as above is still the faster loop.
+- **Touching `Platforms/Android/`? Build the Android TFM** — the Windows head does not compile that folder:
+  `$env:JAVA_HOME="C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"; dotnet build GrocerySense.App -f net10.0-android [-c Release] -p:AndroidSdkDirectory="C:\Program Files (x86)\Android\android-sdk" -p:JavaSdkDirectory=$env:JAVA_HOME`
 - Run `dotnet test` unpiped before committing — `dotnet test | tail` in an `&&` chain returns tail's exit code and can commit red.
 - Verify features in the running app against seeded receipt/flyer fixtures, not just unit tests.
 

@@ -5,18 +5,15 @@ v2 feature code (Phases 1/2/4/5/6), the July code-review/security fix pass,
 **and all nine food-savings recommendations** (`Grocery_Sense/brainstorms/2026-07-09-family-food-savings.md`)
 are done and merged to `main`.
 
-> ## ⚠ Read this before trusting §3 / §4 on `main`
->
-> **The code these sections describe is NOT on `main` yet.** `main` is at `b8c47ab` (the v2
-> baseline). All of the work below sits on **`refactor/ponytail-audit`, 31 commits ahead of `main`
-> and 0 behind** — a clean fast-forward whenever you want it. This doc is deliberately kept current
-> on `main` so the tracker doesn't go stale, which means **§3's limitations and §4's landmines
-> describe branch code**. On `main` itself, receipt replacement still deletes at Prepare, the flyer
-> sync still throttles on attempts, and there is no restore path.
+**State (2026-08-01): all of the work below is MERGED AND PUSHED to `main`** — fast-forwarded to
+`c0a0643`, `origin/main` matches. §3's limitations and §4's landmines describe `main` as it now
+stands. (An earlier revision of this file warned that they described an unmerged branch; that
+warning is obsolete.)
 
-**Branch state (verified 2026-08-01 on `refactor/ponytail-audit`): 578 tests green, 0 skipped;
-Windows head 0 errors; Android head builds Debug AND Release, 0 errors; not pushed.** The branch
-carries, in order:
+**Verified at that commit: 578 tests green, 0 skipped; Windows head 0 errors; Android head builds
+Debug AND Release, 0 errors; `dotnet build GrocerySense.sln` now succeeds on Windows too.** First CI
+run: `test` ✅, `secret-scan` ✅, `android-release` ❌ → root-caused and fixed (`OPEN_ITEMS_0721.md`
+§1). What landed:
 
 - **The full hardening plan (rev 3.1, now complete)** — P0-1 atomic receipt replacement · P0-2
   bounded share intake + orphan sweep · P0-3 Azure spend/resource bounds + OCR gate · P1-4 Flipp

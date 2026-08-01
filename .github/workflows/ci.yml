@@ -27,18 +27,13 @@ jobs:
       - name: Run tests
         run: dotnet test Grocery_Sense/GrocerySense.Tests
 
-  # UNVERIFIED ON A RUNNER — this job has never executed; the first push is its first run.
-  # Known risk: GrocerySense.App declares TargetFrameworks = android;ios;maccatalyst
-  # unconditionally, and restore evaluates workloads for every declared TFM. Building `-f
-  # net10.0-android` succeeds on the Windows dev box, but that box has the ios + maccatalyst
-  # workloads installed, so local success does NOT prove a Linux runner (which has neither) is fine.
-  # `dotnet workload restore` is used instead of `workload install maui-android` because it installs
-  # exactly what the project enumerates and fails with an actionable message naming the missing
-  # workload. If this job fails at restore with NETSDK1147, the fix is one of:
-  #   a) make ios/maccatalyst conditional on macOS in the csproj (mirrors the existing Windows
-  #      condition on line 5, and would also fix the documented `dotnet build GrocerySense.sln`
-  #      failure on Windows), or
-  #   b) move this job to a macOS runner.
+  # First run (2026-08-01) FAILED here and the fix is already in: the App used to declare
+  # TargetFrameworks = android;ios;maccatalyst unconditionally, so this Linux runner tried to resolve
+  # an iOS pack it cannot have — "workload packs that do not exist in any of the workloads available
+  # in this installation: Microsoft.iOS.Sdk.net10.0_26.5". Note it failed at the COMPILE step, not at
+  # restore: `dotnet workload restore` exits clean and the build is what breaks, so NETSDK1147 is not
+  # the symptom to look for. The csproj now enumerates iOS/macCatalyst only on macOS.
+  # If this job ever fails that way again, the alternative is moving it to a macOS runner.
   android-release:
     runs-on: ubuntu-latest
     steps:

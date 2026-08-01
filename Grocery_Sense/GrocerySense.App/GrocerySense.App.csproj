@@ -1,7 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
-        <TargetFrameworks>net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+        <!-- Only enumerate heads the HOST can actually build. iOS/macCatalyst need a Mac (Xcode), so
+             listing them everywhere made every non-Mac host resolve iOS workload packs it can't have:
+             it broke CI's Linux Android job ("workload packs that do not exist in this installation:
+             Microsoft.iOS.Sdk...") and is why `dotnet build GrocerySense.sln` has always failed on
+             Windows. Same IsOSPlatform pattern the Windows head already used. A Mac still gets the
+             full set, so this costs the future iOS work nothing. -->
+        <TargetFrameworks>net10.0-android</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('osx'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
         <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
 
         <OutputType>Exe</OutputType>
