@@ -305,20 +305,20 @@ public sealed class PriceDropAlertService
             "SELECT item_id, store_id, alert_kind FROM price_drop_alerts " +
             "WHERE status = 'dismissed' AND dismissed_at IS NOT NULL AND date(dismissed_at) >= date('now', $window)");
         cmd.Parameters.AddWithValue("$window", $"-{AlertSuppressionDays} days");
-        using var r = cmd.ExecuteReader();
-        var keys = new HashSet<AlertKey>();
-        while (r.Read())
-            keys.Add(new AlertKey(r.IsDBNull(0) ? 0 : r.GetInt32(0), r.IsDBNull(1) ? 0 : r.GetInt32(1),
-                r.IsDBNull(2) ? "" : r.GetString(2)));
-        return keys;
+        return ReadKeys(cmd);
     }
 
-    private static HashSet<AlertKey> LoadOpenKeys(SqliteConnection conn, SqliteTransaction? tx, string? source = null)
+    private static HashSet<AlertKey> LoadOpenKeys(SqliteConnection conn, SqliteTransaction? tx, string source)
     {
-        var sql = "SELECT item_id, store_id, alert_kind FROM price_drop_alerts WHERE status = 'open'";
-        if (!string.IsNullOrEmpty(source)) sql += " AND source = $source";
-        using var cmd = Cmd(conn, tx, sql);
-        if (!string.IsNullOrEmpty(source)) cmd.Parameters.AddWithValue("$source", source);
+        using var cmd = Cmd(conn, tx,
+            "SELECT item_id, store_id, alert_kind FROM price_drop_alerts WHERE status = 'open' AND source = $source");
+        cmd.Parameters.AddWithValue("$source", source);
+        return ReadKeys(cmd);
+    }
+
+    // Both key queries select the same three columns; NULLs collapse to 0/"" so a partial row still keys.
+    private static HashSet<AlertKey> ReadKeys(SqliteCommand cmd)
+    {
         using var r = cmd.ExecuteReader();
         var keys = new HashSet<AlertKey>();
         while (r.Read())

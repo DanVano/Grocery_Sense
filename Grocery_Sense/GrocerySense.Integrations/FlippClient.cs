@@ -30,7 +30,7 @@ public sealed class FlippClient : IFlyerProvider
     public FlippClient() : this(new HttpClient { Timeout = TimeSpan.FromSeconds(20) }) { }
     public FlippClient(HttpClient http) => _http = http; // test seam: fake handler with canned JSON
 
-    public async Task<IReadOnlyList<Dictionary<string, object?>>> FetchFlyersForStoreAsync(
+    public async Task<IReadOnlyList<ProviderDeal>> FetchFlyersForStoreAsync(
         string storeName, string postalCode, CancellationToken ct = default)
     {
         var store = (storeName ?? "").Trim();
@@ -55,7 +55,7 @@ public sealed class FlippClient : IFlyerProvider
             if (matching.Count >= MaxFlyersPerStore) break;
         }
 
-        var deals = new List<Dictionary<string, object?>>();
+        var deals = new List<ProviderDeal>();
         foreach (var (flyerId, validFrom, validTo) in matching)
         {
             ct.ThrowIfCancellationRequested();
@@ -77,18 +77,15 @@ public sealed class FlippClient : IFlyerProvider
                 var promo = FirstNonEmpty(Str(it, "sale_story"), Str(it, "pre_price_text"), Str(it, "post_price_text"));
                 var priceText = promo ?? (price is { } p ? "$" + p.ToString("0.00", CultureInfo.InvariantCulture) : null);
 
-                deals.Add(new Dictionary<string, object?>
-                {
-                    ["title"] = name,
-                    ["description"] = FirstNonEmpty(Str(it, "description"), promo, name),
-                    ["price_text"] = priceText,
-                    ["price"] = price,
-                    ["unit_price"] = price,
-                    ["unit"] = null,
-                    ["valid_from"] = IsoDateOnly(Str(it, "valid_from")) ?? validFrom,
-                    ["valid_to"] = IsoDateOnly(Str(it, "valid_to")) ?? validTo,
-                    ["page_index"] = Num(it, "page"),
-                });
+                deals.Add(new ProviderDeal(
+                    Title: name!,
+                    Description: FirstNonEmpty(Str(it, "description"), promo, name),
+                    PriceText: priceText,
+                    Price: price,
+                    UnitPrice: price,
+                    ValidFrom: IsoDateOnly(Str(it, "valid_from")) ?? validFrom,
+                    ValidTo: IsoDateOnly(Str(it, "valid_to")) ?? validTo,
+                    PageIndex: Num(it, "page") is { } pg ? (int)pg : null));
             }
         }
         return deals;

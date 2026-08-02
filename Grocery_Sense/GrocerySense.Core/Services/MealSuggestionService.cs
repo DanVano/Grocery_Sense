@@ -297,18 +297,9 @@ public sealed class MealSuggestionService
         return outMap;
     }
 
-    private static List<string> CollectAllIngredients(IEnumerable<Recipe> recipes)
-    {
-        var seen = new HashSet<string>();
-        var result = new List<string>();
-        foreach (var r in recipes)
-            foreach (var ing in r.Ingredients)
-            {
-                var low = ing.ToLowerInvariant();
-                if (seen.Add(low)) result.Add(low);
-            }
-        return result;
-    }
+    // Distinct() yields first-occurrence order, which is what the callers below rely on.
+    private static List<string> CollectAllIngredients(IEnumerable<Recipe> recipes) =>
+        recipes.SelectMany(r => r.Ingredients).Select(i => i.ToLowerInvariant()).Distinct().ToList();
 
     private static IEnumerable<string> Lower(IEnumerable<string> values) =>
         values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim().ToLowerInvariant());

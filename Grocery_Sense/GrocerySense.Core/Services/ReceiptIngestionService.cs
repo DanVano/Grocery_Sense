@@ -402,6 +402,6 @@ public sealed class ReceiptIngestionService
     private static string ComputeSha256(string filePath)
     {
         using var stream = File.OpenRead(filePath);
-        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 }

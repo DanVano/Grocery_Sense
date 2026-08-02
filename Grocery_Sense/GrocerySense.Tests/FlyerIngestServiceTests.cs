@@ -20,9 +20,12 @@ public sealed class FlyerIngestServiceTests : IDisposable
             string filePath, CancellationToken ct = default) => Task.FromResult((op, raw));
     }
 
-    private FlyerIngestService Build(TempDb db, Dictionary<string, object?> layout) =>
-        new(new FakeLayout(layout), new OcrGate(), new FlyerMutationGate(), db.Factory,
-            new IngredientMappingService(db.Factory), new UnitNormalizationService(), new MultiBuyDealService());
+    private FlyerIngestService Build(TempDb db, Dictionary<string, object?> layout)
+    {
+        var mapper = new IngredientMappingService(db.Factory);
+        return new(new FakeLayout(layout), new OcrGate(), new FlyerMutationGate(), db.Factory, mapper,
+            new DealEnricher(mapper, new UnitNormalizationService(), new MultiBuyDealService()));
+    }
 
     private string WriteAsset(string content)
     {

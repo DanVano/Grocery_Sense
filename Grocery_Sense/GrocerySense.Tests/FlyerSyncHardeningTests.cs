@@ -78,7 +78,7 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     {
         WriteKeyedMeta($"attempt={DateTimeOffset.UtcNow.AddMinutes(-2):o}");
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
-        var provider = new FuncProvider(_ => Array.Empty<Dictionary<string, object?>>());
+        var provider = new FuncProvider(_ => Array.Empty<ProviderDeal>());
 
         var result = await Build(provider).RunSyncAsync(force: true);
 
@@ -91,7 +91,7 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     {
         WriteKeyedMeta($"success={DateTimeOffset.UtcNow.AddHours(6):o}");
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
-        var provider = new FuncProvider(_ => Array.Empty<Dictionary<string, object?>>());
+        var provider = new FuncProvider(_ => Array.Empty<ProviderDeal>());
 
         var result = await Build(provider).RunSyncAsync(force: false);
 
@@ -162,7 +162,7 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
             FlyersRepo.AddDeals(conn, new[] { NewDealRow(oldAuto, store, "Stale Apples") });
         }
 
-        var result = await Build(new FuncProvider(_ => Array.Empty<Dictionary<string, object?>>()))
+        var result = await Build(new FuncProvider(_ => Array.Empty<ProviderDeal>()))
             .RunSyncAsync(force: true);
 
         Assert.Equal(1, result.StoresSynced); // an empty result is still a committed sync
@@ -183,7 +183,7 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     {
         var legacy = DateTimeOffset.UtcNow.AddDays(-10);
         File.WriteAllText(_metaPath, legacy.ToString("o"));
-        var svc = Build(new FuncProvider(_ => Array.Empty<Dictionary<string, object?>>()));
+        var svc = Build(new FuncProvider(_ => Array.Empty<ProviderDeal>()));
 
         var meta = svc.ReadMeta();
         Assert.Equal(legacy, meta.Success!.Value, TimeSpan.FromSeconds(1)); // legacy reads as success
@@ -201,9 +201,10 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     {
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
         var gate = new FlyerMutationGate();
-        var scheduler = new FlyerSyncScheduler(Build(new FuncProvider(_ => Array.Empty<Dictionary<string, object?>>())), gate);
-        var ingest = new FlyerIngestService(new NullLayout(), new OcrGate(), gate, _factory,
-            new IngredientMappingService(_factory), new UnitNormalizationService(), new MultiBuyDealService());
+        var scheduler = new FlyerSyncScheduler(Build(new FuncProvider(_ => Array.Empty<ProviderDeal>())), gate);
+        var mapper = new IngredientMappingService(_factory);
+        var ingest = new FlyerIngestService(new NullLayout(), new OcrGate(), gate, _factory, mapper,
+            new DealEnricher(mapper, new UnitNormalizationService(), new MultiBuyDealService()));
 
         Assert.True(gate.TryEnter()); // something else holds the flyer-write gate
         try

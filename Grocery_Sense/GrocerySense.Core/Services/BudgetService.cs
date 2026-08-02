@@ -38,13 +38,11 @@ public sealed class BudgetService
 
         var remaining = budget.Value - spend.Total;
         var pctUsed = budget.Value > 0 ? (double)(spend.Total / budget.Value) : 0.0;
-        var status = pctUsed > 1.0 ? "over" : pctUsed >= 0.85 ? "warning" : "ok";
-        var projStatus = Grade(projected, budget.Value);
         return new BudgetStatus(month, spend.Total, spend.ReceiptCount, budget, remaining, pctUsed,
-            remaining < 0, status, projected, projStatus);
+            remaining < 0, Grade(spend.Total, budget.Value), projected, Grade(projected, budget.Value));
     }
 
-    // Grade a dollar amount against the budget with the same thresholds as current-spend status.
+    // Grade a dollar amount against the budget — the single home for the 85%/100% cutoffs.
     private static string Grade(decimal amount, decimal budget)
     {
         if (budget <= 0) return "ok";

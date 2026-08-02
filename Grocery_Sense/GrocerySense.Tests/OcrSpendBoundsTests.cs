@@ -39,9 +39,12 @@ public sealed class OcrSpendBoundsTests : IDisposable
         new(ocr, new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
 
-    private static FlyerIngestService BuildFlyers(TempDb db, IFlyerLayoutClient layout) =>
-        new(layout, new OcrGate(), new FlyerMutationGate(), db.Factory, new IngredientMappingService(db.Factory),
-            new UnitNormalizationService(), new MultiBuyDealService());
+    private static FlyerIngestService BuildFlyers(TempDb db, IFlyerLayoutClient layout)
+    {
+        var mapper = new IngredientMappingService(db.Factory);
+        return new(layout, new OcrGate(), new FlyerMutationGate(), db.Factory, mapper,
+            new DealEnricher(mapper, new UnitNormalizationService(), new MultiBuyDealService()));
+    }
 
     private string WriteFile(string content)
     {

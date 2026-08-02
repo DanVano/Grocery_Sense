@@ -39,15 +39,14 @@ public sealed class FlyerIngestService
     private readonly DealEnricher _enricher;
 
     public FlyerIngestService(IFlyerLayoutClient layout, OcrGate gate, FlyerMutationGate flyerGate,
-        SqliteConnectionFactory factory, IngredientMappingService mapper, UnitNormalizationService unitNorm,
-        MultiBuyDealService multibuy)
+        SqliteConnectionFactory factory, IngredientMappingService mapper, DealEnricher enricher)
     {
         _layout = layout;
         _gate = gate;
         _flyerGate = flyerGate;
         _factory = factory;
         _mapper = mapper;
-        _enricher = new DealEnricher(mapper, unitNorm, multibuy);
+        _enricher = enricher;
     }
 
     public async Task<FlyerIngestResult> IngestAssetsAsync(int? storeId, string? validFrom, string? validTo,
@@ -252,7 +251,7 @@ public sealed class FlyerIngestService
 
     // ---------------- helpers (sha, money cast) — JSON navigation is shared via RawJson ----------------
 
-    private static string Sha256(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+    private static string Sha256(byte[] data) => Convert.ToHexStringLower(SHA256.HashData(data));
 
     private static string Trunc(string s, int max) => s.Length <= max ? s : s[..max];
 }

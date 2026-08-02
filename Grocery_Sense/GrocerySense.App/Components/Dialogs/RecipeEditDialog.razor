@@ -38,12 +38,14 @@
         _tags = string.Join(", ", Existing.Tags);
     }
 
-    private static IReadOnlyList<string> Lines(string s) =>
-        s.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+    private const StringSplitOptions TrimNonEmpty =
+        StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries;
+
+    private static IReadOnlyList<string> Lines(string s) => s.Split('\n', TrimNonEmpty);
 
     private void Save() => MudDialog.Close(DialogResult.Ok(new UserRecipeRow(
         Existing?.Id ?? 0, _name.Trim(), _servings, Lines(_ingredients), Lines(_steps),
-        _tags.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList())));
+        _tags.Split(',', TrimNonEmpty))));
 
     private void Cancel() => MudDialog.Cancel();
 }

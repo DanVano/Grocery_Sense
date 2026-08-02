@@ -19,9 +19,9 @@ public class DiResolutionSmokeTests
 
     private sealed class FakeFlyerProvider : IFlyerProvider
     {
-        public Task<IReadOnlyList<Dictionary<string, object?>>> FetchFlyersForStoreAsync(
+        public Task<IReadOnlyList<ProviderDeal>> FetchFlyersForStoreAsync(
             string storeName, string postalCode, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Dictionary<string, object?>>>(Array.Empty<Dictionary<string, object?>>());
+            => Task.FromResult<IReadOnlyList<ProviderDeal>>(Array.Empty<ProviderDeal>());
     }
 
     private sealed class FakeFlyerLayoutClient : IFlyerLayoutClient

@@ -25,10 +25,10 @@ public abstract class FlyerSyncTestBase : IDisposable
 
     public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
-    protected sealed class FuncProvider(Func<string, IReadOnlyList<Dictionary<string, object?>>> fn) : IFlyerProvider
+    protected sealed class FuncProvider(Func<string, IReadOnlyList<ProviderDeal>> fn) : IFlyerProvider
     {
         public int Calls;
-        public Task<IReadOnlyList<Dictionary<string, object?>>> FetchFlyersForStoreAsync(
+        public Task<IReadOnlyList<ProviderDeal>> FetchFlyersForStoreAsync(
             string storeName, string postalCode, CancellationToken ct = default)
         {
             Interlocked.Increment(ref Calls);
@@ -36,11 +36,13 @@ public abstract class FlyerSyncTestBase : IDisposable
         }
     }
 
-    protected static Dictionary<string, object?> Deal(string title, double unitPrice) => new()
-    {
-        ["title"] = title, ["price_text"] = $"${unitPrice}", ["unit_price"] = unitPrice, ["unit"] = "each",
-    };
+    protected static ProviderDeal Deal(string title, double unitPrice) =>
+        new(title, PriceText: $"${unitPrice}", UnitPrice: unitPrice, Unit: "each");
 
-    protected FlyerSyncService Build(IFlyerProvider provider) => new(provider, _factory, _config,
-        new IngredientMappingService(_factory), new UnitNormalizationService(), new MultiBuyDealService());
+    protected FlyerSyncService Build(IFlyerProvider provider)
+    {
+        var mapper = new IngredientMappingService(_factory);
+        return new(provider, _factory, _config, mapper,
+            new DealEnricher(mapper, new UnitNormalizationService(), new MultiBuyDealService()));
+    }
 }

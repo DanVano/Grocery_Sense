@@ -10,9 +10,9 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
 {
     private sealed class StubProvider : IFlyerProvider
     {
-        public Task<IReadOnlyList<Dictionary<string, object?>>> FetchFlyersForStoreAsync(
+        public Task<IReadOnlyList<ProviderDeal>> FetchFlyersForStoreAsync(
             string storeName, string postalCode, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Dictionary<string, object?>>>(Array.Empty<Dictionary<string, object?>>());
+            => Task.FromResult<IReadOnlyList<ProviderDeal>>(Array.Empty<ProviderDeal>());
     }
 
     private void WriteMeta(DateTimeOffset dt) => File.WriteAllText(_metaPath, dt.ToString("o"));
@@ -83,7 +83,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         {
             "Store A" => throw new InvalidOperationException("network down"),
             "Store B" => new[] { Deal("Apples", 2.50), Deal("Milk 2L", 4.99) },
-            _ => Array.Empty<Dictionary<string, object?>>(),
+            _ => Array.Empty<ProviderDeal>(),
         });
 
         var result = await Build(provider).RunSyncAsync(force: true);
@@ -112,10 +112,7 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         var normalized = new IngredientMappingService(_factory).MapToItem("Apples Apples").NormalizedInput;
         ItemAliasesRepo.UpsertAlias(conn, normalized, item, 1.0);
 
-        var provider = new FuncProvider(_ => new[]
-        {
-            new Dictionary<string, object?> { ["title"] = "Apples", ["price_text"] = "2/$5.00" },
-        });
+        var provider = new FuncProvider(_ => new[] { new ProviderDeal("Apples", PriceText: "2/$5.00") });
 
         var result = await Build(provider).RunSyncAsync(force: true);
 

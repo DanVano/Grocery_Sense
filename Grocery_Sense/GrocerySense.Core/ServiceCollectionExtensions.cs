@@ -16,6 +16,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<UnitNormalizationService>();
         services.AddSingleton<MultiBuyDealService>();
         services.AddSingleton<IngredientMappingService>();
+        // The ONE home for the multibuy -> unit-guess -> map -> normalize chain, shared by flyer sync and
+        // manual flyer ingest (V2_FOLLOWUPS §4.22 — they must never drift back into two copies).
+        services.AddSingleton<DealEnricher>();
         services.AddSingleton<PriceHistoryService>();
         services.AddSingleton<PriceDropAlertService>();
         services.AddSingleton<WatchlistService>();

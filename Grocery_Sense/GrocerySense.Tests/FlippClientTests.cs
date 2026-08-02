@@ -58,16 +58,16 @@ public sealed class FlippClientTests
 
         Assert.Equal(2, deals.Count); // blank-name item dropped
         var apples = deals[0];
-        Assert.Equal("Gala Apples", apples["title"]);
-        Assert.Equal("2/$5", apples["price_text"]);          // promo phrase wins over the plain price
-        Assert.Equal(1.99, (double)apples["unit_price"]!, 4); // string price parsed
-        Assert.Equal("Product of Canada", apples["description"]);
-        Assert.Equal("2026-07-09", apples["valid_from"]);     // flyer window, date-only
-        Assert.Equal("2026-07-16", apples["valid_to"]);
-        Assert.Equal(3.0, (double)apples["page_index"]!, 4);
+        Assert.Equal("Gala Apples", apples.Title);
+        Assert.Equal("2/$5", apples.PriceText);            // promo phrase wins over the plain price
+        Assert.Equal(1.99, apples.UnitPrice!.Value, 4);     // string price parsed
+        Assert.Equal("Product of Canada", apples.Description);
+        Assert.Equal("2026-07-09", apples.ValidFrom);      // flyer window, date-only
+        Assert.Equal("2026-07-16", apples.ValidTo);
+        Assert.Equal(3, apples.PageIndex);
 
         var chicken = deals[1];
-        Assert.Equal("$8.99", chicken["price_text"]); // no promo phrase -> plain price text
+        Assert.Equal("$8.99", chicken.PriceText); // no promo phrase -> plain price text
 
         // Only flyer 101 (No Frills) was fetched; Walmart's 202 was filtered out.
         Assert.Equal(2, handler.Urls.Count);
