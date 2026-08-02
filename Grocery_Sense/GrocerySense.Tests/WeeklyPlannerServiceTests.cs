@@ -69,7 +69,7 @@ public sealed class WeeklyPlannerServiceTests
     public void Build_returns_plan_with_suggestions_and_ingredients()
     {
         using var db = new TempDb();
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 3, mapIngredients: false);
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 3);
         Assert.Equal(3, plan.Suggestions.Count);
         Assert.NotEmpty(plan.PlannedIngredients);
     }
@@ -78,27 +78,15 @@ public sealed class WeeklyPlannerServiceTests
     public void Build_num_recipes_caps_suggestions()
     {
         using var db = new TempDb();
-        Assert.Equal(2, Planner(db).BuildWeeklyPlan(numRecipes: 2, mapIngredients: false).Suggestions.Count);
+        Assert.Equal(2, Planner(db).BuildWeeklyPlan(numRecipes: 2).Suggestions.Count);
     }
 
     [Fact]
-    public void Build_map_false_leaves_mapping_unset()
-    {
-        using var db = new TempDb();
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 2, mapIngredients: false);
-        Assert.All(plan.PlannedIngredients, ing =>
-        {
-            Assert.Null(ing.ItemId);
-            Assert.Null(ing.MatchMethod);
-        });
-    }
-
-    [Fact]
-    public void Build_map_true_annotates_a_seeded_item()
+    public void Build_annotates_a_seeded_item()
     {
         using var db = new TempDb();
         ItemsRepo.CreateItem(db.Conn, "rice");
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4);
         var rice = plan.PlannedIngredients.FirstOrDefault(p => p.Name.ToLowerInvariant() == "rice");
         Assert.NotNull(rice);
         Assert.NotNull(rice!.ItemId);
@@ -108,10 +96,10 @@ public sealed class WeeklyPlannerServiceTests
     }
 
     [Fact]
-    public void Build_map_true_marks_unmatched_as_none()
+    public void Build_marks_unmatched_as_none()
     {
         using var db = new TempDb();
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 2, mapIngredients: true);
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 2);
         Assert.All(plan.PlannedIngredients, ing =>
         {
             Assert.Null(ing.ItemId);
@@ -140,7 +128,7 @@ public sealed class WeeklyPlannerServiceTests
     {
         using var db = new TempDb();
         SeedRiceCadence(db, lastDaysAgo: 2); // 2 days since < 0.75 x 10-day interval
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4);
 
         var rice = plan.PlannedIngredients.First(p => p.Name.ToLowerInvariant() == "rice");
         Assert.True(rice.LikelyHave);
@@ -152,7 +140,7 @@ public sealed class WeeklyPlannerServiceTests
     {
         using var db = new TempDb();
         SeedRiceCadence(db, lastDaysAgo: 9); // 9 days since >= 0.75 x 10-day interval
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4);
 
         var rice = plan.PlannedIngredients.First(p => p.Name.ToLowerInvariant() == "rice");
         Assert.False(rice.LikelyHave);
@@ -169,7 +157,7 @@ public sealed class WeeklyPlannerServiceTests
         PricesRepo.AddPricePoint(db.Conn, item, store, 4.0, "each", quantity: 1.0,
             source: "receipt", date: DaysAgo(1), receiptId: rid);
 
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true);
+        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4);
         Assert.False(plan.PlannedIngredients.First(p => p.Name.ToLowerInvariant() == "rice").LikelyHave);
     }
 
@@ -178,7 +166,8 @@ public sealed class WeeklyPlannerServiceTests
     {
         using var db = new TempDb();
         SeedRiceCadence(db, lastDaysAgo: 2);
-        Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: true, persistToShoppingList: true);
+        var planner = Planner(db);
+        planner.PersistToShoppingList(planner.BuildWeeklyPlan(numRecipes: 4));
 
         var row = List(db).GetActiveItems().First(r => r.DisplayName.ToLowerInvariant() == "rice");
         Assert.Contains("May already have:", row.Notes);
@@ -190,8 +179,9 @@ public sealed class WeeklyPlannerServiceTests
     public void Persist_writes_every_ingredient_with_used_in_notes()
     {
         using var db = new TempDb();
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 2, mapIngredients: false,
-            persistToShoppingList: true, addedBy: "test");
+        var planner = Planner(db);
+        var plan = planner.BuildWeeklyPlan(numRecipes: 2);
+        planner.PersistToShoppingList(plan, addedBy: "test");
         var items = List(db).GetActiveItems();
         Assert.Equal(plan.PlannedIngredients.Count, items.Count);
         Assert.All(items, row => Assert.Contains("Used in:", row.Notes));
@@ -201,7 +191,9 @@ public sealed class WeeklyPlannerServiceTests
     public void Persist_quantity_reflects_approximate_count()
     {
         using var db = new TempDb();
-        var plan = Planner(db).BuildWeeklyPlan(numRecipes: 4, mapIngredients: false, persistToShoppingList: true);
+        var planner = Planner(db);
+        var plan = planner.BuildWeeklyPlan(numRecipes: 4);
+        planner.PersistToShoppingList(plan);
         var byName = List(db).GetActiveItems().ToDictionary(i => i.DisplayName.ToLowerInvariant());
         foreach (var ing in plan.PlannedIngredients)
         {

@@ -20,8 +20,7 @@ public sealed class ShoppingListService
     // Split a comma-separated string into items, adding each (blank entries skipped). Returns the new rows.
     // Each name is mapped to a canonical item (match-only — typos stay unmapped, never force-created) so
     // manual adds reach the optimizer/Shop Mode intel; the user's typed text stays as the display name.
-    public IReadOnlyList<ShoppingListRow> AddItemsFromText(string text, int? plannedStoreId = null,
-        string? addedBy = null, int? memberId = null)
+    public IReadOnlyList<ShoppingListRow> AddItemsFromText(string text)
     {
         var created = new List<ShoppingListRow>();
         using (var conn = _factory.Open())
@@ -30,9 +29,7 @@ public sealed class ShoppingListService
             {
                 var name = raw.Trim();
                 if (name.Length == 0) continue;
-                var rowId = ShoppingListRepo.AddItem(conn, name, addedBy: addedBy, addedByMemberId: memberId,
-                    itemId: _mapper.MapToItem(conn, name).ItemId);
-                if (plannedStoreId is not null) ShoppingListRepo.SetPlannedStoreId(conn, rowId, plannedStoreId);
+                var rowId = ShoppingListRepo.AddItem(conn, name, itemId: _mapper.MapToItem(conn, name).ItemId);
                 if (ShoppingListRepo.GetItem(conn, rowId) is { } match) created.Add(match);
             }
         }
@@ -40,14 +37,14 @@ public sealed class ShoppingListService
         return created;
     }
 
-    public IReadOnlyList<ShoppingListRow> GetActiveItems(int? storeId = null, bool includeCheckedOff = false)
+    public IReadOnlyList<ShoppingListRow> GetActiveItems(bool includeCheckedOff = false)
     {
         using var conn = _factory.Open();
-        return ShoppingListRepo.ListActiveItems(conn, storeId, includeCheckedOff);
+        return ShoppingListRepo.ListActiveItems(conn, includeCheckedOff: includeCheckedOff);
     }
 
     public int AddSingleItem(string name, double? quantity = null, string unit = "", int? plannedStoreId = null,
-        string? notes = null, string? addedBy = null, int? addedByMemberId = null, int? itemId = null)
+        string? notes = null, string? addedBy = null, int? itemId = null)
     {
         // No explicit item link -> try to map the name (match-only; unknowns stay NULL and the optimizer
         // discloses them instead of silently dropping the row). Map on the same connection as the insert.
@@ -56,7 +53,7 @@ public sealed class ShoppingListService
         {
             itemId ??= _mapper.MapToItem(conn, name).ItemId;
             rowId = ShoppingListRepo.AddItem(conn, name, quantity ?? 1.0, unit ?? "", category: "", notes: notes ?? "",
-                addedBy: addedBy, addedByMemberId: addedByMemberId, plannedStoreId: plannedStoreId, itemId: itemId);
+                addedBy: addedBy, plannedStoreId: plannedStoreId, itemId: itemId);
         }
         _mapper.FlushLearnedAliases();
         return rowId;
@@ -183,8 +180,7 @@ public sealed class ShoppingListService
     // Writes optimizer-chosen planned_store_id back onto the active list rows, keyed by item_id. Hard-excluded
     // lines are left unassigned (planned_store_id = NULL) so they stand out as unplanned. The clear + write run
     // in ONE transaction (rollback on failure -> no partial assignment).
-    public ApplyPlanResult ApplyOptimizerPlanToActiveList(BasketOptimizationResult result, string mode = "fast",
-        bool clearFirst = true)
+    public ApplyPlanResult ApplyOptimizerPlanToActiveList(BasketOptimizationResult result, string mode = "fast")
     {
         var modeKey = (mode ?? "fast").Trim().ToLowerInvariant();
         if (result.Stores.Count == 0)
@@ -204,7 +200,7 @@ public sealed class ShoppingListService
 
         using var conn = _factory.Open();
         using var tx = conn.BeginTransaction();
-        var cleared = clearFirst ? ShoppingListRepo.ClearPlannedStoreIdsForActiveItems(conn, false, tx) : 0;
+        var cleared = ShoppingListRepo.ClearPlannedStoreIdsForActiveItems(conn, tx);
         var updated = ShoppingListRepo.BulkSetPlannedStoreIdsByItemId(conn, assignments, activeOnly: true, tx);
         tx.Commit();
 

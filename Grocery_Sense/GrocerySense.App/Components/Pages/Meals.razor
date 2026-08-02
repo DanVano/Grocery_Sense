@@ -211,7 +211,7 @@ else if (_myRecipes is not null)
             }
             else
             {
-                _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n, mapIngredients: true));
+                _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n));
             }
             _persisted = false; // a fresh suggestion can be added again
         }

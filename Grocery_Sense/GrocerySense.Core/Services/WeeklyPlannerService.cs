@@ -21,38 +21,23 @@ public sealed class WeeklyPlannerService
         _factory = factory;
     }
 
-    public WeeklyPlan BuildWeeklyPlan(int numRecipes = 6, IEnumerable<string>? targetIngredients = null,
-        IReadOnlySet<int>? recentlyUsedRecipeIds = null, bool persistToShoppingList = false,
-        int? plannedStoreId = null, string? addedBy = null, bool mapIngredients = true)
-    {
-        var suggestions = _meals.SuggestMealsForWeek(
-            targetIngredients: targetIngredients, maxRecipes: numRecipes,
-            recentlyUsedRecipeIds: recentlyUsedRecipeIds);
+    public WeeklyPlan BuildWeeklyPlan(int numRecipes = 6) =>
+        FinishPlan(_meals.SuggestMealsForWeek(maxRecipes: numRecipes));
 
-        var plan = FinishPlan(suggestions, mapIngredients);
-        if (persistToShoppingList) PersistToShoppingList(plan, plannedStoreId, addedBy);
-        return plan;
-    }
-
-    // Aggregate + (optionally) map/annotate — shared by the plain and budget-capped builders.
-    private WeeklyPlan FinishPlan(IReadOnlyList<SuggestedMeal> suggestions, bool mapIngredients)
+    // Aggregate + map/annotate — shared by the plain and budget-capped builders.
+    private WeeklyPlan FinishPlan(IReadOnlyList<SuggestedMeal> suggestions)
     {
-        var planned = AggregateIngredients(suggestions);
-        if (mapIngredients)
+        _mapper.InvalidateChoices(); // pick up items added since the last build
+        var planned = AggregateIngredients(suggestions).Select(ing =>
         {
-            _mapper.InvalidateChoices(); // pick up items added since the last build
-            planned = planned.Select(ing =>
-            {
-                var res = _mapper.MapToItem(ing.Name);
-                return res.ItemId is not null
-                    ? ing with { ItemId = res.ItemId, CanonicalName = res.CanonicalName,
-                                 MatchConfidence = res.Confidence, MatchMethod = res.Method }
-                    : ing with { MatchConfidence = res.Confidence, MatchMethod = res.Method };
-            }).ToList();
-            _mapper.FlushLearnedAliases();
-            planned = AnnotateLikelyHave(planned);
-        }
-        return new WeeklyPlan(suggestions, planned);
+            var res = _mapper.MapToItem(ing.Name);
+            return res.ItemId is not null
+                ? ing with { ItemId = res.ItemId, CanonicalName = res.CanonicalName,
+                             MatchConfidence = res.Confidence, MatchMethod = res.Method }
+                : ing with { MatchConfidence = res.Confidence, MatchMethod = res.Method };
+        }).ToList();
+        _mapper.FlushLearnedAliases();
+        return new WeeklyPlan(suggestions, AnnotateLikelyHave(planned));
     }
 
     // Below this fraction of priced ingredients, a cost estimate understates the real total badly enough
@@ -61,13 +46,11 @@ public sealed class WeeklyPlannerService
 
     // "N dinners around $cap": count-first selection over cost estimates. Recipes with no (or too-partial)
     // estimate are excluded and counted — a budget plan must never include a meal it can't price.
-    public BudgetedWeeklyPlan BuildWeeklyPlanUnderBudget(double budgetCap, int numRecipes = 6,
-        IReadOnlySet<int>? recentlyUsedRecipeIds = null, bool mapIngredients = true)
+    public BudgetedWeeklyPlan BuildWeeklyPlanUnderBudget(double budgetCap, int numRecipes = 6)
     {
-        var candidates = _meals.SuggestMealsForWeek(
-            maxRecipes: int.MaxValue, recentlyUsedRecipeIds: recentlyUsedRecipeIds);
+        var candidates = _meals.SuggestMealsForWeek(maxRecipes: int.MaxValue);
         var (picked, over, noCost, total) = SelectUnderBudget(candidates, budgetCap, numRecipes);
-        var plan = FinishPlan(picked, mapIngredients);
+        var plan = FinishPlan(picked);
         var avgKnown = picked.Count > 0 ? picked.Average(p => p.CostKnownRatio) : 0.0;
         return new BudgetedWeeklyPlan(plan, budgetCap, total, over, noCost, avgKnown);
     }
@@ -119,10 +102,13 @@ public sealed class WeeklyPlannerService
 
     // Public so the UI can persist the exact plan the user reviewed, rather than rebuilding it at click time
     // (a rebuild re-reads _numRecipes + live DB/deal state and can diverge from what was shown).
-    public void PersistToShoppingList(WeeklyPlan plan, int? plannedStoreId = null, string? addedBy = null)
+    public void PersistToShoppingList(WeeklyPlan plan, string? addedBy = null)
     {
         var by = string.IsNullOrWhiteSpace(addedBy) ? null : addedBy.Trim();
-        var rows = plan.PlannedIngredients.Select(ing =>
+
+        using var conn = _factory.Open();
+        using var tx = conn.BeginTransaction();
+        foreach (var ing in plan.PlannedIngredients)
         {
             var notes = new List<string>();
             if (ing.RecipeNames.Count > 0) notes.Add("Used in: " + string.Join(", ", ing.RecipeNames));
@@ -132,21 +118,10 @@ public sealed class WeeklyPlannerService
                 var label = ing.CanonicalName ?? $"item_id={ing.ItemId}";
                 notes.Add($"Mapped: {label} ({ing.MatchConfidence.Value.ToString("0.00", CultureInfo.InvariantCulture)}, {ing.MatchMethod})");
             }
-            return (
-                DisplayName: (ing.Name ?? "").Trim(),
-                Quantity: Math.Max(1.0, ing.ApproximateCount),
-                Unit: "each",
-                Category: "",
-                Notes: notes.Count > 0 ? string.Join(" | ", notes) : "",
-                AddedBy: by,
-                AddedByMemberId: (int?)null,
-                PlannedStoreId: plannedStoreId,
-                ItemId: ing.ItemId);
-        }).ToList();
-
-        using var conn = _factory.Open();
-        using var tx = conn.BeginTransaction();
-        ShoppingListRepo.BulkAddItems(conn, rows, tx);
+            ShoppingListRepo.AddItem(conn, (ing.Name ?? "").Trim(), Math.Max(1.0, ing.ApproximateCount),
+                unit: "each", notes: notes.Count > 0 ? string.Join(" | ", notes) : "",
+                addedBy: by, itemId: ing.ItemId, tx: tx);
+        }
         tx.Commit();
     }
 

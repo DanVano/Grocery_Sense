@@ -55,13 +55,13 @@ public sealed class ConfigStoreTests : IDisposable
     public void Load_rereads_after_external_file_change()
     {
         var store = New();
-        store.Save(store.Load() with { City = "Ottawa" });
-        Assert.Equal("Ottawa", store.Load().City);
+        store.Save(store.Load() with { PostalCode = "K1A0B1" });
+        Assert.Equal("K1A0B1", store.Load().PostalCode);
 
         // Same instance must notice an out-of-band write (mtime/size key changes).
         var other = New();
-        other.Save(other.Load() with { City = "Toronto" });
-        Assert.Equal("Toronto", store.Load().City);
+        other.Save(other.Load() with { PostalCode = "M5V2T6" });
+        Assert.Equal("M5V2T6", store.Load().PostalCode);
     }
 
     [Fact]

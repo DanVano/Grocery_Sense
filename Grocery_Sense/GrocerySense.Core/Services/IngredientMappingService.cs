@@ -23,7 +23,6 @@ public sealed class IngredientMappingService
 {
     private const double AcceptThreshold = 0.78;
     private const double LearnThreshold = 0.90;
-    private const bool AutoLearn = true;
 
     private static readonly Dictionary<string, string> DefaultAbbrev = new()
     {
@@ -108,7 +107,7 @@ public sealed class IngredientMappingService
             if (confidence < AcceptThreshold)
                 return new MappingResult(null, null, confidence, "none", normalized);
 
-            if (AutoLearn && confidence >= LearnThreshold)
+            if (confidence >= LearnThreshold)
                 _pendingLearns.Add((normalized, bestItemId, confidence, "auto_fuzzy"));
 
             return new MappingResult(bestItemId, choices[best.Index].Name, confidence, "fuzzy", normalized);

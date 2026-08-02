@@ -104,22 +104,6 @@ public static class ShoppingListRepo
         cmd.ExecuteNonQuery();
     }
 
-    // Insert many rows in one statement-per-row pass (caller owns the transaction for atomicity).
-    public static int BulkAddItems(SqliteConnection conn,
-        IReadOnlyList<(string DisplayName, double Quantity, string Unit, string Category, string Notes,
-            string? AddedBy, int? AddedByMemberId, int? PlannedStoreId, int? ItemId)> rows,
-        SqliteTransaction? tx = null)
-    {
-        var count = 0;
-        foreach (var row in rows)
-        {
-            AddItem(conn, row.DisplayName, row.Quantity, row.Unit, row.Category, row.Notes,
-                row.AddedBy, row.AddedByMemberId, row.PlannedStoreId, row.ItemId, tx: tx);
-            count++;
-        }
-        return count;
-    }
-
     public static void SetCheckedOff(SqliteConnection conn, int itemId, bool checkedOff, SqliteTransaction? tx = null)
     {
         using var cmd = Db.Command(conn, tx, "UPDATE shopping_list SET is_checked_off = $v WHERE id = $id");
@@ -142,12 +126,13 @@ public static class ShoppingListRepo
         cmd.ExecuteNonQuery();
     }
 
-    public static int ClearPlannedStoreIdsForActiveItems(SqliteConnection conn, bool includeCheckedOff = false,
-        SqliteTransaction? tx = null)
+    public static int ClearPlannedStoreIdsForActiveItems(SqliteConnection conn, SqliteTransaction? tx = null)
     {
-        var sql = "UPDATE shopping_list SET planned_store_id = NULL WHERE is_active = 1 AND is_deleted = 0";
-        if (!includeCheckedOff) sql += " AND is_checked_off = 0";
-        using var cmd = Db.Command(conn, tx, sql);
+        using var cmd = Db.Command(conn, tx,
+            """
+            UPDATE shopping_list SET planned_store_id = NULL
+            WHERE is_active = 1 AND is_deleted = 0 AND is_checked_off = 0
+            """);
         return cmd.ExecuteNonQuery();
     }
 

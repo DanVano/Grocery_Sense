@@ -27,10 +27,7 @@ else
 {
     <MudPaper Class="pa-3 mb-3" Outlined="true">
         <MudText Typo="Typo.subtitle1" GutterBottom="true">Location</MudText>
-        <MudStack Row="true" Spacing="2">
-            <MudTextField @bind-Value="_postal" Label="Postal code" Variant="Variant.Outlined" Margin="Margin.Dense" />
-            <MudTextField @bind-Value="_city" Label="City" Variant="Variant.Outlined" Margin="Margin.Dense" />
-        </MudStack>
+        <MudTextField @bind-Value="_postal" Label="Postal code" Variant="Variant.Outlined" Margin="Margin.Dense" />
         <MudText Typo="Typo.caption">
             Flyer sync sends your full postal code to Flipp's unofficial service to find nearby deals.
         </MudText>
@@ -164,7 +161,6 @@ else
     private bool _saved;
 
     private string _postal = "";
-    private string _city = "";
     private string _allergies = "";
     private string _hardExcludes = "";
     private string _softExcludes = "";
@@ -198,7 +194,6 @@ else
             _members = cfg.Household.Members;
             _lastBackup = FormatStamp(Microsoft.Maui.Storage.Preferences.Default.Get(LastBackupKey, ""));
             _postal = cfg.PostalCode;
-            _city = cfg.City;
             _maxStores = cfg.MaxStores;
             _minItemSavingPct = (int)Math.Round(cfg.MinItemSavingPct * 100);
             _minStoreSaving = cfg.MinStoreSaving;
@@ -267,7 +262,6 @@ else
                 Config.Save(cfg with
                 {
                     PostalCode = _postal?.Trim() ?? "",
-                    City = _city?.Trim() ?? "",
                     MaxStores = _maxStores,
                     MinItemSavingPct = _minItemSavingPct / 100.0,
                     MinStoreSaving = _minStoreSaving,

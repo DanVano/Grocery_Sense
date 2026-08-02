@@ -39,7 +39,7 @@ public sealed class AzureDocIntClient : IReceiptOcrClient, IFlyerLayoutClient
         if (string.IsNullOrWhiteSpace(_endpoint) || string.IsNullOrWhiteSpace(_apiKey))
             throw new InvalidOperationException(
                 "Azure DocumentIntelligence endpoint/apiKey are not configured. Supply them from the App composition root.");
-        AzureDocIntEndpointGuard.Validate(_endpoint);
+        ValidateEndpoint(_endpoint);
 
         var client = new DocumentIntelligenceClient(new Uri(_endpoint), new AzureKeyCredential(_apiKey));
 
@@ -66,5 +66,21 @@ public sealed class AzureDocIntClient : IReceiptOcrClient, IFlyerLayoutClient
         string operationId;
         try { operationId = operation.Id; } catch { operationId = Guid.NewGuid().ToString("N"); }
         return (operationId, rawJson);
+    }
+
+    // Trust boundary: the endpoint comes from env vars / SecureStorage, so a typo or a tampered value must not
+    // ship the receipt image (and the API key) to an arbitrary host. Runs before any file or network I/O, which
+    // is what lets AzureDocIntClientSecurityTests exercise it offline through the public analyze methods.
+    private static void ValidateEndpoint(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("Azure DocumentIntelligence endpoint must be an https:// URL.");
+
+        var host = uri.Host;
+        var ok = host.EndsWith(".cognitiveservices.azure.com", StringComparison.OrdinalIgnoreCase)
+                 || host.EndsWith(".api.cognitive.microsoft.com", StringComparison.OrdinalIgnoreCase);
+        if (!ok)
+            throw new InvalidOperationException(
+                "Azure DocumentIntelligence endpoint host must be an Azure Cognitive Services domain.");
     }
 }

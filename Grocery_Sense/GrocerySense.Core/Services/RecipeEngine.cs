@@ -21,7 +21,6 @@ public sealed class RecipeEngine
     private readonly string? _recipesPath; // null => embedded resource
     private readonly Func<IReadOnlyList<Recipe>>? _extraRecipes; // user recipes, merged at load
     private IReadOnlyList<Recipe>? _cache;
-    private long _cacheStamp;
 
     public RecipeEngine(string? recipesPath = null, Func<IReadOnlyList<Recipe>>? extraRecipes = null)
     {
@@ -44,18 +43,11 @@ public sealed class RecipeEngine
 
     private IReadOnlyList<Recipe> LoadCatalog(bool forceReload)
     {
-        // Embedded source is immutable at runtime -> load once. A file source is mtime-invalidated so a
-        // runtime edit is picked up without forceReload (mirrors Python).
-        var stamp = _recipesPath is null ? 1 : FileStamp(_recipesPath);
-        if (_cache is not null && !forceReload && stamp == _cacheStamp)
-            return _cache;
-
+        // Load once: production reads the embedded resource, which is immutable at runtime. A file source
+        // (tests, tooling) re-reads on forceReload — the mtime stamping this used to do had no production path.
+        if (_cache is not null && !forceReload) return _cache;
         var json = ReadSource();
-        if (json is null) { _cache = Array.Empty<Recipe>(); _cacheStamp = 0; return _cache; }
-
-        _cache = Parse(json);
-        _cacheStamp = stamp;
-        return _cache;
+        return _cache = json is null ? Array.Empty<Recipe>() : Parse(json);
     }
 
     // Recipes whose ingredients overlap `includeIngredients`, ranked by overlap count (+ small profile
@@ -163,11 +155,6 @@ public sealed class RecipeEngine
 
     private static HashSet<string> NormalizeSet(IEnumerable<string> values) =>
         values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim().ToLowerInvariant()).ToHashSet();
-
-    private static long FileStamp(string path)
-    {
-        try { return File.GetLastWriteTimeUtc(path).Ticks; } catch { return 0; }
-    }
 }
 
 internal sealed class RecipeJson

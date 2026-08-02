@@ -157,14 +157,13 @@ public sealed class ConfigStore
     }
 
     private static UserConfig EmptyConfig() => new(
-        ProfileVersion, "", "", null,
+        ProfileVersion, "", null,
         new Household(1, 1, new List<HouseholdMember>()));
 
     private static UserConfig Normalize(UserConfig c) => c with
     {
         ProfileVersion = ProfileVersion, // always bump to latest on load/save (safe).
         PostalCode = c.PostalCode ?? "",
-        City = c.City ?? "",
         MonthlyBudget = c.MonthlyBudget is > 0 ? c.MonthlyBudget : null,
         // Optimizer settings: clamp missing/invalid (e.g. 0 from an older config) back to the defaults.
         MaxStores = c.MaxStores > 0 ? c.MaxStores : 3,

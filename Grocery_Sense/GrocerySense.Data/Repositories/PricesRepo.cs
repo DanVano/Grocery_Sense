@@ -31,22 +31,22 @@ public static class PricesRepo
     // ---------- CRUD + basic stats ----------
 
     // Returns the inserted row id. date defaults to today (yyyy-MM-dd) when null.
+    // flyer_source_id is left NULL: the prices/flyer_sources flyer path is retired (see the note further down),
+    // and only RestoreReceiptFromBackup writes that column, via its own SQL.
     public static int AddPricePoint(SqliteConnection conn, int itemId, int storeId, double unitPrice, string unit,
         double? quantity = null, double? totalPrice = null, string? rawName = null, int? confidence = null,
-        string source = "manual", string? date = null, int? receiptId = null, int? flyerSourceId = null,
-        SqliteTransaction? tx = null)
+        string source = "manual", string? date = null, int? receiptId = null, SqliteTransaction? tx = null)
     {
         date ??= DateTime.Now.ToString("yyyy-MM-dd");
         using var cmd = Db.Command(conn, tx,
             """
-            INSERT INTO prices (item_id, store_id, receipt_id, flyer_source_id, source, date,
+            INSERT INTO prices (item_id, store_id, receipt_id, source, date,
                 unit_price, unit, quantity, total_price, raw_name, confidence)
-            VALUES ($item, $store, $rid, $fsid, $source, $date, $uprice, $unit, $qty, $total, $raw, $conf)
+            VALUES ($item, $store, $rid, $source, $date, $uprice, $unit, $qty, $total, $raw, $conf)
             """);
         cmd.Parameters.AddWithValue("$item", itemId);
         cmd.Parameters.AddWithValue("$store", storeId);
         cmd.Parameters.AddWithValue("$rid", Db.OrNull(receiptId));
-        cmd.Parameters.AddWithValue("$fsid", Db.OrNull(flyerSourceId));
         cmd.Parameters.AddWithValue("$source", source);
         cmd.Parameters.AddWithValue("$date", date);
         cmd.Parameters.AddWithValue("$uprice", unitPrice);

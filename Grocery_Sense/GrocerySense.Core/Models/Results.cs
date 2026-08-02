@@ -243,7 +243,6 @@ public record Household(int PrimaryMemberId, int ActiveMemberId, IReadOnlyList<H
 public record UserConfig(
     int ProfileVersion,
     string PostalCode,
-    string City,
     double? MonthlyBudget,
     Household Household,
     // BasketOptimizer settings (single-profile). Defaults are the redesign's tuning starting points.

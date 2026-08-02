@@ -61,15 +61,14 @@ public sealed class RecipeEngineTests : IDisposable
     }
 
     [Fact]
-    public void Cache_reloads_when_file_mtime_changes()
+    public void Catalog_is_cached_until_forceReload()
     {
         var path = WriteJson("""[{"name":"A","ingredients":["x"]}]""");
         var eng = new RecipeEngine(path);
         Assert.Single(eng.LoadAllRecipes());
 
         File.WriteAllText(path, """[{"name":"A"},{"name":"B","ingredients":["y"]}]""");
-        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(5));
-        Assert.Equal(2, eng.LoadAllRecipes().Count);
+        Assert.Single(eng.LoadAllRecipes()); // cached — the catalog is immutable for the process
         Assert.Equal(2, eng.LoadAllRecipes(forceReload: true).Count);
     }
 
