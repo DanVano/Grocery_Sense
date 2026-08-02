@@ -536,16 +536,11 @@ public static class ReceiptsRepo
 
     // ---- internals ----
 
+    // prices, receipt_line_items, receipt_raw_json, receipt_file_hashes and receipt_signatures all declare
+    // receipt_id ... ON DELETE CASCADE, and SqliteConnectionFactory sets foreign_keys=ON on every connection,
+    // so the children go with the parent. Same house rule FlyersRepo states: no redundant child deletes.
     private static void DeleteReceiptRows(SqliteConnection conn, SqliteTransaction tx, int receiptId)
     {
-        // Child -> parent. (FK cascade would cover most of this, but the explicit order matches Python
-        // and keeps the behavior independent of pragma state.)
-        foreach (var table in new[] { "prices", "receipt_line_items", "receipt_raw_json", "receipt_file_hashes", "receipt_signatures" })
-        {
-            using var cmd = Db.Command(conn, tx, $"DELETE FROM {table} WHERE receipt_id = $id");
-            cmd.Parameters.AddWithValue("$id", receiptId);
-            cmd.ExecuteNonQuery();
-        }
         using var del = Db.Command(conn, tx, "DELETE FROM receipts WHERE id = $id");
         del.Parameters.AddWithValue("$id", receiptId);
         del.ExecuteNonQuery();
