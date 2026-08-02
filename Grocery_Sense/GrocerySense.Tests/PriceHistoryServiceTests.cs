@@ -8,15 +8,23 @@ public sealed class PriceHistoryServiceTests
 {
     private static int Store(TempDb db, string name = "Loblaws") => StoresRepo.CreateStore(db.Conn, name).Id;
 
+    // Seed the way production does — straight into items/prices. CreateItem is already get-or-create
+    // (case-insensitive dedupe), and AddPricePoint defaults date to today.
+    private static int Item(TempDb db, string name) => ItemsRepo.CreateItem(db.Conn, name).Id;
+
+    private static void Price(TempDb db, string itemName, int storeId, double unitPrice, string? date = null) =>
+        PricesRepo.AddPricePoint(db.Conn, Item(db, itemName), storeId, unitPrice, "each",
+            source: "receipt", date: date);
+
     [Fact]
-    public void Record_then_GetBaselinePrices_aggregates_case_insensitively()
+    public void GetBaselinePrices_aggregates_case_insensitively()
     {
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
 
-        svc.RecordPriceFromReceipt("Milk", store, 3.00, "each");
-        svc.RecordPriceFromReceipt("Milk", store, 5.00, "each");
+        Price(db, "Milk", store, 3.00);
+        Price(db, "Milk", store, 5.00);
 
         // Batched baseline (the API MealSuggestionService uses) = trailing-window average, keyed by the
         // trimmed input; lookup is case-insensitive (recorded "Milk", queried "milk"). Repo-level min/max/count
@@ -31,11 +39,11 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        var itemId = svc.GetOrCreateItem("Milk").Id;
-        svc.RecordPriceFromReceipt("Milk", store, 3.00, "each", dateStr: "2026-07-01");
-        svc.RecordPriceFromReceipt("Milk", store, 4.00, "each", dateStr: "2026-07-20");
-        svc.RecordPriceFromReceipt("Milk", store, 3.50, "each", dateStr: "2026-07-10");
-        svc.RecordPriceFromReceipt("Milk", store, 5.00, "each", dateStr: "2026-07-15");
+        var itemId = Item(db, "Milk");
+        Price(db, "Milk", store, 3.00, "2026-07-01");
+        Price(db, "Milk", store, 4.00, "2026-07-20");
+        Price(db, "Milk", store, 3.50, "2026-07-10");
+        Price(db, "Milk", store, 5.00, "2026-07-15");
 
         var profile = svc.GetItemPriceProfile(itemId);
 
@@ -54,7 +62,7 @@ public sealed class PriceHistoryServiceTests
     {
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
-        var itemId = svc.GetOrCreateItem("Never Bought").Id;
+        var itemId = Item(db, "Never Bought");
 
         var profile = svc.GetItemPriceProfile(itemId);
 
@@ -71,7 +79,7 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        foreach (var _ in new[] { 1, 2, 3 }) svc.RecordPriceFromReceipt("Eggs", store, 10.00, "each"); // avg 10, n=3
+        foreach (var _ in new[] { 1, 2, 3 }) Price(db, "Eggs", store, 10.00); // avg 10, n=3
 
         Assert.Equal("great", svc.ClassifyDeal("Eggs", 7.00).Classification);   // +30%
         Assert.Equal("good", svc.ClassifyDeal("Eggs", 9.00).Classification);    // +10%
@@ -85,8 +93,8 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        svc.RecordPriceFromReceipt("Bread", store, 2.00, "each");
-        svc.RecordPriceFromReceipt("Bread", store, 4.00, "each"); // n=2
+        Price(db, "Bread", store, 2.00);
+        Price(db, "Bread", store, 4.00); // n=2
 
         Assert.Equal("weak_data", svc.ClassifyDeal("Bread", 1.00).Classification);
         Assert.Equal("no_data", svc.ClassifyDeal("Nonexistent", 1.00).Classification);
@@ -99,7 +107,7 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        foreach (var _ in new[] { 1, 2, 3 }) svc.RecordPriceFromReceipt("Eggs", store, 10.00, "each"); // adj avg 10 (all today)
+        foreach (var _ in new[] { 1, 2, 3 }) Price(db, "Eggs", store, 10.00); // adj avg 10 (all today)
 
         // 8% below: "good" under the new >=7 band (would have been "typical" under the old >=10).
         Assert.Equal("good", svc.ClassifyDeal("Eggs", 9.20).Classification);
@@ -114,8 +122,8 @@ public sealed class PriceHistoryServiceTests
         var svc = new PriceHistoryService(db.Factory); // null ConfigStore -> InflationRates.Seed
         var store = Store(db);
         // Two ~1-year-old points at 5.00. Nominal average is 5.00; inflation must pull the baseline above it.
-        svc.RecordPriceFromReceipt("Butter", store, 5.00, "each", "2025-07-01");
-        svc.RecordPriceFromReceipt("Butter", store, 5.00, "each", "2025-07-01");
+        Price(db, "Butter", store, 5.00, "2025-07-01");
+        Price(db, "Butter", store, 5.00, "2025-07-01");
 
         var c = svc.ClassifyDeal("Butter", 5.00);
         Assert.True(c.HasHistory);
@@ -130,8 +138,8 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        svc.RecordPriceFromReceipt("Flour", store, 6.00, "each", "2025-01-01");
-        svc.RecordPriceFromReceipt("Flour", store, 6.00, "each", "2026-01-01"); // one point per year
+        Price(db, "Flour", store, 6.00, "2025-01-01");
+        Price(db, "Flour", store, 6.00, "2026-01-01"); // one point per year
 
         var c = svc.ClassifyDeal("Flour", 6.00);
         Assert.True(c.HasHistory);
@@ -145,11 +153,11 @@ public sealed class PriceHistoryServiceTests
         using var db = new TempDb();
         var svc = new PriceHistoryService(db.Factory);
         var store = Store(db);
-        var item = svc.GetOrCreateItem("Cheese");
-        PricesRepo.AddPricePoint(db.Conn, item.Id, store, 8.00, "each"); // dated today
-        PricesRepo.AddPricePoint(db.Conn, item.Id, store, 8.00, "each");
-        PricesRepo.AddPricePoint(db.Conn, item.Id, store, 8.00, "each");
-        PricesRepo.AddPricePoint(db.Conn, item.Id, store, 999.00, "each", date: "garbage-date"); // unparseable
+        var itemId = Item(db, "Cheese");
+        PricesRepo.AddPricePoint(db.Conn, itemId, store, 8.00, "each"); // dated today
+        PricesRepo.AddPricePoint(db.Conn, itemId, store, 8.00, "each");
+        PricesRepo.AddPricePoint(db.Conn, itemId, store, 8.00, "each");
+        PricesRepo.AddPricePoint(db.Conn, itemId, store, 999.00, "each", date: "garbage-date"); // unparseable
 
         var c = svc.ClassifyDeal("Cheese", 6.00);
         Assert.Equal(3, c.SampleCount);   // the garbage-dated point is excluded

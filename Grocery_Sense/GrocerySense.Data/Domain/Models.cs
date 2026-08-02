@@ -31,19 +31,6 @@ public record Item(
 public record ItemAdminRow(
     int Id, string CanonicalName, bool IsTracked, string? DefaultUnit, int PricePoints, string? LastPriceDate);
 
-public record Receipt(
-    int Id,
-    int StoreId,
-    string PurchaseDate,
-    double? SubtotalAmount = null,
-    double? TaxAmount = null,
-    double? TotalAmount = null,
-    string Source = "receipt",
-    string? FilePath = null,
-    int? ImageOverallConfidence = null,
-    string? KeepImageUntil = null,
-    string? AzureRequestId = null);
-
 public record PricePoint(
     int Id,
     int ItemId,
@@ -72,21 +59,6 @@ public record PriceStats(
 // Best-effort current quote for an item/store (ports the dicts prices_repo returns). Unit is populated
 // for active-flyer quotes (norm_unit/unit/'each'); null for the most-recent-price fallback.
 public record PriceQuote(double UnitPrice, string Source, string? Unit = null);
-
-public record ShoppingListItem(
-    int Id,
-    string DisplayName,
-    double? Quantity = null,
-    string? Unit = null,
-    int? ItemId = null,
-    int? PlannedStoreId = null,
-    string? AddedBy = null,
-    string? AddedAt = null,
-    bool IsCheckedOff = false,
-    bool IsActive = true,
-    string? Notes = null,
-    string? Category = null,
-    int? AddedByMemberId = null);
 
 // Repo-local return shapes (ports of dataclasses defined inside *_repo.py).
 // Mirrors shopping_list_repo.ShoppingListRow: quantity/unit/category/notes are coalesced non-null,
@@ -142,11 +114,10 @@ public record MemberRequestRow(
     int Id, int? MemberId, string MemberName, string Kind, string Label,
     IReadOnlyList<int> ItemRowIds, string CreatedAt, bool Reviewed);
 
+// Doubles as the spend-trend point (GetSpendTrend) — same month/total/count shape.
 public record MonthSpend(string Month, decimal Total, int ReceiptCount);
 
 public record StoreMonthSpend(int StoreId, string StoreName, decimal Total, int ReceiptCount);
-
-public record SpendTrendPoint(string Month, decimal Total, int ReceiptCount);
 
 public record DeletedBackup(int BackupId, int? OriginalReceiptId, string? DeletedAt);
 

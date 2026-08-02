@@ -60,7 +60,7 @@ public sealed class BudgetService
     }
 
     // Monthly spend for the last N months (oldest first).
-    public IReadOnlyList<SpendTrendPoint> GetTrend(int months = 12)
+    public IReadOnlyList<MonthSpend> GetTrend(int months = 12)
     {
         using var conn = _factory.Open();
         return ReceiptsRepo.GetSpendTrend(conn, months);

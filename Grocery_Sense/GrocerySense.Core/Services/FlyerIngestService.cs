@@ -247,22 +247,6 @@ public sealed class FlyerIngestService
         new(@"\b\d+\.\d{2}\b"),                                             // 3.99 (no $)
     ];
 
-    // Strict money: a $-prefixed amount, or a bare decimal (optional trailing /unit). Rejects OCR letter-O
-    // prefixes ("O.99"), EU decimals ("1,25"), and multi-amount strings ("Was $4.99 Now $2.99"). Ported from
-    // _safe_float_money — the "never fabricate a price" guard (CLAUDE: fail loud, never fake).
-    internal static double? SafeFloatMoney(string? s)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return null;
-        var m = StrictMoney.Match(s.Trim());
-        if (!m.Success) return null;
-        var raw = m.Groups["dollar"].Success ? m.Groups["dollar"].Value : m.Groups["bare"].Value;
-        return double.TryParse(raw, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
-    }
-
-    private static readonly Regex StrictMoney = new(
-        @"^\s*(?:\$\s*(?<dollar>\d+(?:\.\d{1,2})?)|(?<bare>\d+(?:\.\d{1,2})?)(?:\s*/.*)?)\s*$");
-
     private static string GuessAssetType(string path) =>
         Path.GetExtension(path).TrimStart('.').ToLowerInvariant() == "pdf" ? "pdf" : "image";
 

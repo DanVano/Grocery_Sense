@@ -60,18 +60,6 @@ public sealed class FlyerSyncService
         _metaPath = Path.Combine(dir, "flyer_sync_meta.json");
     }
 
-    // True if no COMMITTED sync happened yet, the meta is unreadable, the clock skewed backwards, or the
-    // last success is older than the throttle interval. Attempts never satisfy this — an all-fail sync
-    // leaves NeedsSync() true.
-    public bool NeedsSync()
-    {
-        var meta = ReadMeta();
-        if (meta.Success is null) return true;
-        var elapsed = DateTimeOffset.UtcNow - meta.Success.Value;
-        if (elapsed < TimeSpan.Zero) return true; // clock skew: RunSync discloses it instead of syncing
-        return elapsed.TotalSeconds >= SyncIntervalDays * 86400;
-    }
-
     public async Task<FlyerSyncResult> RunSyncAsync(bool force = false, CancellationToken ct = default)
     {
         var meta = ReadMeta();

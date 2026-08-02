@@ -111,27 +111,4 @@ public static class StoresRepo
         cmd.ExecuteNonQuery();
     }
 
-    public static void UpdateStore(SqliteConnection conn, int storeId, string name, string? address = null,
-        string? city = null, string? postalCode = null, string? flippStoreId = null, bool isFavorite = false,
-        int priority = 0, string? notes = null, SqliteTransaction? tx = null)
-    {
-        using var cmd = Db.Command(conn, tx,
-            """
-            UPDATE stores
-            SET name = $name, address = $address, city = $city, postal_code = $postal,
-                flipp_store_id = $flipp, is_favorite = $fav, priority = $prio, notes = $notes
-            WHERE id = $id
-            """);
-        cmd.Parameters.AddWithValue("$name", name);
-        cmd.Parameters.AddWithValue("$address", Db.OrNull(address));
-        cmd.Parameters.AddWithValue("$city", Db.OrNull(city));
-        cmd.Parameters.AddWithValue("$postal", Db.OrNull(postalCode));
-        cmd.Parameters.AddWithValue("$flipp", Db.OrNull(flippStoreId));
-        cmd.Parameters.AddWithValue("$fav", isFavorite ? 1 : 0);
-        cmd.Parameters.AddWithValue("$prio", priority);
-        cmd.Parameters.AddWithValue("$notes", Db.OrNull(notes));
-        cmd.Parameters.AddWithValue("$id", storeId);
-        cmd.ExecuteNonQuery();
-    }
-
 }

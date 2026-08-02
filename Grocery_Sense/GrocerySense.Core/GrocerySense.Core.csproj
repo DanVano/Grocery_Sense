@@ -5,7 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Flyer money-parse guards (SafeFloatMoney/ExtractPriceText) are internal but get direct test coverage. -->
+    <!-- Flyer parse guards (ExtractPriceText/ExtractDealsFromLayout) are internal but get direct test coverage. -->
     <InternalsVisibleTo Include="GrocerySense.Tests" />
   </ItemGroup>
 

@@ -7,9 +7,11 @@ using Microsoft.Data.Sqlite;
 namespace GrocerySense.Core;
 
 // Port of reference-python/.../services/price_history_service.py — item history, baselines, deal classify.
-// Wraps ItemsRepo + PricesRepo with higher-level operations. Opens its own connection per call via the
-// factory (mirrors Python's connection_scope). The Python dict returns are replaced with typed records.
-// Divergence: no ensure_schema() — items.default_unit / prices.norm_* come from the migration ledger.
+// READ-ONLY: wraps ItemsRepo + PricesRepo query surface, opening its own connection per call via the factory
+// (mirrors Python's connection_scope). The Python dict returns are replaced with typed records.
+// Divergences: no ensure_schema() (items.default_unit / prices.norm_* come from the migration ledger), and the
+// Python write helpers are gone — production price writes are ReceiptsRepo.IngestReceipt's own INSERT INTO
+// prices, inside the ingest transaction. Seed prices via ItemsRepo.CreateItem + PricesRepo.AddPricePoint.
 public sealed class PriceHistoryService
 {
     private readonly SqliteConnectionFactory _factory;
@@ -21,43 +23,6 @@ public sealed class PriceHistoryService
     {
         _factory = factory;
         _configStore = configStore;
-    }
-
-    // ---------- item helpers ----------
-
-    public Item GetOrCreateItem(string canonicalName, string? category = null, string? defaultUnit = null)
-    {
-        using var conn = _factory.Open();
-        return GetOrCreateItem(conn, canonicalName, category, defaultUnit);
-    }
-
-    private static Item GetOrCreateItem(SqliteConnection conn, string canonicalName, string? category = null,
-        string? defaultUnit = null)
-    {
-        var clean = canonicalName.Trim();
-        return ItemsRepo.GetItemByName(conn, clean)
-               ?? ItemsRepo.CreateItem(conn, clean, category: category, defaultUnit: defaultUnit);
-    }
-
-    // ---------- recording prices ----------
-
-    public int RecordPriceFromReceipt(string itemName, int storeId, double unitPrice, string unit,
-        string? dateStr = null, double? quantity = null, double? totalPrice = null, int? receiptId = null,
-        string? rawName = null, int? confidence = null)
-    {
-        using var conn = _factory.Open();
-        var item = GetOrCreateItem(conn, itemName);
-        return PricesRepo.AddPricePoint(conn, item.Id, storeId, unitPrice, unit, quantity, totalPrice, rawName,
-            confidence, source: "receipt", date: dateStr ?? Today(), receiptId: receiptId);
-    }
-
-    public int RecordManualPrice(string itemName, int storeId, double unitPrice, string unit,
-        string? dateStr = null, double? quantity = null, double? totalPrice = null, string? rawName = null)
-    {
-        using var conn = _factory.Open();
-        var item = GetOrCreateItem(conn, itemName);
-        return PricesRepo.AddPricePoint(conn, item.Id, storeId, unitPrice, unit, quantity, totalPrice, rawName,
-            source: "manual", date: dateStr ?? Today());
     }
 
     // The Items page's price-history panel (F02): recent points (newest-first, store names resolved)
@@ -178,7 +143,6 @@ public sealed class PriceHistoryService
         return new DealClassification(item, true, classification, percent, baseline, min, max, count, message);
     }
 
-    private static string Today() => DateTime.Today.ToString("yyyy-MM-dd");
     private static string F2(double v) => v.ToString("F2", CultureInfo.InvariantCulture);
     private static string Pct(double v) => v.ToString("+0.0;-0.0", CultureInfo.InvariantCulture);
 }

@@ -54,33 +54,6 @@ public sealed class FlyerIngestServiceTests : IDisposable
         },
     };
 
-    // ---------------- SafeFloatMoney — the "never fabricate a price" guard ----------------
-
-    [Theory]
-    [InlineData("$2.99", 2.99)]
-    [InlineData("2.99", 2.99)]
-    [InlineData(" $ 10.00 ", 10.00)]
-    [InlineData("4.99/kg", 4.99)]
-    [InlineData("$0.99", 0.99)]
-    [InlineData("0.50", 0.50)]
-    public void SafeFloatMoney_parses_clean_inputs(string raw, double expected) =>
-        Assert.Equal(expected, FlyerIngestService.SafeFloatMoney(raw)!.Value, 2);
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(null)]
-    [InlineData("free")]
-    [InlineData("--")]
-    [InlineData("O.99")]                 // OCR letter-O prefix
-    [InlineData("1,25")]                 // EU decimal comma
-    [InlineData("Was $4.99 Now $2.99")]  // multi-amount, ambiguous
-    [InlineData("price: $3.49")]         // prose prefix
-    [InlineData("-5.00")]                // negative
-    [InlineData("$")]                    // lone dollar
-    [InlineData("$ .99")]                // missing integer part
-    public void SafeFloatMoney_rejects_dirty_or_ambiguous(string? raw) =>
-        Assert.Null(FlyerIngestService.SafeFloatMoney(raw));
-
     // ---------------- ExtractPriceText — flyer price forms ----------------
 
     [Theory]

@@ -167,7 +167,7 @@ public static class ReceiptsRepo
             .ToList();
     }
 
-    public static IReadOnlyList<SpendTrendPoint> GetSpendTrend(SqliteConnection conn, int months = 12,
+    public static IReadOnlyList<MonthSpend> GetSpendTrend(SqliteConnection conn, int months = 12,
         SqliteTransaction? tx = null)
     {
         months = Math.Max(1, months);
@@ -190,7 +190,7 @@ public static class ReceiptsRepo
                 agg[month] = (cur.Total + amount, cur.Count + 1);
             }
         }
-        return agg.Select(kv => new SpendTrendPoint(kv.Key, kv.Value.Total, kv.Value.Count)).ToList();
+        return agg.Select(kv => new MonthSpend(kv.Key, kv.Value.Total, kv.Value.Count)).ToList();
     }
 
     // ---- Ingest dedupe lookups + transactional receipt write (ReceiptIngestionService, Phase 5) ----

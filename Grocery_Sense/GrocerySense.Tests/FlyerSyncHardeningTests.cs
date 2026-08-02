@@ -24,7 +24,7 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
     // ---------------- success = committed, never attempted ----------------
 
     [Fact]
-    public async Task All_fail_sync_leaves_NeedsSync_true_and_records_the_failure()
+    public async Task All_fail_sync_records_no_success_and_keeps_the_failure()
     {
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
         var svc = Build(new FuncProvider(_ => throw new InvalidOperationException("network down")));
@@ -33,10 +33,9 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
 
         Assert.Equal(0, result.StoresSynced);
         Assert.Single(result.Errors);
-        Assert.True(svc.NeedsSync()); // an all-fail run must NOT buy a 3.5-day silent blackout
         var meta = svc.ReadMeta();
         Assert.NotNull(meta.Attempt);
-        Assert.Null(meta.Success);
+        Assert.Null(meta.Success); // no success = no 3.5-day silent blackout bought by an all-fail run
         Assert.Equal("Mart: fetch_failed", meta.Failure); // redacted: store + reason class only
     }
 
@@ -188,13 +187,13 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
 
         var meta = svc.ReadMeta();
         Assert.Equal(legacy, meta.Success!.Value, TimeSpan.FromSeconds(1)); // legacy reads as success
-        Assert.True(svc.NeedsSync()); // 10 days old -> due
 
         using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
         await svc.RunSyncAsync(force: true);
 
         Assert.Contains("success=", File.ReadAllText(_metaPath)); // rewritten keyed
-        Assert.False(svc.NeedsSync());
+        // A just-completed sync throttles the un-forced path (attempt cooldown, then the success interval).
+        Assert.Equal("too_soon", (await svc.RunSyncAsync(force: false)).SkippedReason);
     }
 
     [Fact]

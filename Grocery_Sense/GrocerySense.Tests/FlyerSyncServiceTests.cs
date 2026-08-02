@@ -17,30 +17,24 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
 
     private void WriteMeta(DateTimeOffset dt) => File.WriteAllText(_metaPath, dt.ToString("o"));
 
-    // ---------------- NeedsSync throttle ----------------
+    // ---------------- freshness gate (the un-forced RunSync path) ----------------
 
-    [Fact]
-    public void NeedsSync_true_when_no_meta() => Assert.True(Build(new StubProvider()).NeedsSync());
-
-    [Fact]
-    public void NeedsSync_false_when_meta_recent()
+    // No meta, a success older than the 3.5-day interval, and an unreadable meta all mean "due" — only a
+    // recent COMMITTED success throttles (RunSync_skips_too_soon_when_recently_synced pins that half).
+    [Theory]
+    [InlineData(null)]        // no meta at all
+    [InlineData("stale")]     // success older than the interval
+    [InlineData("{not json")] // unreadable
+    public async Task RunSync_is_due_when_meta_is_missing_stale_or_unreadable(string? meta)
     {
-        WriteMeta(DateTimeOffset.UtcNow);
-        Assert.False(Build(new StubProvider()).NeedsSync());
-    }
+        if (meta == "stale") WriteMeta(DateTimeOffset.UtcNow.AddDays(-5));
+        else if (meta is not null) File.WriteAllText(_metaPath, meta);
+        using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
 
-    [Fact]
-    public void NeedsSync_true_when_meta_older_than_interval()
-    {
-        WriteMeta(DateTimeOffset.UtcNow.AddDays(-5)); // interval is 3.5 days
-        Assert.True(Build(new StubProvider()).NeedsSync());
-    }
+        var result = await Build(new StubProvider()).RunSyncAsync(force: false);
 
-    [Fact]
-    public void NeedsSync_true_when_meta_malformed()
-    {
-        File.WriteAllText(_metaPath, "{not json");
-        Assert.True(Build(new StubProvider()).NeedsSync());
+        Assert.True(result.Ran);
+        Assert.Null(result.SkippedReason);
     }
 
     // ---------------- RunSync skip paths ----------------
