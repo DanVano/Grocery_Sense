@@ -88,9 +88,7 @@
     <MudTabPanel Text="Deals & Stock-up">
         @if (_alerts is null)
         {
-            <div class="d-flex justify-center pa-8">
-                <MudProgressCircular Indeterminate="true" aria-label="Loading" />
-            </div>
+            <Loading />
         }
         else if (_alerts.Count == 0)
         {
@@ -163,17 +161,17 @@
         // Refresh + load the PERSISTED open alerts — the same rows receipt-scan notifications deep-link to,
         // so a notification tap lands on the alert that fired it. Refresh is idempotent (re-derives open
         // engine rows, honors the 30-day dismissed suppression) and coexists with the SyncCompleted DI hook.
-        await Guard(() => Alerts.RefreshEngineAlerts(staplesOnly: true));
+        await GuardAsync(() => Alerts.RefreshEngineAlerts(staplesOnly: true));
         await ReloadAlertsAsync();
     }
 
     private async Task ReloadAlertsAsync() =>
-        _alerts = await Guard(() => Alerts.GetAlerts()) ?? Array.Empty<PriceDropAlert>();
+        _alerts = await GuardAsync(() => Alerts.GetAlerts()) ?? Array.Empty<PriceDropAlert>();
 
     private async Task DismissAsync(PriceDropAlert alert)
     {
         if (alert.Id is not int id) return; // only persisted rows are dismissible
-        await Guard(() => { Alerts.DismissAlert(id); return 0; });
+        await GuardAsync(() => Alerts.DismissAlert(id));
         await ReloadAlertsAsync();
     }
 
@@ -193,7 +191,7 @@
         if (itemId <= 0) { _error = "Pick an item from the list."; return; }
 
         var target = _target;
-        await Guard(() => { Watchlist.AddWatch(itemId, target); return 0; });
+        await GuardAsync(() => Watchlist.AddWatch(itemId, target));
         _pickName = null;
         _target = null;
         await ReloadWatchlistAsync();
@@ -201,7 +199,7 @@
 
     private async Task RemoveAsync(int watchId)
     {
-        await Guard(() => { Watchlist.RemoveWatch(watchId); return 0; });
+        await GuardAsync(() => Watchlist.RemoveWatch(watchId));
         await ReloadWatchlistAsync();
     }
 
@@ -209,38 +207,21 @@
     // same as acting on it in-store, so the card stays open — the user dismisses it explicitly when done.
     private async Task AddAlertAsync(PriceDropAlert alert)
     {
-        await Guard(() => { Shopping.AddAlertToList(alert); return 0; });
+        await GuardAsync(() => Shopping.AddAlertToList(alert));
         if (_error is null) Snackbar.Add($"Added {alert.ItemName} — see Shopping List", Severity.Success);
     }
 
     // Add a watch hit to the list (F04) — mapped, planned at the hit's store, price in the note.
     private async Task AddHitAsync(WatchlistHit hit)
     {
-        await Guard(() => Shopping.AddWatchHitToList(hit));
+        await GuardAsync(() => Shopping.AddWatchHitToList(hit));
         if (_error is null) Snackbar.Add($"Added {hit.ItemName} — see Shopping List", Severity.Success);
     }
 
     private async Task ReloadWatchlistAsync()
     {
-        _items = await Guard(() => Watchlist.ListWatchableItems()) ?? Array.Empty<(int, string)>();
-        _watches = await Guard(() => Watchlist.ListWatches()) ?? Array.Empty<SavingsWatchItem>();
-        _hits = await Guard(() => Watchlist.ComputeHits()) ?? Array.Empty<WatchlistHit>();
-    }
-
-    // Run sync service work off the UI thread; errors land in the alert, result is default on failure.
-    private async Task<T?> Guard<T>(Func<T> work)
-    {
-        _busy = true;
-        try
-        {
-            _error = null;
-            return await Task.Run(work);
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-            return default;
-        }
-        finally { _busy = false; }
+        _items = await GuardAsync(() => Watchlist.ListWatchableItems()) ?? Array.Empty<(int, string)>();
+        _watches = await GuardAsync(() => Watchlist.ListWatches()) ?? Array.Empty<SavingsWatchItem>();
+        _hits = await GuardAsync(() => Watchlist.ComputeHits()) ?? Array.Empty<WatchlistHit>();
     }
 }

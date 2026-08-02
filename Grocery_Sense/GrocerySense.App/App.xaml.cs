@@ -4,7 +4,9 @@ using Microsoft.Extensions.Logging;
 
 namespace GrocerySense.App;
 
-public partial class App : Application
+// Code-only Application: there is no App.xaml — the shell had no Application.Resources to declare
+// (the BlazorWebView styles itself from wwwroot + MudBlazor).
+public class App : Application
 {
 	private readonly AppStartup _startup;
 	private readonly FlyerSyncScheduler _flyerSync;
@@ -17,7 +19,6 @@ public partial class App : Application
 
 	public App(AppStartup startup, FlyerSyncScheduler flyerSync, DbMaintenanceService maintenance, ILogger<App> logger)
 	{
-		InitializeComponent();
 		ResetIosSecretsOnFirstLaunch();
 		_startup = startup;
 		_flyerSync = flyerSync;

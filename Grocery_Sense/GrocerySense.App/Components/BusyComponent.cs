@@ -14,9 +14,10 @@ public abstract class BusyComponent : ComponentBase
     protected string? _message;
     protected Severity _messageSeverity = Severity.Info;
 
-    // Run sync service work off the UI thread; errors land in _error, result is null on failure.
-    // `after` runs inside the same guard, so its failure surfaces too.
-    protected async Task<T?> GuardAsync<T>(Func<T> work, Func<Task>? after = null) where T : class
+    // Run sync service work off the UI thread; errors land in _error, result is default(T) on failure
+    // (null for the reference types most callers use). `after` runs inside the same guard, so its
+    // failure surfaces too — which is what keeps a success-only Snackbar after it honest.
+    protected async Task<T?> GuardAsync<T>(Func<T> work, Func<Task>? after = null)
     {
         _busy = true;
         try
@@ -29,7 +30,7 @@ public abstract class BusyComponent : ComponentBase
         catch (Exception ex)
         {
             _error = ex.Message;
-            return null;
+            return default;
         }
         finally { _busy = false; }
     }

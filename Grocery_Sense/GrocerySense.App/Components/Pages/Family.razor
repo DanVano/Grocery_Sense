@@ -120,34 +120,23 @@ else
         Config.SetActiveMemberId(id);
     }
 
-    private async Task PickMealAsync(string recipeName)
-    {
-        _busy = true;
-        _error = null;
-        try
+    // GuardAsync runs `after` inside its try, so the Snackbar only fires on a pick that actually landed.
+    private Task PickMealAsync(string recipeName) =>
+        GuardAsync(() => Picks.PickMeal(_activeId, recipeName), async () =>
         {
-            await Task.Run(() => Picks.PickMeal(_activeId, recipeName));
             Snackbar.Add($"Added ingredients for “{recipeName}”.", Severity.Success);
             await ReloadAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-        finally { _busy = false; }
-    }
+        });
 
-    private async Task AddQuickItemAsync()
+    private Task AddQuickItemAsync()
     {
-        _busy = true;
-        _error = null;
-        try
+        var text = _quickItem; // snapshot: the field is cleared once the add succeeds
+        return GuardAsync(() => Picks.PickItem(_activeId, text), async () =>
         {
-            var text = _quickItem;
-            await Task.Run(() => Picks.PickItem(_activeId, text));
             Snackbar.Add($"Added “{text.Trim()}”.", Severity.Success);
             _quickItem = "";
             await ReloadAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-        finally { _busy = false; }
+        });
     }
 
     private Task KeepAsync(int requestId) => ReviewAsync(() => Picks.MarkReviewed(requestId));

@@ -23,9 +23,7 @@
 
 @if (_busy)
 {
-    <div class="d-flex justify-center pa-8">
-        <MudProgressCircular Indeterminate="true" aria-label="Working" />
-    </div>
+    <Loading Label="Working" />
 }
 else if (_optimized is { } opt)
 {

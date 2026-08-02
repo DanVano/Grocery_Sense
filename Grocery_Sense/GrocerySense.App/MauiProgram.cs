@@ -7,13 +7,10 @@ public static class MauiProgram
 {
 	public static MauiApp CreateMauiApp()
 	{
+		// No ConfigureFonts: the whole UI is a BlazorWebView, so text is styled by MudBlazor's web CSS —
+		// a registered native font would have no consumer.
 		var builder = MauiApp.CreateBuilder();
-		builder
-			.UseMauiApp<App>()
-			.ConfigureFonts(fonts =>
-			{
-				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
-			});
+		builder.UseMauiApp<App>();
 
 		builder.Services.AddMauiBlazorWebView();
 		builder.Services.AddMudServices();

@@ -1,4 +1,5 @@
-﻿@page "/budget"
+@page "/budget"
+@inherits BusyComponent
 @inject BudgetService BudgetSvc
 
 <MudText Typo="Typo.h5" GutterBottom="true">Budget</MudText>
@@ -16,9 +17,7 @@
 
 @if (_status is null)
 {
-    <div class="d-flex justify-center pa-8">
-        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
-    </div>
+    <Loading />
 }
 else
 {
@@ -124,8 +123,6 @@ else
     private IReadOnlyList<StoreMonthSpend>? _byStore;
     private InflationContext? _inflation;
     private double? _budgetInput;
-    private bool _busy;
-    private string? _error;
 
     protected override Task OnInitializedAsync() => ReloadAsync();
 
@@ -149,17 +146,9 @@ else
         catch (Exception ex) { _error = ex.Message; }
     }
 
-    private async Task SaveAsync()
+    private Task SaveAsync()
     {
-        _busy = true;
-        try
-        {
-            _error = null;
-            var amount = _budgetInput;
-            await Task.Run(() => BudgetSvc.SaveMonthlyBudget(amount));
-            await ReloadAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-        finally { _busy = false; }
+        var amount = _budgetInput;
+        return GuardAsync(() => BudgetSvc.SaveMonthlyBudget(amount), ReloadAsync);
     }
 }

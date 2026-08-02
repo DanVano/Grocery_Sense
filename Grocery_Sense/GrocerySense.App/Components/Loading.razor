@@ -1,0 +1,9 @@
+@* Centred busy spinner — the one every page shows while its first load runs. Label is what a screen
+   reader announces, so it says what is happening ("Working" while a plan computes, "Loading" otherwise). *@
+<div class="d-flex justify-center pa-8">
+    <MudProgressCircular Indeterminate="true" aria-label="@Label" />
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "Loading";
+}

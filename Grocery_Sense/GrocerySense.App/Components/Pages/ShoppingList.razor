@@ -122,9 +122,7 @@
 {
     @if (_groups is null)
     {
-        <div class="d-flex justify-center pa-8">
-            <MudProgressCircular Indeterminate="true" aria-label="Loading" />
-        </div>
+        <Loading />
     }
     else if (_groups.Count == 0)
     {
@@ -214,9 +212,7 @@
 }
 else if (_items is null)
 {
-    <div class="d-flex justify-center pa-8">
-        <MudProgressCircular Indeterminate="true" aria-label="Loading" />
-    </div>
+    <Loading />
 }
 else if (_items.Count == 0)
 {
