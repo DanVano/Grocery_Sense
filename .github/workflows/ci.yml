@@ -5,6 +5,10 @@
 # CRITICAL NuGet advisories (NU1903/NU1904) to build errors — dotnet test/build below inherit it.
 # It does NOT fail every vulnerable package; NU1900 (advisory data unavailable) is deliberately
 # not an error so offline restores still build.
+#
+# Actions pinned at @v5: the first run warned that checkout/setup-dotnet/setup-java @v4 target
+# Node 20, which is deprecated and was already being force-run on Node 24. Bumped before that
+# turns into a hard failure.
 name: CI
 
 on:
@@ -19,15 +23,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
       # Unpiped on purpose (V2_FOLLOWUPS §4.4): piping through tail/head swallows the exit code.
       - name: Run tests
         run: dotnet test Grocery_Sense/GrocerySense.Tests
 
-  # First run (2026-08-01) FAILED here and the fix is already in: the App used to declare
+  # The first run (2026-08-01) FAILED here and the fix is already in: the App used to declare
   # TargetFrameworks = android;ios;maccatalyst unconditionally, so this Linux runner tried to resolve
   # an iOS pack it cannot have — "workload packs that do not exist in any of the workloads available
   # in this installation: Microsoft.iOS.Sdk.net10.0_26.5". Note it failed at the COMPILE step, not at
@@ -37,11 +41,11 @@ jobs:
   android-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -53,7 +57,7 @@ jobs:
   secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # full history — the scan covers every commit ever pushed, not just the tip
       # Version-pinned binary rather than a third-party action; --redact keeps any hit out of CI logs.

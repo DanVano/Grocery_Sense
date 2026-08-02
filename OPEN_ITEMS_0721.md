@@ -5,24 +5,23 @@ on 2026-07-21: `V3_Phase0_plan.md`, `V3_PRE_PHASE0_BACKEND_CLOSEOUT.md`, `INFLAT
 `Phase0_changes.md`, `Pony_tail_audit_claude_0718.md`, and the four `*_review_*_0718.md` files — all of
 which were fully or ~fully executed (verified against the code, 2026-07-21).
 
-**Current state (updated 2026-07-31):** all v2 + v2-follow-up feature code is done and merged to `main`
+**Current state (updated 2026-08-01):** all v2 + v2-follow-up feature code is done and merged to `main`
 (PR #1). **The Android head BUILDS** (JDK 17 + API 36 installed; `dotnet build GrocerySense.App
 -f net10.0-android` → 0 errors, 7 pre-existing CS8602 nullable warnings in `AndroidLocalNotifier.cs`).
 
-**Unpushed work sits on `refactor/ponytail-audit` — 31 commits ahead of `main`, 0 behind (a clean
-fast-forward). Verified 2026-08-01: 578 tests green; Windows head 0 errors; Android head builds
-Debug AND Release, 0 errors.** It carries the completed hardening plan (P0-1…P1-6), seven
-UI/workflow features, a bugfix/security/perf/refactor pass, three architecture deepenings, and a
-seven-commit ponytail refactor pass. The 608→578 test change is deleted code taking its tests with
+**Everything is MERGED AND PUSHED to `main` (2026-08-01).** `main` = `origin/main` = `7299661`,
+fast-forwarded from the v2 baseline `b8c47ab`. It carries the completed hardening plan (P0-1…P1-6),
+seven UI/workflow features, a bugfix/security/perf/refactor pass, three architecture deepenings, and
+a seven-commit ponytail refactor pass. The 608→578 test change is deleted code taking its tests with
 it, not lost coverage.
 
-**`main` has none of that code** — `main` is still the v2 baseline (`b8c47ab`). Only the docs are
-kept current here, so a doc section may describe behaviour `main` does not have yet; see the banner
-at the top of `V2_FOLLOWUPS.md`. **Merging (or fast-forwarding) `main` is a [USER] decision — not
-done.** The CI workflow also lives only on the branch, so it has still never executed.
+**Verified at `7299661`: 578 tests green; Windows head 0 errors; Android head builds Debug AND
+Release, 0 errors; `dotnet build GrocerySense.sln` succeeds on Windows; CI green on all three jobs**
+(`test` · `secret-scan` · `android-release`). Docs in this repo now describe `main` itself — no
+branch/main split to reason about.
 
 Everything still open below is **on-device / user / hardware-gated** — no service or data code blocks
-release. **The Android head builds in BOTH configurations (verified 2026-07-31): Debug and Release,
+release. **The Android head builds in BOTH configurations (verified 2026-08-01): Debug and Release,
 0 errors, 8 pre-existing warnings** (7 CS8602 in `AndroidLocalNotifier.cs`, 1 CS0612 obsolete
 `OnBackPressed`) — so the Android-only share-intake source is compile-proven and CI's Android Release
 job should pass. Build it with:
