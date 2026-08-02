@@ -1,29 +1,15 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
-public sealed class BudgetServiceTests : IDisposable
+public sealed class BudgetServiceTests : TempDirTestBase
 {
-    private readonly string _cfgDir = Path.Combine(Path.GetTempPath(), $"gs_budget_{Guid.NewGuid():N}");
 
-    public BudgetServiceTests() => Directory.CreateDirectory(_cfgDir);
-    public void Dispose() { try { Directory.Delete(_cfgDir, recursive: true); } catch { /* temp */ } }
 
-    private static string ThisMonthDate => DateTime.UtcNow.ToString("yyyy-MM") + "-15";
-
-    private static void AddReceipt(SqliteConnection conn, int storeId, decimal total)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO receipts (store_id, purchase_date, total_amount, source) VALUES ($s, $d, $t, 'receipt')";
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$d", ThisMonthDate);
-        cmd.Parameters.AddWithValue("$t", total);
-        cmd.ExecuteNonQuery();
-    }
+    private static void AddReceipt(SqliteConnection conn, int storeId, decimal total) =>
+        AddReceiptOn(conn, storeId, total, MonthDate(DateTime.UtcNow));
 
     [Fact]
     public void Status_is_unset_without_a_budget_but_still_reports_spend()
@@ -33,7 +19,7 @@ public sealed class BudgetServiceTests : IDisposable
         AddReceipt(db.Conn, store, 50m);
         AddReceipt(db.Conn, store, 30m);
 
-        var svc = new BudgetService(new ConfigStore(_cfgDir), db.Factory);
+        var svc = new BudgetService(new ConfigStore(_dir), db.Factory);
         var status = svc.GetBudgetStatus();
 
         Assert.Equal("unset", status.Status);
@@ -48,7 +34,7 @@ public sealed class BudgetServiceTests : IDisposable
         using var db = new TempDb();
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         AddReceipt(db.Conn, store, 80m);
-        var svc = new BudgetService(new ConfigStore(_cfgDir), db.Factory);
+        var svc = new BudgetService(new ConfigStore(_dir), db.Factory);
 
         svc.SaveMonthlyBudget(100); // 80% used
         var ok = svc.GetBudgetStatus();
@@ -81,7 +67,7 @@ public sealed class BudgetServiceTests : IDisposable
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         AddReceipt(db.Conn, store, 80m);
 
-        var status = new BudgetService(new ConfigStore(_cfgDir), db.Factory).GetBudgetStatus();
+        var status = new BudgetService(new ConfigStore(_dir), db.Factory).GetBudgetStatus();
 
         Assert.Equal("unset", status.ProjectedStatus);
         Assert.Equal(ExpectedProjection(80m), status.ProjectedSpend);
@@ -93,7 +79,7 @@ public sealed class BudgetServiceTests : IDisposable
         using var db = new TempDb();
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         AddReceipt(db.Conn, store, 80m);
-        var svc = new BudgetService(new ConfigStore(_cfgDir), db.Factory);
+        var svc = new BudgetService(new ConfigStore(_dir), db.Factory);
         var projected = ExpectedProjection(80m);
 
         svc.SaveMonthlyBudget((double)(projected - 10m)); // pace overshoots the budget
@@ -107,7 +93,7 @@ public sealed class BudgetServiceTests : IDisposable
     public void SaveMonthlyBudget_null_or_nonpositive_clears()
     {
         using var db = new TempDb();
-        var svc = new BudgetService(new ConfigStore(_cfgDir), db.Factory);
+        var svc = new BudgetService(new ConfigStore(_dir), db.Factory);
         svc.SaveMonthlyBudget(100);
         svc.SaveMonthlyBudget(0); // clears
         Assert.Equal("unset", svc.GetBudgetStatus().Status);
@@ -135,7 +121,7 @@ public sealed class BudgetServiceTests : IDisposable
         AddReceiptOn(db.Conn, store, 120m, MonthDate(now));            // this month
         AddReceiptOn(db.Conn, store, 100m, MonthDate(now.AddYears(-1))); // same month last year
 
-        var config = new ConfigStore(_cfgDir);
+        var config = new ConfigStore(_dir);
         config.Save(config.Load() with
         {
             FoodInflationByYear = new Dictionary<string, double> { [now.Year.ToString()] = 4.3 },
@@ -155,7 +141,7 @@ public sealed class BudgetServiceTests : IDisposable
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         AddReceiptOn(db.Conn, store, 120m, MonthDate(DateTime.UtcNow)); // this month only
 
-        var ctx = new BudgetService(new ConfigStore(_cfgDir), db.Factory).GetInflationContext();
+        var ctx = new BudgetService(new ConfigStore(_dir), db.Factory).GetInflationContext();
 
         Assert.False(ctx.EnoughHistory);
         Assert.Null(ctx.SpendYoyPct);
@@ -169,7 +155,7 @@ public sealed class BudgetServiceTests : IDisposable
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         AddReceiptOn(db.Conn, store, 100m, MonthDate(DateTime.UtcNow.AddYears(-1))); // prior year only
 
-        var ctx = new BudgetService(new ConfigStore(_cfgDir), db.Factory).GetInflationContext();
+        var ctx = new BudgetService(new ConfigStore(_dir), db.Factory).GetInflationContext();
 
         Assert.False(ctx.EnoughHistory);
         Assert.Null(ctx.SpendYoyPct);

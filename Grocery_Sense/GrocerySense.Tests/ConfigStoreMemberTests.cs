@@ -1,13 +1,9 @@
 using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
-public sealed class ConfigStoreMemberTests : IDisposable
+public sealed class ConfigStoreMemberTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_cfgmem_{Guid.NewGuid():N}");
-    public ConfigStoreMemberTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { /* temp */ } }
 
     private ConfigStore New() => new(_dir);
 

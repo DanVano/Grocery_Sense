@@ -1,6 +1,5 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
-using Xunit;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
@@ -8,11 +7,9 @@ namespace GrocerySense.Tests;
 // Port of tests/planning/test_weekly_planner.py.
 public sealed class WeeklyPlannerServiceTests
 {
-    private static readonly string SampleFixture =
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
-
+    
     private static WeeklyPlannerService Planner(TempDb db) => new(
-        new MealSuggestionService(new RecipeEngine(SampleFixture), priceHistory: null, factory: db.Factory),
+        new MealSuggestionService(new RecipeEngine(Fixtures.RecipesSamplePath), priceHistory: null, factory: db.Factory),
         new IngredientMappingService(db.Factory), db.Factory);
 
     private static ShoppingListService List(TempDb db) => new(db.Factory, new IngredientMappingService(db.Factory));

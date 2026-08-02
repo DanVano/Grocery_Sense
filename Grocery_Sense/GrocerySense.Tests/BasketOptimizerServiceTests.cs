@@ -1,19 +1,15 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 // The 8 spec-driven golden cases for the BasketOptimizer redesign (PORTING.md Phase 4 verify), plus the
 // plan write-back + no-partial-rows tests.
-public sealed class BasketOptimizerServiceTests : IDisposable
+public sealed class BasketOptimizerServiceTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_opt_{Guid.NewGuid():N}");
-    public BasketOptimizerServiceTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
-    private static readonly string Today = DateTime.UtcNow.ToString("yyyy-MM-dd");
 
     private (BasketOptimizerService Svc, ConfigStore Config) Build(TempDb db)
     {
@@ -367,11 +363,7 @@ public sealed class BasketOptimizerServiceTests : IDisposable
         Price(db, milk, store, 10.0); // recent non-flyer price
 
         var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, store, Today, Today);
-        FlyersRepo.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
-            Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
-            Title: "Milk", Description: null, PriceText: null, DealQty: null, DealTotal: null,
-            UnitPrice: 7.0m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,
-            ItemId: milk, MappingConfidence: null, Confidence: null, CreatedAt: null) });
+        FlyersRepo.AddDeals(db.Conn, new[] { Deal(flyerId, store, "Milk", unitPrice: 7.0m, itemId: milk) });
 
         var plan = Assert.Single(Assert.Single(svc.Optimize("best_savings").Stores).Items);
         Assert.Equal("flyer", plan.Source);

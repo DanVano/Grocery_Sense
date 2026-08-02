@@ -2,7 +2,6 @@
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

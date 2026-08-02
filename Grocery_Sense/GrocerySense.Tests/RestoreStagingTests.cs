@@ -2,7 +2,6 @@ using GrocerySense.Core;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

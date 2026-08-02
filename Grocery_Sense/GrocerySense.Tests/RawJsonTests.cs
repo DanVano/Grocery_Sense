@@ -1,6 +1,5 @@
 using System.Text.Json;
 using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

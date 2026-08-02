@@ -1,14 +1,10 @@
 using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
-public sealed class PreferencesServiceTests : IDisposable
+public sealed class PreferencesServiceTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_pref_{Guid.NewGuid():N}");
 
-    public PreferencesServiceTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
     // Sets keys on the single master profile and saves.
     private ConfigStore SeedProfile(Action<Dictionary<string, object?>> mutate)

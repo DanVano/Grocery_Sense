@@ -1,5 +1,4 @@
 ﻿using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

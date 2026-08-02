@@ -4,6 +4,10 @@ namespace GrocerySense.Tests;
 
 internal static class Fixtures
 {
+    // The 8-recipe catalog every meal-planning test builds its RecipeEngine from.
+    public static readonly string RecipesSamplePath =
+        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
+
     private static readonly JsonSerializerOptions Opts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

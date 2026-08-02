@@ -1,21 +1,18 @@
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class FlyersRepoTests
 {
-    private static readonly string Yesterday = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd");
-    private static readonly string Tomorrow = DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd");
-    private static readonly string LastWeek = DateTime.UtcNow.AddDays(-7).ToString("yyyy-MM-dd");
 
     [Fact]
     public void Batch_assets_rawjson_and_deals_round_trip_money()
     {
         using var db = new TempDb();
         var storeId = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
-        var batch = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow, sourceType: "manual_upload");
+        var batch = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, DaysAgo(1), DaysAgo(-1), sourceType: "manual_upload");
         FlyersRepo.AddAsset(db.Conn, batch, "image", "/tmp/flyer.png", sha256: "abc");
         FlyersRepo.AddRawJson(db.Conn, batch, "{\"pages\":1}", sha256: "def");
 
@@ -40,13 +37,13 @@ public sealed class FlyersRepoTests
         using var db = new TempDb();
         var storeId = StoresRepo.CreateStore(db.Conn, "Sobeys").Id;
 
-        var live = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow);
+        var live = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, DaysAgo(1), DaysAgo(-1));
         FlyersRepo.AddDeals(db.Conn, new[] { Deal(live, storeId, "Live") });
 
-        var expired = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, LastWeek, Yesterday);
+        var expired = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, DaysAgo(7), DaysAgo(1));
         FlyersRepo.AddDeals(db.Conn, new[] { Deal(expired, storeId, "Expired") });
 
-        var archived = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, Yesterday, Tomorrow, status: "archived");
+        var archived = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, DaysAgo(1), DaysAgo(-1), status: "archived");
         FlyersRepo.AddDeals(db.Conn, new[] { Deal(archived, storeId, "Archived") });
 
         var active = FlyersRepo.ListActiveDeals(db.Conn);
@@ -57,6 +54,5 @@ public sealed class FlyersRepoTests
     }
 
     private static FlyerDeal Deal(int flyerId, int storeId, string title) =>
-        new(0, flyerId, null, storeId, null, title, null, null,
-            null, null, null, null, null, null, null, null, null, null, null);
+        TestSeed.Deal(flyerId, storeId, title, unit: null);
 }

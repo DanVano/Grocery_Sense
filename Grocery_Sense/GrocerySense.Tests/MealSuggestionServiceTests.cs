@@ -1,18 +1,16 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 // Port of tests/planning/test_meal_suggestion.py + the _compute_cost_estimate half of test_recipes_catalog.py.
 public sealed class MealSuggestionServiceTests
 {
-    private static readonly string SampleFixture =
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
-
+    
     private static MealSuggestionService Svc(TempDb db) =>
-        new(new RecipeEngine(SampleFixture), priceHistory: null, factory: db.Factory);
+        new(new RecipeEngine(Fixtures.RecipesSamplePath), priceHistory: null, factory: db.Factory);
 
     private static List<string> Names(IEnumerable<SuggestedMeal> s) => s.Select(m => m.Recipe.Name).ToList();
 
@@ -146,8 +144,8 @@ public sealed class MealSuggestionServiceTests
             today.AddDays(-1).ToString("yyyy-MM-dd"), today.AddDays(6).ToString("yyyy-MM-dd"), sourceType: "test");
         FlyersRepo.AddDeals(db.Conn, new[]
         {
-            new FlyerDeal(0, batch, null, store, null, "chicken thighs", "family pack", "$5.99/kg",
-                null, null, 5.99m, "kg", null, null, null, null, null, null, null),
+            Deal(batch, store, "chicken thighs", unitPrice: 5.99m, priceText: "$5.99/kg", unit: "kg")
+                with { Description = "family pack" },
         });
 
         var s = Svc(db).SuggestMealsForWeek(new MealProfile(), maxRecipes: 20);

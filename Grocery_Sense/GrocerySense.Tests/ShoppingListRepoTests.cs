@@ -1,5 +1,4 @@
 using GrocerySense.Data.Repositories;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

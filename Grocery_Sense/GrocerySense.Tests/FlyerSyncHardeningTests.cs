@@ -2,7 +2,7 @@ using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
-using Xunit;
+using static GrocerySense.Tests.OcrFixtures;
 
 namespace GrocerySense.Tests;
 
@@ -170,11 +170,9 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
         Assert.Equal(0L, Count("SELECT COUNT(*) FROM flyer_deals")); // stale deals did not outlive the sync
     }
 
-    private static GrocerySense.Domain.FlyerDeal NewDealRow(int flyerId, int storeId, string title) => new(
-        Id: 0, FlyerId: flyerId, AssetId: null, StoreId: storeId, PageIndex: null,
-        Title: title, Description: null, PriceText: "$1.00", DealQty: null, DealTotal: null,
-        UnitPrice: 1.00m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,
-        ItemId: null, MappingConfidence: null, Confidence: null, CreatedAt: null);
+    // TestSeed-qualified: the inherited Deal() builds a ProviderDeal, not a flyer_deals row.
+    private static GrocerySense.Domain.FlyerDeal NewDealRow(int flyerId, int storeId, string title) =>
+        TestSeed.Deal(flyerId, storeId, title, unitPrice: 1.00m, priceText: "$1.00");
 
     // ---------------- meta migration + shared gate ----------------
 
@@ -203,7 +201,7 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
         var gate = new FlyerMutationGate();
         var scheduler = new FlyerSyncScheduler(Build(new FuncProvider(_ => Array.Empty<ProviderDeal>())), gate);
         var mapper = new IngredientMappingService(_factory);
-        var ingest = new FlyerIngestService(new NullLayout(), new OcrGate(), gate, _factory, mapper,
+        var ingest = new FlyerIngestService(new FakeLayout(new()), new OcrGate(), gate, _factory, mapper,
             new DealEnricher(mapper, new UnitNormalizationService(), new MultiBuyDealService()));
 
         Assert.True(gate.TryEnter()); // something else holds the flyer-write gate
@@ -226,10 +224,4 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
         Assert.Null(after.SkippedReason);
     }
 
-    private sealed class NullLayout : IFlyerLayoutClient
-    {
-        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeLayoutFileAsync(
-            string filePath, CancellationToken ct = default) =>
-            Task.FromResult(("op", new Dictionary<string, object?>()));
-    }
 }

@@ -1,7 +1,6 @@
 using GrocerySense.Core;
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

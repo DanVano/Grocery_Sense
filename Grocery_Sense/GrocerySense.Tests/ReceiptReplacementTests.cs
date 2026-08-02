@@ -3,40 +3,25 @@ using GrocerySense.Core.Abstractions;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
-using Xunit;
 using static GrocerySense.Tests.OcrFixtures;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 // P0-1 hardening: replacement is atomic. Prepare only observes duplicate owners; the commit transaction
 // re-reads them, backup-deletes exactly the observed owner, and inserts — or leaves everything untouched.
-public sealed class ReceiptReplacementTests : IDisposable
+public sealed class ReceiptReplacementTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_replace_{Guid.NewGuid():N}");
-    public ReceiptReplacementTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
     private static ReceiptIngestionService Build(TempDb db, IReceiptOcrClient ocr) =>
         new(ocr, new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
             new UnitNormalizationService(), new MultiBuyDealService());
 
-    private string WriteFile(string content)
-    {
-        var path = Path.Combine(_dir, $"{Guid.NewGuid():N}.jpg");
-        File.WriteAllText(path, content);
-        return path;
-    }
 
-    private static long Count(TempDb db, string table)
-    {
-        using var cmd = db.Conn.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
-        return (long)cmd.ExecuteScalar()!;
-    }
 
     private static (long Receipts, long Prices, long Hashes, long Sigs, long Backups) Snapshot(TempDb db) =>
-        (Count(db, "receipts"), Count(db, "prices"), Count(db, "receipt_file_hashes"),
-         Count(db, "receipt_signatures"), Count(db, "deleted_receipt_backups"));
+        (Count(db.Conn, "receipts"), Count(db.Conn, "prices"), Count(db.Conn, "receipt_file_hashes"),
+         Count(db.Conn, "receipt_signatures"), Count(db.Conn, "deleted_receipt_backups"));
 
     [Fact]
     public async Task Ocr_failure_during_replace_prepare_leaves_the_original_untouched()
@@ -121,7 +106,7 @@ public sealed class ReceiptReplacementTests : IDisposable
 
         Assert.Throws<OperationCanceledException>(() => svc.CommitPreparedReceipt(prepared, null, cts.Token));
 
-        Assert.Equal(0L, Count(db, "receipts"));
+        Assert.Equal(0L, Count(db.Conn, "receipts"));
     }
 
     [Fact]
@@ -168,7 +153,7 @@ public sealed class ReceiptReplacementTests : IDisposable
         Assert.True(outcome.WasDuplicate);
         Assert.False(outcome.ReplaceConflict);
         Assert.Equal(winner.ReceiptId, outcome.ReceiptId);
-        Assert.Equal(1L, Count(db, "receipts"));
+        Assert.Equal(1L, Count(db.Conn, "receipts"));
     }
 
     [Fact]
@@ -186,7 +171,7 @@ public sealed class ReceiptReplacementTests : IDisposable
         Assert.NotEqual(first.ReceiptId, replaced.ReceiptId);
         Assert.Null(ReceiptsRepo.GetReceipt(db.Conn, first.ReceiptId!.Value));
         Assert.NotNull(ReceiptsRepo.GetReceipt(db.Conn, replaced.ReceiptId!.Value));
-        Assert.Equal(1L, Count(db, "receipts"));
-        Assert.Equal(1L, Count(db, "deleted_receipt_backups"));
+        Assert.Equal(1L, Count(db.Conn, "receipts"));
+        Assert.Equal(1L, Count(db.Conn, "deleted_receipt_backups"));
     }
 }

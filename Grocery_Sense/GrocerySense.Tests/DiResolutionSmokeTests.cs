@@ -4,12 +4,24 @@ using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public class DiResolutionSmokeTests
 {
+    // AddGrocerySenseCore plus the four head-bound abstractions every registration graph needs.
+    private static ServiceCollection CoreServices(string dbPath)
+    {
+        var services = new ServiceCollection();
+        services.AddGrocerySenseCore(dbPath);
+        services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
+        services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
+        services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
+        services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
+        return services;
+    }
+
     private sealed class FakeOcrClient : IReceiptOcrClient
     {
         public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
@@ -41,12 +53,7 @@ public class DiResolutionSmokeTests
     public void Every_registered_service_resolves()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"gs_smoke_{Guid.NewGuid():N}.db");
-        var services = new ServiceCollection();
-        services.AddGrocerySenseCore(dbPath);
-        services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
-        services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
-        services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
-        services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
+        var services = CoreServices(dbPath);
 
         using var provider = services.BuildServiceProvider(validateScopes: true);
 
@@ -64,12 +71,7 @@ public class DiResolutionSmokeTests
     public void Paid_ocr_and_flyer_write_gates_are_singletons_so_the_services_share_them()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"gs_gates_{Guid.NewGuid():N}.db");
-        var services = new ServiceCollection();
-        services.AddGrocerySenseCore(dbPath);
-        services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
-        services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
-        services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
-        services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
+        var services = CoreServices(dbPath);
 
         using var provider = services.BuildServiceProvider(validateScopes: true);
 
@@ -84,12 +86,7 @@ public class DiResolutionSmokeTests
         Directory.CreateDirectory(dir);
         try
         {
-            var services = new ServiceCollection();
-            services.AddGrocerySenseCore(Path.Combine(dir, "test.db"));
-            services.AddSingleton<IReceiptOcrClient, FakeOcrClient>();
-            services.AddSingleton<IFlyerProvider, FakeFlyerProvider>();
-            services.AddSingleton<IFlyerLayoutClient, FakeFlyerLayoutClient>();
-            services.AddSingleton<ILocalNotifier, FakeLocalNotifier>();
+            var services = CoreServices(Path.Combine(dir, "test.db"));
             using var provider = services.BuildServiceProvider(validateScopes: true);
 
             var factory = provider.GetRequiredService<SqliteConnectionFactory>();
@@ -106,23 +103,13 @@ public class DiResolutionSmokeTests
         finally { try { Directory.Delete(dir, recursive: true); } catch { /* temp */ } }
     }
 
-    // Staple with a 30% drop: 4 receipts @ $10 (usual), one today @ $7. Mirrors
-    // PriceDropAlertServiceTests.SeedStapleWithDrop (kept local — different connection shape).
+    // Staple with a 30% drop: 4 receipts @ $10 (usual), one today @ $7.
     private static void SeedStapleWithDrop(SqliteConnection conn)
     {
-        static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
         var store = StoresRepo.CreateStore(conn, "Loblaws").Id;
         var item = ItemsRepo.CreateItem(conn, "Milk").Id;
         foreach (var d in new[] { 40, 30, 20, 10, 0 })
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                "INSERT INTO receipts (store_id, purchase_date, source) VALUES ($s, $d, 'receipt'); SELECT last_insert_rowid();";
-            cmd.Parameters.AddWithValue("$s", store);
-            cmd.Parameters.AddWithValue("$d", DaysAgo(d));
-            var rid = (int)(long)cmd.ExecuteScalar()!;
             PricesRepo.AddPricePoint(conn, item, store, d == 0 ? 7.0 : 10.0, "each",
-                source: "receipt", date: DaysAgo(d), receiptId: rid);
-        }
+                source: "receipt", date: DaysAgo(d), receiptId: AddReceipt(conn, store, DaysAgo(d)));
     }
 }

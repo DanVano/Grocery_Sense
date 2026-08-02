@@ -1,15 +1,12 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
-using Xunit;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class MealSuggestionMarginalCostTests
 {
-    private static readonly string SampleFixture =
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
-
+    
 
     // Receipt purchases spaced 10 days apart ending `lastDaysAgo` ago -> cadence 10d + a price baseline.
     private static void SeedItemHistory(TempDb db, int storeId, string name, double price, int lastDaysAgo)
@@ -24,7 +21,7 @@ public sealed class MealSuggestionMarginalCostTests
     }
 
     private static MealSuggestionService Service(TempDb db) => new(
-        new RecipeEngine(SampleFixture), new PriceHistoryService(db.Factory), db.Factory);
+        new RecipeEngine(Fixtures.RecipesSamplePath), new PriceHistoryService(db.Factory), db.Factory);
 
     [Fact]
     public void Likely_have_ingredient_reduces_marginal_cost()
@@ -48,7 +45,7 @@ public sealed class MealSuggestionMarginalCostTests
     [Fact]
     public void Without_factory_marginal_fields_stay_null()
     {
-        var svc = new MealSuggestionService(new RecipeEngine(SampleFixture));
+        var svc = new MealSuggestionService(new RecipeEngine(Fixtures.RecipesSamplePath));
         var meal = svc.SuggestMealsForWeek(maxRecipes: 1)[0];
         Assert.Null(meal.MarginalCostTotal);
         Assert.Null(meal.NewIngredientCount);
@@ -62,17 +59,11 @@ public sealed class MealSuggestionMarginalCostTests
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         SeedItemHistory(db, store, "rice", 4.0, lastDaysAgo: 2);
 
-        long Count(string table)
-        {
-            using var cmd = db.Conn.CreateCommand();
-            cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
-            return (long)cmd.ExecuteScalar()!;
-        }
 
-        var aliasesBefore = Count("item_aliases");
-        var itemsBefore = Count("items");
+        var aliasesBefore = Count(db.Conn, "item_aliases");
+        var itemsBefore = Count(db.Conn, "items");
         Service(db).SuggestMealsForWeek(maxRecipes: 20);
-        Assert.Equal(aliasesBefore, Count("item_aliases")); // regression guard: browsing must never write
-        Assert.Equal(itemsBefore, Count("items"));
+        Assert.Equal(aliasesBefore, Count(db.Conn, "item_aliases")); // regression guard: browsing must never write
+        Assert.Equal(itemsBefore, Count(db.Conn, "items"));
     }
 }

@@ -174,7 +174,9 @@ public sealed class FlyerIngestService
     internal sealed record ExtractedDeal(int? PageIndex, string Title, string Description, string PriceText, double? Confidence);
 
     // Walks each page's lines; a line with a price-like token is a deal anchor, the 1-2 prior lines its title/desc.
-    internal IReadOnlyList<ExtractedDeal> ExtractDealsFromLayout(Dictionary<string, object?> analyzeResult)
+    // Static: pure parsing over the layout payload, no instance state — so tests can call it without
+    // standing up a service and a DB.
+    internal static IReadOnlyList<ExtractedDeal> ExtractDealsFromLayout(Dictionary<string, object?> analyzeResult)
     {
         var outv = new List<ExtractedDeal>();
         var pages = AsList(analyzeResult.GetValueOrDefault("pages"));

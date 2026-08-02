@@ -1,6 +1,5 @@
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

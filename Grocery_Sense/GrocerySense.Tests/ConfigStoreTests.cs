@@ -1,15 +1,11 @@
 using System.Text.Json;
 using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
-public sealed class ConfigStoreTests : IDisposable
+public sealed class ConfigStoreTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_cfg_{Guid.NewGuid():N}");
 
-    public ConfigStoreTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
     private ConfigStore New() => new(_dir);
     private string ConfigPath => Path.Combine(_dir, "user_config.json");

@@ -1,7 +1,6 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
@@ -157,11 +156,7 @@ public sealed class PriceDropAlertServiceTests
             PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "receipt", date: DaysAgo(d), receiptId: rid);
         }
         var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, store, DaysAgo(1), DaysAgo(-6));
-        FlyersRepo.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
-            Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
-            Title: "Milk", Description: null, PriceText: null, DealQty: null, DealTotal: null,
-            UnitPrice: 7.0m, Unit: "each", NormUnitPrice: null, NormUnit: null, NormNote: null,
-            ItemId: item, MappingConfidence: null, Confidence: null, CreatedAt: null) });
+        FlyersRepo.AddDeals(db.Conn, new[] { Deal(flyerId, store, "Milk", unitPrice: 7.0m, itemId: item) });
         var svc = new PriceDropAlertService(db.Factory);
 
         Assert.Equal(1, svc.RefreshEngineAlerts());

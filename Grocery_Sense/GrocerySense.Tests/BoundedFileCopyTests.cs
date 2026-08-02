@@ -2,12 +2,9 @@ using GrocerySense.Core;
 
 namespace GrocerySense.Tests;
 
-public sealed class BoundedFileCopyTests : IDisposable
+public sealed class BoundedFileCopyTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_copy_{Guid.NewGuid():N}");
 
-    public BoundedFileCopyTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { /* temp */ } }
 
     [Fact]
     public async Task Oversized_source_throws_and_removes_partial_file()

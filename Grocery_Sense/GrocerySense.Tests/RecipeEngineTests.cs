@@ -1,28 +1,17 @@
 using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
 // Port of tests/planning/test_recipe_engine.py + the catalog-integrity half of test_recipes_catalog.py.
 // Dropped as Python-only quirks (noted): the str()-coercion of non-string ingredients (C# is typed), and
 // the module-singleton delegation tests (C# injects an engine instance — no global).
-public sealed class RecipeEngineTests : IDisposable
+public sealed class RecipeEngineTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_recipes_{Guid.NewGuid():N}");
-    public RecipeEngineTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { /* temp */ } }
 
-    private static readonly string SampleFixture =
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
+    
+    private RecipeEngine Sample() => new(Fixtures.RecipesSamplePath);
 
-    private RecipeEngine Sample() => new(SampleFixture);
-
-    private string WriteJson(string content)
-    {
-        var path = Path.Combine(_dir, $"{Guid.NewGuid():N}.json");
-        File.WriteAllText(path, content);
-        return path;
-    }
+    private string WriteJson(string content) => WriteFile(content, ".json");
 
     // ---- normalization on load ----
 

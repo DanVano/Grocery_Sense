@@ -1,19 +1,15 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
-public sealed class ShoppingInsightsServiceTests : IDisposable
+public sealed class ShoppingInsightsServiceTests : TempDirTestBase
 {
     // Per-test config dir: ConfigStore writes user_config.json beside the DB in prod; tests isolate it.
-    private readonly string _cfgDir = Path.Combine(Path.GetTempPath(), $"gs_insights_{Guid.NewGuid():N}");
 
-    public ShoppingInsightsServiceTests() => Directory.CreateDirectory(_cfgDir);
 
-    public void Dispose() { try { Directory.Delete(_cfgDir, recursive: true); } catch { /* temp */ } }
 
 
     // Usual = receipt median $10 (4 samples, satisfies MinReceiptSamplesForUsual), quantity=1 per receipt
@@ -28,7 +24,7 @@ public sealed class ShoppingInsightsServiceTests : IDisposable
         }
     }
 
-    private ShoppingInsightsService Svc(TempDb db) => new(db.Factory, new ConfigStore(_cfgDir));
+    private ShoppingInsightsService Svc(TempDb db) => new(db.Factory, new ConfigStore(_dir));
 
     [Fact]
     public void Buy_badge_when_current_is_15pct_below_usual_but_not_near_low()

@@ -1,7 +1,7 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -231,11 +231,7 @@ public sealed class ShoppingListServiceTests
     }
 
     private static FlyerDeal MakeDeal(int storeId, string title, string priceText, int? itemId) =>
-        new(Id: 0, FlyerId: 0, AssetId: null, StoreId: storeId, PageIndex: null,
-            Title: title, Description: null, PriceText: priceText,
-            DealQty: null, DealTotal: null, UnitPrice: null, Unit: null,
-            NormUnitPrice: null, NormUnit: null, NormNote: null,
-            ItemId: itemId, MappingConfidence: null, Confidence: null, CreatedAt: null);
+        Deal(0, storeId, title, itemId: itemId, priceText: priceText, unit: null);
 
     private static PriceDropAlert MakeAlert(int itemId, string itemName, int storeId, double? suggestedQty, string? note) =>
         new(ItemId: itemId, ItemName: itemName, StoreId: storeId, StoreName: "Loblaws",

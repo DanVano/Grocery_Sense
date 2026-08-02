@@ -1,7 +1,7 @@
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
@@ -307,12 +307,6 @@ public sealed class ReceiptsRepoTests
         cmd.ExecuteNonQuery();
     }
 
-    private static int Count(SqliteConnection conn, string table)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
-        return Convert.ToInt32(cmd.ExecuteScalar());
-    }
 
     private static int SignatureReceiptId(SqliteConnection conn, string sig)
     {

@@ -1,13 +1,10 @@
 using GrocerySense.Core;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
 public sealed class UserRecipeServiceTests
 {
-    private static readonly string SampleFixture =
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
-
+    
     [Fact]
     public void ListAsRecipes_normalizes_and_offsets_ids()
     {
@@ -50,7 +47,7 @@ public sealed class UserRecipeServiceTests
         svc.Add("Beef Stir Fry", 2, new[] { "beef", "peppers" }, [], []); // same name as catalog recipe
         svc.Add("Dad's Chili", 6, new[] { "ground beef", "beans" }, [], []);
 
-        var engine = new RecipeEngine(SampleFixture, extraRecipes: svc.ListAsRecipes);
+        var engine = new RecipeEngine(Fixtures.RecipesSamplePath, extraRecipes: svc.ListAsRecipes);
         var all = engine.LoadAllRecipes();
 
         Assert.Single(all, r => r.Name == "Beef Stir Fry");                     // no duplicate
@@ -66,7 +63,7 @@ public sealed class UserRecipeServiceTests
         var svc = new UserRecipeService(db.Factory);
         svc.Add("Peanut Bomb", 2, new[] { "peanuts", "noodles" }, [], []);
 
-        var engine = new RecipeEngine(SampleFixture, extraRecipes: svc.ListAsRecipes);
+        var engine = new RecipeEngine(Fixtures.RecipesSamplePath, extraRecipes: svc.ListAsRecipes);
         var safe = engine.RecipesMatchingProfile(new MealProfile { Allergies = new[] { "peanuts" } });
         Assert.DoesNotContain(safe, r => r.Name == "Peanut Bomb");
     }
@@ -76,7 +73,7 @@ public sealed class UserRecipeServiceTests
     {
         using var db = new TempDb();
         var svc = new UserRecipeService(db.Factory);
-        var engine = new RecipeEngine(SampleFixture, extraRecipes: svc.ListAsRecipes);
+        var engine = new RecipeEngine(Fixtures.RecipesSamplePath, extraRecipes: svc.ListAsRecipes);
         Assert.Equal(8, engine.LoadAllRecipes().Count);
         svc.Add("Dad's Chili", 6, new[] { "beef" }, [], []);
         Assert.Equal(9, engine.LoadAllRecipes().Count); // extras re-read per call

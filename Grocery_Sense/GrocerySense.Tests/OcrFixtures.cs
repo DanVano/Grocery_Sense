@@ -9,10 +9,28 @@ namespace GrocerySense.Tests;
 internal static class OcrFixtures
 {
     // Returns a fixed canned AnalyzeResult regardless of file (so two different files dedupe by signature).
+    // Calls counts invocations — the spend-bounds tests assert a rejected request burns zero paid calls.
     internal sealed class FakeOcr(Dictionary<string, object?> raw, string op = "op-1") : IReceiptOcrClient
     {
+        public int Calls;
         public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeReceiptFileAsync(
-            string filePath, CancellationToken ct = default) => Task.FromResult((op, raw));
+            string filePath, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult((op, raw));
+        }
+    }
+
+    // The layout-client twin of FakeOcr.
+    internal sealed class FakeLayout(Dictionary<string, object?> raw, string op = "op-1") : IFlyerLayoutClient
+    {
+        public int Calls;
+        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeLayoutFileAsync(
+            string filePath, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult((op, raw));
+        }
     }
 
     // Dequeues one canned result per call; a null entry throws (mid-batch OCR failure).

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using GrocerySense.Integrations;
-using Xunit;
 
 namespace GrocerySense.Tests;
 

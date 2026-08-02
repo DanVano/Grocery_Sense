@@ -1,15 +1,11 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 
 namespace GrocerySense.Tests;
 
-public sealed class DbMaintenanceServiceTests : IDisposable
+public sealed class DbMaintenanceServiceTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_dbmaint_{Guid.NewGuid():N}");
-    public DbMaintenanceServiceTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { /* temp */ } }
 
     private static void SeedReceiptWithMoney(TempDb db, string total)
     {

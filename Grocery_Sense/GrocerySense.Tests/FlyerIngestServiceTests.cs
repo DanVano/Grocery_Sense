@@ -3,23 +3,15 @@ using GrocerySense.Core.Abstractions;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
-using Xunit;
+using static GrocerySense.Tests.OcrFixtures;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
-public sealed class FlyerIngestServiceTests : IDisposable
+public sealed class FlyerIngestServiceTests : TempDirTestBase
 {
-    private readonly string _rawDir = Path.Combine(Path.GetTempPath(), $"gs_flyer_{Guid.NewGuid():N}");
-    public FlyerIngestServiceTests() => Directory.CreateDirectory(_rawDir);
-    public void Dispose() { try { Directory.Delete(_rawDir, recursive: true); } catch { /* temp */ } }
 
     // Returns a fixed canned layout regardless of file path (mirrors the receipt FakeOcr).
-    private sealed class FakeLayout(Dictionary<string, object?> raw, string op = "op-1") : IFlyerLayoutClient
-    {
-        public Task<(string OperationId, Dictionary<string, object?> RawJson)> AnalyzeLayoutFileAsync(
-            string filePath, CancellationToken ct = default) => Task.FromResult((op, raw));
-    }
-
     private FlyerIngestService Build(TempDb db, Dictionary<string, object?> layout)
     {
         var mapper = new IngredientMappingService(db.Factory);
@@ -27,12 +19,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
             new DealEnricher(mapper, new UnitNormalizationService(), new MultiBuyDealService()));
     }
 
-    private string WriteAsset(string content)
-    {
-        var path = Path.Combine(_rawDir, $"{Guid.NewGuid():N}.png");
-        File.WriteAllText(path, content);
-        return path;
-    }
+    private string WriteAsset(string content) => WriteFile(content, ".png");
 
     private static Dictionary<string, object?> Line(string content, double conf) =>
         new() { ["content"] = content, ["confidence"] = conf };
@@ -83,9 +70,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
     [Fact]
     public void ExtractDealsFromLayout_skips_header_and_finds_price_anchors()
     {
-        using var db = new TempDb();
-        var svc = Build(db, CannedLayout());
-        var deals = svc.ExtractDealsFromLayout(CannedLayout());
+        var deals = FlyerIngestService.ExtractDealsFromLayout(CannedLayout());
 
         Assert.DoesNotContain("Header row — no price here", deals.Select(d => d.Title));
         var priceTexts = deals.Select(d => d.PriceText).ToList();
@@ -99,8 +84,6 @@ public sealed class FlyerIngestServiceTests : IDisposable
     [Fact]
     public void ExtractDealsFromLayout_title_uses_prior_line()
     {
-        using var db = new TempDb();
-        var svc = Build(db, CannedLayout());
         var layout = new Dictionary<string, object?>
         {
             ["pages"] = new List<object?>
@@ -117,7 +100,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
             },
         };
 
-        var deal = Assert.Single(svc.ExtractDealsFromLayout(layout));
+        var deal = Assert.Single(FlyerIngestService.ExtractDealsFromLayout(layout));
         Assert.Equal("Family Pack", deal.Title);
         Assert.Contains("Chicken Thighs", deal.Description);
     }
@@ -125,11 +108,9 @@ public sealed class FlyerIngestServiceTests : IDisposable
     [Fact]
     public void ExtractDealsFromLayout_handles_empty_and_malformed()
     {
-        using var db = new TempDb();
-        var svc = Build(db, CannedLayout());
 
-        Assert.Empty(svc.ExtractDealsFromLayout(new()));
-        Assert.Empty(svc.ExtractDealsFromLayout(new() { ["pages"] = new List<object?>() }));
+        Assert.Empty(FlyerIngestService.ExtractDealsFromLayout(new()));
+        Assert.Empty(FlyerIngestService.ExtractDealsFromLayout(new() { ["pages"] = new List<object?>() }));
 
         var malformed = new Dictionary<string, object?>
         {
@@ -146,7 +127,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
                 },
             },
         };
-        var deal = Assert.Single(svc.ExtractDealsFromLayout(malformed));
+        var deal = Assert.Single(FlyerIngestService.ExtractDealsFromLayout(malformed));
         Assert.Equal("$3.99", deal.PriceText);
     }
 
@@ -174,7 +155,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
             Assert.Equal(5L, cmd.ExecuteScalar());
         }
         // Raw JSON is persisted to SQLite only (RawJsonCount above) — no plaintext copy on disk.
-        Assert.Empty(Directory.GetFiles(_rawDir, "*.json"));
+        Assert.Empty(Directory.GetFiles(_dir, "*.json"));
     }
 
     // Split-brain regression (flyer unification): a manually ingested, mapped deal must surface through
@@ -217,7 +198,7 @@ public sealed class FlyerIngestServiceTests : IDisposable
         var svc = Build(db, CannedLayout());
 
         var result = await svc.IngestAssetsAsync(storeId, null, null,
-            new[] { Path.Combine(_rawDir, "does-not-exist.png") });
+            new[] { Path.Combine(_dir, "does-not-exist.png") });
 
         Assert.True(result.FlyerId > 0);
         Assert.Equal(0, result.AssetsCount);
@@ -237,21 +218,14 @@ public sealed class FlyerIngestServiceTests : IDisposable
             var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, "2026-06-20", "2026-06-27", tx: tx);
             FlyersRepo.AddAsset(db.Conn, flyerId, "image", "/tmp/f.png", "sha", tx);
             // deal pointing at a non-existent flyer_id -> FK violation on flyer_deals.flyer_id.
-            var poisoned = new FlyerDeal(0, 999999, null, storeId, 0, "X", null, "$1", null, 1m, 1m, "each",
-                null, null, null, null, null, null, null);
+            var poisoned = Deal(999999, storeId, "X", unitPrice: 1m, priceText: "$1"); // FK to a missing batch
             Assert.ThrowsAny<SqliteException>(() => FlyersRepo.AddDeals(db.Conn, new[] { poisoned }, tx));
             tx.Rollback();
         }
 
-        Assert.Equal(0L, ScalarCount(db.Conn, "flyer_batches"));
-        Assert.Equal(0L, ScalarCount(db.Conn, "flyer_assets"));
-        Assert.Equal(0L, ScalarCount(db.Conn, "flyer_deals"));
+        Assert.Equal(0L, Count(db.Conn, "flyer_batches"));
+        Assert.Equal(0L, Count(db.Conn, "flyer_assets"));
+        Assert.Equal(0L, Count(db.Conn, "flyer_deals"));
     }
 
-    private static long ScalarCount(SqliteConnection conn, string table)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
-        return (long)cmd.ExecuteScalar()!;
-    }
 }

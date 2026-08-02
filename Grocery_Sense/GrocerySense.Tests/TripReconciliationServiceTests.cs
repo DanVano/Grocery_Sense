@@ -1,13 +1,11 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
-using Xunit;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class TripReconciliationServiceTests
 {
-    private static string Today => DateTime.UtcNow.ToString("yyyy-MM-dd");
 
 
     private static void AddLine(TempDb db, int receiptId, int lineIndex, int? itemId, string desc,
@@ -28,22 +26,6 @@ public sealed class TripReconciliationServiceTests
         cmd.ExecuteNonQuery();
     }
 
-    private static void SeedActiveFlyerDeal(TempDb db, int storeId, int itemId, string title, string unitPrice,
-        string? unit = null)
-    {
-        using var cmd = db.Conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO flyer_batches (store_id, status, imported_at) VALUES ($s, 'active', datetime('now'));
-            INSERT INTO flyer_deals (flyer_id, store_id, item_id, title, unit_price, unit, created_at)
-            VALUES (last_insert_rowid(), $s, $item, $t, $p, $u, datetime('now'));
-            """;
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$item", itemId);
-        cmd.Parameters.AddWithValue("$t", title);
-        cmd.Parameters.AddWithValue("$p", unitPrice);
-        cmd.Parameters.AddWithValue("$u", (object?)unit ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
-    }
 
     [Fact]
     public void Flags_paid_above_current_flyer_price()
@@ -51,7 +33,7 @@ public sealed class TripReconciliationServiceTests
         using var db = new TempDb();
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var chicken = ItemsRepo.CreateItem(db.Conn, "chicken").Id;
-        SeedActiveFlyerDeal(db, store, chicken, "chicken", "2.00");
+        SeedActiveFlyerDeal(db, store, "chicken", "2.00", itemId: chicken);
         ShoppingListRepo.AddItem(db.Conn, "chicken", itemId: chicken, plannedStoreId: store);
 
         var rid = AddReceipt(db, store, Today);
@@ -71,7 +53,7 @@ public sealed class TripReconciliationServiceTests
         using var db = new TempDb();
         var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
         var beef = ItemsRepo.CreateItem(db.Conn, "beef").Id;
-        SeedActiveFlyerDeal(db, store, beef, "beef", "8.80", unit: "kg"); // per-kg — line unit unknown
+        SeedActiveFlyerDeal(db, store, "beef", "8.80", itemId: beef, unit: "kg"); // per-kg — line unit unknown
         ShoppingListRepo.AddItem(db.Conn, "beef", itemId: beef, plannedStoreId: store);
 
         var rid = AddReceipt(db, store, Today);

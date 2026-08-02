@@ -1,14 +1,12 @@
 using GrocerySense.Data;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
 public sealed class PricesRepoTests
 {
-    private static string Today => DateTime.UtcNow.ToString("yyyy-MM-dd");
 
     private static (int item, int store) Seed(TempDb db, string item = "Milk", string store = "Loblaws")
         => (ItemsRepo.CreateItem(db.Conn, item).Id, StoresRepo.CreateStore(db.Conn, store).Id);
@@ -173,11 +171,8 @@ public sealed class PricesRepoTests
 
     private static void MakeDeal(TempDb db, int flyerId, int store, int? item, decimal? unitPrice,
         decimal? normUnitPrice = null, string? normUnit = null)
-        => FlyersRepo.AddDeals(db.Conn, new[] { new GrocerySense.Domain.FlyerDeal(
-            Id: 0, FlyerId: flyerId, AssetId: null, StoreId: store, PageIndex: null,
-            Title: "t", Description: null, PriceText: null, DealQty: null, DealTotal: null,
-            UnitPrice: unitPrice, Unit: "each", NormUnitPrice: normUnitPrice, NormUnit: normUnit,
-            NormNote: null, ItemId: item, MappingConfidence: null, Confidence: null, CreatedAt: null) });
+        => FlyersRepo.AddDeals(db.Conn, new[] { Deal(flyerId, store, unitPrice: unitPrice, itemId: item,
+            normUnitPrice: normUnitPrice, normUnit: normUnit) });
 
     [Fact]
     public void ActiveFlyerPricesBatch_returns_min_active_deal_and_skips_inactive_expired_unmapped()

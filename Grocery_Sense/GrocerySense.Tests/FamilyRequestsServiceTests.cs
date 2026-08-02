@@ -1,23 +1,18 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
-using Xunit;
+using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
 
-public sealed class FamilyRequestsServiceTests : IDisposable
+public sealed class FamilyRequestsServiceTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_family_{Guid.NewGuid():N}");
-    public FamilyRequestsServiceTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { /* temp */ } }
 
-    private static readonly string SampleFixture =
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "recipes_sample.json");
-
+    
     private (FamilyRequestsService Svc, ConfigStore Config, ShoppingListService List) Build(TempDb db)
     {
         var config = new ConfigStore(_dir);
         var list = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
-        var svc = new FamilyRequestsService(config, new RecipeEngine(SampleFixture),
+        var svc = new FamilyRequestsService(config, new RecipeEngine(Fixtures.RecipesSamplePath),
             new PreferencesService(config), new IngredientMappingService(db.Factory), db.Factory);
         return (svc, config, list);
     }
@@ -26,26 +21,13 @@ public sealed class FamilyRequestsServiceTests : IDisposable
     private (FamilyRequestsService Svc, ConfigStore Config) BuildWithMeals(TempDb db)
     {
         var config = new ConfigStore(_dir);
-        var engine = new RecipeEngine(SampleFixture);
+        var engine = new RecipeEngine(Fixtures.RecipesSamplePath);
         var meals = new MealSuggestionService(engine, priceHistory: null, factory: db.Factory);
         var svc = new FamilyRequestsService(config, engine, new PreferencesService(config),
             new IngredientMappingService(db.Factory), db.Factory, meals);
         return (svc, config);
     }
 
-    private static void SeedActiveFlyerDeal(TempDb db, int storeId, string title, string unitPrice)
-    {
-        using var cmd = db.Conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO flyer_batches (store_id, status, imported_at) VALUES ($s, 'active', datetime('now'));
-            INSERT INTO flyer_deals (flyer_id, store_id, title, unit_price, created_at)
-            VALUES (last_insert_rowid(), $s, $t, $p, datetime('now'));
-            """;
-        cmd.Parameters.AddWithValue("$s", storeId);
-        cmd.Parameters.AddWithValue("$t", title);
-        cmd.Parameters.AddWithValue("$p", unitPrice);
-        cmd.ExecuteNonQuery();
-    }
 
     private void SetMasterAllergies(ConfigStore config, params string[] allergies)
     {

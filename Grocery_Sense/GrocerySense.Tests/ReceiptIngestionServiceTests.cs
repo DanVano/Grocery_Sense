@@ -4,16 +4,12 @@ using GrocerySense.Core.Abstractions;
 using GrocerySense.Data.Repositories;
 using GrocerySense.Domain;
 using Microsoft.Data.Sqlite;
-using Xunit;
 using static GrocerySense.Tests.OcrFixtures;
 
 namespace GrocerySense.Tests;
 
-public sealed class ReceiptIngestionServiceTests : IDisposable
+public sealed class ReceiptIngestionServiceTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_ingest_{Guid.NewGuid():N}");
-    public ReceiptIngestionServiceTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
     private ReceiptIngestionService Build(TempDb db, Dictionary<string, object?> raw) =>
         new(new FakeOcr(raw), new OcrGate(), db.Factory, new IngredientMappingService(db.Factory),
@@ -31,12 +27,6 @@ public sealed class ReceiptIngestionServiceTests : IDisposable
         return cmd.ExecuteScalar() as string;
     }
 
-    private string WriteFile(string content)
-    {
-        var path = Path.Combine(_dir, $"{Guid.NewGuid():N}.jpg");
-        File.WriteAllText(path, content);
-        return path;
-    }
 
     [Fact]
     public async Task Ingest_writes_receipt_line_items_and_prices()

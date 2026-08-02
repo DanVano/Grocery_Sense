@@ -2,7 +2,6 @@ using GrocerySense.Core;
 using GrocerySense.Core.Abstractions;
 using GrocerySense.Data.Repositories;
 using Microsoft.Data.Sqlite;
-using Xunit;
 using static GrocerySense.Tests.OcrFixtures;
 
 namespace GrocerySense.Tests;
@@ -10,11 +9,8 @@ namespace GrocerySense.Tests;
 // The single-scan coordinator: ingest then the price-alert pass, with partial success. The key case is that
 // an alert-step failure (a DB throw before the notifier guard) leaves the receipt imported — the App must
 // keep the image, not delete it.
-public sealed class ScanIngestServiceTests : IDisposable
+public sealed class ScanIngestServiceTests : TempDirTestBase
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"gs_scaningest_{Guid.NewGuid():N}");
-    public ScanIngestServiceTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ } }
 
     private ScanIngestService BuildSeq(TempDb db, params Dictionary<string, object?>?[] raws)
     {
@@ -47,12 +43,6 @@ public sealed class ScanIngestServiceTests : IDisposable
         return new ScanIngestService(ingest, scanAlerts);
     }
 
-    private string WriteFile(string content)
-    {
-        var path = Path.Combine(_dir, $"{Guid.NewGuid():N}.jpg");
-        File.WriteAllText(path, content);
-        return path;
-    }
 
     [Fact]
     public async Task Imports_the_receipt_and_runs_the_alert_pass()
