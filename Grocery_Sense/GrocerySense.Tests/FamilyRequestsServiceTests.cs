@@ -32,10 +32,7 @@ public sealed class FamilyRequestsServiceTests : TempDirTestBase
     private void SetMasterAllergies(ConfigStore config, params string[] allergies)
     {
         var cfg = config.Load();
-        var master = config.GetMasterMember();
-        var profile = new Dictionary<string, object?>(master.Profile) { ["allergies"] = allergies.ToList() };
-        var members = cfg.Household.Members.Select(m => m.Id == master.Id ? m with { Profile = profile } : m).ToList();
-        config.Save(cfg with { Household = cfg.Household with { Members = members } });
+        config.Save(cfg with { Preferences = cfg.Preferences! with { Allergies = [.. allergies] } });
     }
 
     [Fact]

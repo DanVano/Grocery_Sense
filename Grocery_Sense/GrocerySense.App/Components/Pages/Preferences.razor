@@ -1,6 +1,5 @@
 @page "/preferences"
 @inherits BusyComponent
-@using System.Text.Json
 @using static GrocerySense.App.ServiceCollectionExtensions
 @inject ConfigStore Config
 @inject ISnackbar Snackbar
@@ -201,13 +200,13 @@ else
                 .OrderBy(r => r.Year)
                 .ToList();
 
-            var profile = Config.GetMasterMember().Profile;
-            _allergies = AsCommaList(profile.GetValueOrDefault("allergies"));
-            _hardExcludes = AsCommaList(profile.GetValueOrDefault("hard_excludes"));
-            _softExcludes = AsCommaList(profile.GetValueOrDefault("soft_excludes"));
-            _preferProteins = AsWeightKeys(profile.GetValueOrDefault("preferred_protein_weights"));
-            _avoidProteins = AsCommaList(profile.GetValueOrDefault("excluded_proteins"));
-            _cuisines = AsCommaList(profile.GetValueOrDefault("favorite_cuisines"));
+            var prefs = cfg.Preferences ?? HouseholdPreferences.Empty();
+            _allergies = string.Join(", ", prefs.Allergies);
+            _hardExcludes = string.Join(", ", prefs.HardExcludes);
+            _softExcludes = string.Join(", ", prefs.SoftExcludes);
+            _preferProteins = string.Join(", ", prefs.PreferredProteinWeights.Where(kv => kv.Value > 1.0).Select(kv => kv.Key));
+            _avoidProteins = string.Join(", ", prefs.ExcludedProteins);
+            _cuisines = string.Join(", ", prefs.FavoriteCuisines);
 
             try
             {
@@ -242,21 +241,6 @@ else
             await Task.Run(() =>
             {
                 var cfg = Config.Load();
-                var master = Config.GetMasterMember();
-                // Preserve every other profile key (diet, spice_level, oils, …) — only the three edited lists change.
-                var profile = new Dictionary<string, object?>(master.Profile)
-                {
-                    ["allergies"] = ParseList(_allergies),
-                    ["hard_excludes"] = ParseList(_hardExcludes),
-                    ["soft_excludes"] = ParseList(_softExcludes),
-                    // Preferred proteins become weights > 1.0 (GetMealProfile reads any weight above 1 as preferred).
-                    ["preferred_protein_weights"] = ParseList(_preferProteins).ToDictionary(p => p, _ => 2.0),
-                    ["excluded_proteins"] = ParseList(_avoidProteins),
-                    ["favorite_cuisines"] = ParseList(_cuisines),
-                };
-                var members = cfg.Household.Members
-                    .Select(m => m.Id == master.Id ? m with { Profile = profile } : m).ToList();
-
                 Config.Save(cfg with
                 {
                     PostalCode = _postal?.Trim() ?? "",
@@ -264,7 +248,11 @@ else
                     MinItemSavingPct = _minItemSavingPct / 100.0,
                     MinStoreSaving = _minStoreSaving,
                     FoodInflationByYear = _rates.ToDictionary(r => r.Year.ToString(), r => r.Pct),
-                    Household = cfg.Household with { Members = members },
+                    Preferences = new HouseholdPreferences(
+                        ParseList(_allergies), ParseList(_hardExcludes), ParseList(_softExcludes),
+                        ParseList(_avoidProteins), ParseList(_cuisines),
+                        // Preferred proteins become weights > 1.0 (GetMealProfile reads any weight above 1 as preferred).
+                        ParseList(_preferProteins).ToDictionary(p => p, _ => 2.0)),
                 });
             });
             _saved = true;
@@ -400,38 +388,6 @@ else
             return Task.CompletedTask;
         });
 
-    // preferred_protein_weights is a {protein: weight} map; surface proteins weighted above 1.0 as a comma list.
-    private static string AsWeightKeys(object? value)
-    {
-        var keys = new List<string>();
-        if (value is JsonElement { ValueKind: JsonValueKind.Object } je)
-        {
-            foreach (var p in je.EnumerateObject())
-                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.GetDouble() > 1.0) keys.Add(p.Name);
-        }
-        // In-session (no JSON round-trip) the runtime type is Dictionary<string, double>, which does NOT match
-        // the generic IDictionary<string, object?>. Match the non-generic IDictionary — as NormWeights does —
-        // so preferred proteins survive a navigate-away-and-back without being wiped on the next Save.
-        else if (value is System.Collections.IDictionary map)
-        {
-            foreach (System.Collections.DictionaryEntry kv in map)
-                if (kv.Key is { } k && Convert.ToDouble(kv.Value) > 1.0) keys.Add(k.ToString() ?? "");
-        }
-        return string.Join(", ", keys.Where(k => k.Length > 0));
-    }
-
     private static List<string> ParseList(string csv) =>
         csv.Split(',').Select(s => s.Trim().ToLowerInvariant()).Where(s => s.Length > 0).Distinct().ToList();
-
-    // Profile values arrive as JsonElement (from disk) or List<string> (defaults); render either as a comma list.
-    private static string AsCommaList(object? value) => value switch
-    {
-        null => "",
-        string s => s,
-        JsonElement je when je.ValueKind == JsonValueKind.Array =>
-            string.Join(", ", je.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : e.ToString())),
-        JsonElement je when je.ValueKind == JsonValueKind.String => je.GetString() ?? "",
-        System.Collections.IEnumerable seq => string.Join(", ", seq.Cast<object?>().Select(o => o?.ToString())),
-        _ => value.ToString() ?? "",
-    };
 }

@@ -149,7 +149,7 @@ public sealed class BasketOptimizerServiceTests : TempDirTestBase
         var (svc, config) = Build(db);
         config.Save(config.Load() with { }); // ensure file exists
         var cfg = config.Load();
-        cfg.Household.Members[0].Profile["hard_excludes"] = new List<string> { "pork" };
+        cfg = cfg with { Preferences = cfg.Preferences! with { HardExcludes = ["pork"] } };
         config.Save(cfg);
 
         int a = Store(db, "A");
@@ -376,7 +376,7 @@ public sealed class BasketOptimizerServiceTests : TempDirTestBase
         using var db = new TempDb();
         var (svc, config) = Build(db);
         var cfg = config.Load();
-        cfg.Household.Members[0].Profile["hard_excludes"] = new List<string> { "pork" };
+        cfg = cfg with { Preferences = cfg.Preferences! with { HardExcludes = ["pork"] } };
         config.Save(cfg);
 
         var store = Store(db, "A");

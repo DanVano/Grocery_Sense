@@ -6,27 +6,24 @@ public sealed class PreferencesServiceTests : TempDirTestBase
 {
 
 
-    // Sets keys on the single master profile and saves.
-    private ConfigStore SeedProfile(Action<Dictionary<string, object?>> mutate)
+    // Sets the household preference set and saves.
+    private ConfigStore SeedPreferences(HouseholdPreferences prefs)
     {
         var store = new ConfigStore(_dir);
-        var cfg = store.Load();
-        mutate(cfg.Household.Members[0].Profile);
-        store.Save(cfg);
+        store.Save(store.Load() with { Preferences = prefs });
         return store;
     }
 
     [Fact]
-    public void Collapses_single_profile_into_hard_soft_proteins_weights()
+    public void Collapses_the_household_preferences_into_hard_soft_proteins_weights()
     {
-        var store = SeedProfile(p =>
-        {
-            p["allergies"] = new List<string> { "Peanuts" };
-            p["hard_excludes"] = new List<string> { "pork" };
-            p["soft_excludes"] = new List<string> { "Cilantro" };
-            p["excluded_proteins"] = new List<string> { "lamb" };
-            p["preferred_protein_weights"] = new Dictionary<string, double> { ["chicken"] = 2.0 };
-        });
+        var store = SeedPreferences(new HouseholdPreferences(
+            Allergies: ["Peanuts"],
+            HardExcludes: ["pork"],
+            SoftExcludes: ["Cilantro"],
+            ExcludedProteins: ["lamb"],
+            FavoriteCuisines: [],
+            PreferredProteinWeights: new Dictionary<string, double> { ["chicken"] = 2.0 }));
 
         var eff = new PreferencesService(store).ComputeEffectivePreferences();
 
@@ -45,12 +42,12 @@ public sealed class PreferencesServiceTests : TempDirTestBase
     [Fact]
     public void Cache_is_invalidated_on_config_save()
     {
-        var store = SeedProfile(p => p["hard_excludes"] = new List<string> { "pork" });
+        var store = SeedPreferences(HouseholdPreferences.Empty() with { HardExcludes = ["pork"] });
         var prefs = new PreferencesService(store);
         Assert.Contains("pork", prefs.ComputeEffectivePreferences().HardExcludes); // populates cache
 
         var cfg = store.Load();
-        cfg.Household.Members[0].Profile["hard_excludes"] = new List<string> { "beef" };
+        cfg = cfg with { Preferences = cfg.Preferences! with { HardExcludes = ["beef"] } };
         store.Save(cfg); // raises Changed -> PreferencesService drops its cache
 
         var eff = prefs.ComputeEffectivePreferences();

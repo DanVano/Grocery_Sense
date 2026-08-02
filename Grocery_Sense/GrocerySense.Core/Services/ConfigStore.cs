@@ -104,7 +104,7 @@ public sealed class ConfigStore
         // Monotonic id: NextMemberId is repaired by EnsureHousehold to >= the current max id, so +1 never
         // collides with a live member AND never reuses a deleted member's id.
         var nextId = cfg.Household.NextMemberId + 1;
-        var member = new HouseholdMember(nextId, (name ?? "").Trim(), SanitizeRole(role), DefaultMemberProfile());
+        var member = new HouseholdMember(nextId, (name ?? "").Trim(), SanitizeRole(role));
         Save(cfg with { Household = cfg.Household with {
             Members = cfg.Household.Members.Append(member).ToList(), NextMemberId = nextId } });
         return member;
@@ -143,8 +143,9 @@ public sealed class ConfigStore
         try
         {
             // Source-gen (no reflection) — this path runs on every start and must survive iOS full AOT (B1).
-            return JsonSerializer.Deserialize(File.ReadAllText(_configFile), UserConfigJsonContext.Default.UserConfig)
-                   ?? EmptyConfig();
+            var text = File.ReadAllText(_configFile);
+            var cfg = JsonSerializer.Deserialize(text, UserConfigJsonContext.Default.UserConfig) ?? EmptyConfig();
+            return cfg.Preferences is null ? cfg with { Preferences = LiftLegacyProfile(text) } : cfg;
         }
         catch (JsonException e)
         {
@@ -160,6 +161,54 @@ public sealed class ConfigStore
         ProfileVersion, "", null,
         new Household(1, 1, new List<HouseholdMember>()));
 
+    // Pre-v3 configs kept preferences in a per-member `profile` dict; only the master member's was ever read.
+    // Lift the six keys production consumed so an existing install doesn't silently lose its allergies — the
+    // rest of that dict (diet, spice_level, oils_allowed, …) was seeded but never read by anything.
+    // ponytail: one-time shim for configs written before 2026-08-02. Delete once every device has saved
+    // through the new shape (the first Save rewrites the file without `profile`).
+    private static HouseholdPreferences LiftLegacyProfile(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("household", out var household)
+                || !household.TryGetProperty("members", out var members)
+                || members.ValueKind != JsonValueKind.Array)
+                return HouseholdPreferences.Empty();
+
+            var master = members.EnumerateArray()
+                .FirstOrDefault(m => m.TryGetProperty("role", out var r) && r.GetString() == RoleMaster);
+            if (master.ValueKind != JsonValueKind.Object) master = members.EnumerateArray().FirstOrDefault();
+            if (master.ValueKind != JsonValueKind.Object
+                || !master.TryGetProperty("profile", out var profile)
+                || profile.ValueKind != JsonValueKind.Object)
+                return HouseholdPreferences.Empty();
+
+            return new HouseholdPreferences(
+                Strings(profile, "allergies"), Strings(profile, "hard_excludes"),
+                Strings(profile, "soft_excludes"), Strings(profile, "excluded_proteins"),
+                Strings(profile, "favorite_cuisines"), Weights(profile, "preferred_protein_weights"));
+        }
+        catch (JsonException)
+        {
+            return HouseholdPreferences.Empty(); // the caller already surfaced parse failures loudly
+        }
+
+        static List<string> Strings(JsonElement profile, string key) =>
+            profile.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Array
+                ? [.. v.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!)]
+                : [];
+
+        static Dictionary<string, double> Weights(JsonElement profile, string key)
+        {
+            var map = new Dictionary<string, double>();
+            if (profile.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Object)
+                foreach (var p in v.EnumerateObject())
+                    if (p.Value.ValueKind == JsonValueKind.Number) map[p.Name] = p.Value.GetDouble();
+            return map;
+        }
+    }
+
     private static UserConfig Normalize(UserConfig c) => c with
     {
         ProfileVersion = ProfileVersion, // always bump to latest on load/save (safe).
@@ -174,6 +223,7 @@ public sealed class ConfigStore
             ? c.FoodInflationByYear
             : new Dictionary<string, double>(InflationRates.Seed),
         Household = EnsureHousehold(c.Household),
+        Preferences = NormalizePreferences(c.Preferences),
     };
 
     // Ensures: >=1 member, >=1 master (tied to primary if possible), valid primary/active ids, non-null
@@ -183,7 +233,7 @@ public sealed class ConfigStore
     {
         var members = h?.Members is { Count: > 0 } ms ? ms.ToList() : new List<HouseholdMember>();
         if (members.Count == 0)
-            members.Add(new HouseholdMember(1, "Primary", RoleMaster, DefaultMemberProfile()));
+            members.Add(new HouseholdMember(1, "Primary", RoleMaster));
 
         var primary = h?.PrimaryMemberId ?? 1;
         if (!members.Any(m => SanitizeRole(m.Role) == RoleMaster))
@@ -194,11 +244,7 @@ public sealed class ConfigStore
         }
 
         for (var i = 0; i < members.Count; i++)
-            members[i] = members[i] with
-            {
-                Role = SanitizeRole(members[i].Role),
-                Profile = members[i].Profile is { Count: > 0 } p ? p : DefaultMemberProfile(),
-            };
+            members[i] = members[i] with { Role = SanitizeRole(members[i].Role) };
 
         var ids = members.Select(m => m.Id).ToHashSet();
         if (!ids.Contains(primary)) primary = members.Min(m => m.Id);
@@ -210,27 +256,25 @@ public sealed class ConfigStore
         return new Household(primary, active, members, nextMemberId);
     }
 
-    // Canonical profile shape (forward-compatible with a v2 master member). Kept whole though v1 only reads
-    // allergies + hard/soft excludes + oils (PreferencesService, Phase 3).
-    private static Dictionary<string, object?> DefaultMemberProfile() => new()
+    // user_config.json is hand-editable, so tokens are lowercased/trimmed/deduped on the way in and out
+    // rather than trusting whatever is on disk. Weight keys get the same treatment; an unparseable weight
+    // would already have failed deserialization.
+    private static HouseholdPreferences NormalizePreferences(HouseholdPreferences? p)
     {
-        ["eats_meat"] = true,
-        ["eats_fish"] = true,
-        ["eats_dairy"] = true,
-        ["eats_eggs"] = true,
-        ["excluded_proteins"] = new List<string>(),
-        ["preferred_protein_weights"] = new Dictionary<string, double>(),
-        ["allergies"] = new List<string>(),
-        ["hard_excludes"] = new List<string>(),
-        ["soft_excludes"] = new List<string>(),
-        ["favorite_cuisines"] = new List<string>(),
-        ["spice_level"] = "medium",
-        ["meal_styles"] = new List<string>(),
-        ["oils_allowed"] = new List<string>(),
-        ["diet"] = "meat eater",
-        ["favorite_tags"] = new List<string>(),
-        ["price_sensitivity"] = "medium",
-    };
+        if (p is null) return HouseholdPreferences.Empty();
+        return new HouseholdPreferences(
+            Tokens(p.Allergies), Tokens(p.HardExcludes), Tokens(p.SoftExcludes),
+            Tokens(p.ExcludedProteins), Tokens(p.FavoriteCuisines),
+            p.PreferredProteinWeights?
+                .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
+                .GroupBy(kv => kv.Key.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.Last().Value) ?? []);
+    }
+
+    private static List<string> Tokens(List<string>? values) =>
+        values is null
+            ? []
+            : values.Select(v => (v ?? "").Trim().ToLowerInvariant()).Where(v => v.Length > 0).Distinct().ToList();
 
     private static string SanitizeRole(string? role)
     {
@@ -239,24 +283,18 @@ public sealed class ConfigStore
     }
 
 
-    // Container-level copy so a handed-out snapshot can be mutated without touching the cache.
+    // Container-level copy so a handed-out snapshot can be mutated without touching the cache. Members are
+    // immutable records of scalars; only the preference collections need copying.
     private static UserConfig Clone(UserConfig c) => c with
     {
-        Household = c.Household with
-        {
-            Members = c.Household.Members
-                .Select(m => m with { Profile = CloneProfile(m.Profile) }).ToList(),
-        },
+        Household = c.Household with { Members = c.Household.Members.ToList() },
+        Preferences = c.Preferences is { } p
+            ? new HouseholdPreferences(
+                [.. p.Allergies], [.. p.HardExcludes], [.. p.SoftExcludes],
+                [.. p.ExcludedProteins], [.. p.FavoriteCuisines],
+                new Dictionary<string, double>(p.PreferredProteinWeights))
+            : null,
     };
-
-    private static Dictionary<string, object?> CloneProfile(Dictionary<string, object?> profile) =>
-        profile.ToDictionary(kv => kv.Key, kv => kv.Value switch
-        {
-            List<string> v => v.ToList(),
-            Dictionary<string, double> v => new Dictionary<string, double>(v),
-            JsonElement v => v.Clone(),
-            _ => kv.Value,
-        });
 
     private static (DateTime, long)? StatKey(string path)
     {

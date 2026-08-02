@@ -231,20 +231,36 @@ public sealed record PickableRecipe(string Name, bool OnSaleThisWeek);
 // receipt quantities carry units (kg/L/each) that can't be honestly mapped onto a new list row.
 public sealed record RestockSuggestion(int ItemId, string Name, int DaysSinceLast, int IntervalDays);
 
-// Household config — ports of config_store.py dataclasses.
-public record HouseholdMember(int Id, string Name, string Role,
-    // Polymorphic profile — converted with Utf8JsonReader/Writer (no reflection) so UserConfig source-gen is AOT-safe.
-    [property: JsonConverter(typeof(ProfileDictionaryConverter))] Dictionary<string, object?> Profile);
+// Household config — ports of config_store.py dataclasses. Members are identity + role only; preferences
+// are household-wide (see HouseholdPreferences below).
+public record HouseholdMember(int Id, string Name, string Role);
 // NextMemberId is the highest member id ever issued (monotonic). New members take NextMemberId+1 so a deleted
 // member's id is never reused — reuse would re-attribute the old member's picks/history to the new one. Older
 // configs lack the field and deserialize to 0; EnsureHousehold repairs it to at least the current max id.
 public record Household(int PrimaryMemberId, int ActiveMemberId, IReadOnlyList<HouseholdMember> Members,
     int NextMemberId = 0);
+
+// The household's ONE shared preference set. v2 decided members are names-only (brainstorm 2026-07-02 Q5);
+// per-member profiles stay a v3 idea, and the v3 shape is overrides-on-a-baseline anyway, so nothing is
+// lost by typing this now. Lists hold lowercase trimmed tokens — ConfigStore.Normalize enforces that,
+// because user_config.json is hand-editable. Weights above 1.0 mark a preferred protein.
+public record HouseholdPreferences(
+    List<string> Allergies,
+    List<string> HardExcludes,
+    List<string> SoftExcludes,
+    List<string> ExcludedProteins,
+    List<string> FavoriteCuisines,
+    Dictionary<string, double> PreferredProteinWeights)
+{
+    public static HouseholdPreferences Empty() => new([], [], [], [], [], []);
+}
+
 public record UserConfig(
     int ProfileVersion,
     string PostalCode,
     double? MonthlyBudget,
     Household Household,
+    HouseholdPreferences? Preferences = null,
     // BasketOptimizer settings (single-profile). Defaults are the redesign's tuning starting points.
     int MaxStores = 3,
     double MinItemSavingPct = 0.10,

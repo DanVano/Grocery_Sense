@@ -333,6 +333,14 @@ returned to Preferences. All 4 Python planning suites ported (59 tests). 364 tot
   (`ComputeEffectivePreferences` → `GetMasterMember`), so secondary profiles are inert. `DeleteMember`
   refuses the master and the last-remaining member and resets `active` to primary if the active member was
   removed. No shopping-list migration was needed — `added_by`/`added_by_member_id` shipped in v1.
+  *(Superseded 2026-08-02, ponytail round 2: since secondary profiles were provably inert and no
+  per-member editing UI ever existed, the per-member `Dictionary<string, object?>` profiles — with their
+  custom converter, deep-clone and read-time coercion — collapsed into one typed `HouseholdPreferences`
+  record on `UserConfig`. `HouseholdMember` is now id + name + role. Ten of the sixteen seeded profile
+  keys had no reader at all. `ConfigStore.Load` lifts the six live keys out of a pre-2026-08-02 config
+  once, so an existing install keeps its allergies; that shim carries a `ponytail:` marker for deletion.
+  Per-member preferences stay a v3 idea and the v3 design is overrides-on-a-baseline, so this costs it
+  nothing.)*
 - **`member_requests` has no member FK** (members live in config JSON, not a DB table — matches Python).
   `item_row_ids` is a JSON array of the shopping_list ids the pick created; decoded with `JsonDocument`
   (AOT-safe) tolerating NULL/junk → `[]` rather than crashing the review screen.

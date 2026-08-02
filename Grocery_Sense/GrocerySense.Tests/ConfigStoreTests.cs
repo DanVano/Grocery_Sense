@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GrocerySense.Core;
 
 namespace GrocerySense.Tests;
@@ -25,11 +24,10 @@ public sealed class ConfigStoreTests : TempDirTestBase
         var store = New();
         var cfg = store.Load();
 
-        ((List<string>)cfg.Household.Members[0].Profile["allergies"]!).Add("peanuts");
+        cfg.Preferences!.Allergies.Add("peanuts");
 
-        // A handed-out snapshot must not mutate the cache — a fresh Load has the unmodified profile.
-        var reloaded = store.Load();
-        Assert.DoesNotContain("peanuts", (List<string>)reloaded.Household.Members[0].Profile["allergies"]!);
+        // A handed-out snapshot must not mutate the cache — a fresh Load has the unmodified preferences.
+        Assert.DoesNotContain("peanuts", store.Load().Preferences!.Allergies);
     }
 
     [Fact]
@@ -90,23 +88,58 @@ public sealed class ConfigStoreTests : TempDirTestBase
     }
 
     [Fact]
-    public void Member_profile_concrete_types_survive_source_gen_roundtrip()
+    public void Household_preferences_survive_the_source_gen_roundtrip()
     {
-        // Exercises ProfileDictionaryConverter.Write over the concrete types a fresh (never-round-tripped)
-        // profile holds: Dictionary<string,double>, List<string>, bool. They must reload as JsonElement.
         var store = New();
-        var cfg = store.Load();
-        var profile = cfg.Household.Members[0].Profile;
-        profile["preferred_protein_weights"] = new Dictionary<string, double> { ["chicken"] = 2.0 };
-        profile["favorite_cuisines"] = new List<string> { "thai", "italian" };
-        profile["eats_meat"] = false;
-        store.Save(cfg);
+        store.Save(store.Load() with
+        {
+            Preferences = new HouseholdPreferences(
+                Allergies: ["peanuts"], HardExcludes: [], SoftExcludes: [], ExcludedProteins: ["lamb"],
+                FavoriteCuisines: ["thai", "italian"],
+                PreferredProteinWeights: new Dictionary<string, double> { ["chicken"] = 2.0 }),
+        });
 
-        var reloaded = New().Load().Household.Members[0].Profile; // fresh instance -> reads from disk
-        Assert.Equal(2.0, ((JsonElement)reloaded["preferred_protein_weights"]!).GetProperty("chicken").GetDouble());
-        var cuisines = ((JsonElement)reloaded["favorite_cuisines"]!).EnumerateArray().Select(e => e.GetString()).ToList();
-        Assert.Contains("thai", cuisines);
-        Assert.False(((JsonElement)reloaded["eats_meat"]!).GetBoolean());
+        var reloaded = New().Load().Preferences!; // fresh instance -> reads from disk
+        Assert.Equal(2.0, reloaded.PreferredProteinWeights["chicken"]);
+        Assert.Contains("thai", reloaded.FavoriteCuisines);
+        Assert.Contains("peanuts", reloaded.Allergies);
+        Assert.Contains("lamb", reloaded.ExcludedProteins);
+    }
+
+    // Configs written before the typed record kept these six keys on the master member's profile dict.
+    // Losing them silently would wipe the user's allergies, so Load lifts them once.
+    [Fact]
+    public void Legacy_member_profile_is_lifted_into_household_preferences()
+    {
+        File.WriteAllText(ConfigPath, """
+            {
+              "profile_version": 2,
+              "postal_code": "K1A0B1",
+              "household": {
+                "primary_member_id": 1,
+                "active_member_id": 1,
+                "members": [
+                  {
+                    "id": 1, "name": "Primary", "role": "master",
+                    "profile": {
+                      "allergies": ["Peanuts"],
+                      "hard_excludes": ["pork"],
+                      "favorite_cuisines": ["thai"],
+                      "preferred_protein_weights": { "chicken": 2.0 },
+                      "diet": "meat eater"
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var prefs = New().Load().Preferences!;
+
+        Assert.Contains("peanuts", prefs.Allergies); // lifted AND normalized to lowercase
+        Assert.Contains("pork", prefs.HardExcludes);
+        Assert.Contains("thai", prefs.FavoriteCuisines);
+        Assert.Equal(2.0, prefs.PreferredProteinWeights["chicken"]);
     }
 
     [Fact]
