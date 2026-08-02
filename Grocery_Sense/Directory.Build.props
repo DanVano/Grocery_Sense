@@ -6,5 +6,10 @@
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
     <WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
+
+    <!-- Every project sets both; MSBuild imports this before the project body, so they can live here.
+         TargetFramework(s) stays per-project — the App head is multi-TFM. -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 </Project>

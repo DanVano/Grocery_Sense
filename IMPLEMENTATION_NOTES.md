@@ -50,7 +50,11 @@ All Phase-1 skipped fixtures now run green + a preference-merge test. 184 tests,
     singular `GetBaselinePrice` (prod uses the batched `GetBaselinePrices` via MealSuggestion); also
     `EnsureItemExists` and the ConfigStore deals cache, plus `ConfigStore.GetHouseholdAllergies` (live
     allergy filtering is master-profile-only through `PreferencesService`). Commits `7510789` + `5a509ee`.
-    **Still live:** `DealClassification`, `GetBaselinePrices`, `RecordManualPrice`, `PriceDropAlert.GetAlerts`.
+    **Still live:** `DealClassification`, `GetBaselinePrices`, `PriceDropAlert.GetAlerts`.
+    *(Correction, ponytail round 2 / 2026-08-02: `RecordManualPrice` was listed here as still live but
+    `git log -S` shows it never had a caller in any commit — the manual-price-entry feature was never
+    built. It is deleted, along with the rest of `PriceHistoryService`'s write/create surface; production
+    price writes are `ReceiptsRepo.IngestReceipt`'s own INSERT inside the ingest transaction.)*
 - **PreferencesService = single-profile Replace, not a port.** Implemented only
   `ComputeEffectivePreferences`; **removed (not stubbed)** the v2 / Phase-8-UI methods (`GetMealProfile`,
   `GetHouseholdBaselineProfile`, `GetEffectiveEditStateForMember`, `ValidateAddExclude`,
@@ -379,8 +383,9 @@ All new features, updates, and bug fixes target the mobile apps.
 - **The Windows head is demoted to a dev-only harness** — kept for fast build checks and fixture
   verification on this PC until the Android head builds locally (v3 Phase A), then it retires as a
   verification target. It was never distributed; nothing to migrate.
-- `net10.0-windows` / `net10.0-maccatalyst` TFMs still sit in `GrocerySense.App.csproj` — removal is
-  a code change deferred to the v3 platform work (maccatalyst is unused and can drop whenever
-  convenient; windows drops when the harness retires).
+- ~~`net10.0-windows` / `net10.0-maccatalyst` TFMs still sit in `GrocerySense.App.csproj`~~ —
+  **maccatalyst is gone** (TFM, `SupportedOSPlatformVersion`, and `Platforms/MacCatalyst/`; ponytail
+  round 2, 2026-08-02): it was neither a product target nor the dev harness. `net10.0-windows` stays
+  until the harness retires.
 - Living docs updated same day (README, `Grocery_Sense/CLAUDE.md`, `V2_FOLLOWUPS.md`, v3 plan);
   historical docs (PORTING, CONTRACT_AUDIT, V2_PLAN, archive/, brainstorms/) intentionally untouched.
