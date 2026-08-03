@@ -106,6 +106,28 @@ public sealed class OcrSpendBoundsTests : TempDirTestBase
         Assert.Equal(0L, cmd.ExecuteScalar());
     }
 
+    // The flyer twin of the test above: the layout-response guard fires before parse/persist, so no
+    // batch or raw-json row exists (the whole ingest is Phase A at that point — nothing has been written).
+    [Fact]
+    public async Task Oversized_layout_response_is_rejected_before_persistence()
+    {
+        using var db = new TempDb();
+        // Round-trip so the value is a JsonElement — the only shape the Azure clients ever produce.
+        var huge = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["blob"] = new string('a', FlyerIngestService.MaxRawJsonChars + 16),
+            }))!;
+        var svc = BuildFlyers(db, new FakeLayout(huge));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            svc.IngestAssetsAsync(1, "2026-01-01", "2026-01-08", new[] { WriteFile("page") }));
+
+        using var cmd = db.Conn.CreateCommand();
+        cmd.CommandText = "SELECT (SELECT COUNT(*) FROM flyer_raw_json) + (SELECT COUNT(*) FROM flyer_batches)";
+        Assert.Equal(0L, cmd.ExecuteScalar());
+    }
+
     [Fact]
     public async Task Over_300_line_receipt_is_rejected_before_any_catalog_write()
     {
