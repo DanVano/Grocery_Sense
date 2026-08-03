@@ -27,6 +27,25 @@ public sealed class UnitNormalizationServiceTests
         Assert.Equal(5.00, second.NormUnitPrice, 5);
     }
 
+    // Cross-dimension observation (count default, weight observed): Convert has no path, so the
+    // observation is kept un-normalized at its own price/unit with the failure disclosed in the note —
+    // never a fabricated conversion, and the established default is never overwritten.
+    [Fact]
+    public void Normalize_keeps_incompatible_observation_unconverted_with_disclosed_note()
+    {
+        using var db = new TempDb();
+        var svc = new UnitNormalizationService();
+        var item = ItemsRepo.CreateItem(db.Conn, "Eggs").Id;
+        svc.Normalize(db.Conn, item, 4.99, "each"); // establishes default_unit = each
+
+        var r = svc.Normalize(db.Conn, item, 11.02, "kg");
+
+        Assert.Equal(11.02, r.NormUnitPrice);
+        Assert.Equal("kg", r.NormUnit); // the OBSERVED unit, not the default
+        Assert.Equal("no_conversion_possible(kg->each)", r.Note);
+        Assert.Equal("each", svc.GetItemDefaultUnit(db.Conn, item)); // default untouched
+    }
+
     [Fact]
     public void Normalize_falls_back_to_each_for_unknown_unit_and_description()
     {
