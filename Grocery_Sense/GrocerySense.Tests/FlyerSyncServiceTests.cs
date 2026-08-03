@@ -144,6 +144,31 @@ public sealed class FlyerSyncServiceTests : FlyerSyncTestBase
         Assert.Equal(2.50, quote.UnitPrice);
     }
 
+    // IsoOr fallback: malformed provider dates must fall back to today/today+7. A leaked "junk" date
+    // fails the string compare in every valid_from/valid_to gate and silently hides the whole batch —
+    // so the assertion that matters is the deal still surfacing as an ACTIVE flyer price.
+    [Fact]
+    public async Task RunSync_malformed_provider_dates_fall_back_and_the_deal_stays_active()
+    {
+        using var conn = _factory.Open();
+        var store = StoresRepo.CreateStore(conn, "Mart").Id;
+        var item = ItemsRepo.CreateItem(conn, "Apples").Id;
+        var normalized = new IngredientMappingService(_factory).MapToItem("Apples Apples").NormalizedInput;
+        ItemAliasesRepo.UpsertAlias(conn, normalized, item, 1.0);
+
+        var provider = new FuncProvider(_ => new[]
+        {
+            new ProviderDeal("Apples", PriceText: "$2.50", UnitPrice: 2.50, Unit: "each",
+                ValidFrom: "junk", ValidTo: "junk"),
+        });
+
+        var result = await Build(provider).RunSyncAsync(force: true);
+
+        Assert.Equal(1, result.DealsInserted);
+        var quotes = PricesRepo.GetActiveFlyerPricesBatch(conn, new[] { item }, new[] { store });
+        Assert.Equal(2.50, quotes[(item, store)].UnitPrice); // visible today => the dates fell back
+    }
+
     [Fact]
     public async Task RunSync_skips_stores_not_marked_shop_here()
     {
