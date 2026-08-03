@@ -62,6 +62,21 @@ public sealed class ConfigStoreMemberTests : TempDirTestBase
         Assert.Throws<InvalidOperationException>(() => cfg.DeleteMember(master.Id));
     }
 
+    // member_requests rows attribute picks by memberId with no DB FK — a reused id would silently hand a
+    // deleted member's pick history to the newcomer. NextMemberId must stay monotonic across deletes.
+    [Fact]
+    public void Add_after_delete_does_not_reuse_the_deleted_id()
+    {
+        var cfg = New();
+        var kid = cfg.AddMember("Kid");
+        cfg.DeleteMember(kid.Id);
+
+        var next = cfg.AddMember("New Kid");
+
+        Assert.Equal(kid.Id + 1, next.Id); // id 3, never 2 again
+        Assert.DoesNotContain(cfg.ListMembers(), m => m.Id == kid.Id);
+    }
+
     [Fact]
     public void Rename_rejects_a_blank_name()
     {
