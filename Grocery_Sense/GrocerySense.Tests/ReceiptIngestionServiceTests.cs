@@ -261,6 +261,61 @@ public sealed class ReceiptIngestionServiceTests : TempDirTestBase
         Assert.NotEqual(today, receipt.PurchaseDate);          // ...never silently "today"
     }
 
+    [Fact]
+    public async Task ImportBatch_isolates_a_failed_file_and_still_commits_the_rest()
+    {
+        using var db = new TempDb();
+        var svc = BuildSeq(db,
+            Raw("Loblaws", "2026-06-01", 4.99, ("Milk", 1, 4.99, 4.99)),
+            null, // SeqOcr throws IOException("OCR unavailable") for this file
+            Raw("Metro", "2026-06-02", 3.50, ("Bread", 1, 3.50, 3.50)));
+        var files = new[] { WriteFile("f1"), WriteFile("f2"), WriteFile("f3") };
+
+        var summary = await svc.ImportBatchAsync(files, (p, _) => Task.FromResult<string?>(p.OcrDate));
+
+        // The failure is disclosed per file (status + exception message), never rethrown mid-batch.
+        Assert.Equal(BatchImportStatus.Failed, summary.Items[1].Status);
+        Assert.Equal("OCR unavailable", summary.Items[1].Detail);
+        Assert.Equal(1, summary.Failed);
+        // ...and the surrounding receipts still commit.
+        Assert.Equal(2, summary.Imported);
+        Assert.Equal(2, ReceiptsRepo.ListRecentReceipts(db.Conn).Count);
+    }
+
+    // Single-scan path ONLY: confirmedDate ?? OcrDate ?? FallbackDate — the file-mtime arm is allowed here
+    // (backfill must skip instead; see ImportBatch_never_defaults_an_undated_receipt_to_today).
+    [Fact]
+    public async Task Single_scan_with_no_ocr_date_falls_back_to_the_file_mtime_date()
+    {
+        using var db = new TempDb();
+        var svc = Build(db, Raw("Loblaws", "", 4.99, ("Milk", 1, 4.99, 4.99))); // OCR found no date
+        var f = WriteFile("a");
+        File.SetLastWriteTime(f, new DateTime(2026, 3, 15, 12, 0, 0)); // local time — InferDate reads local mtime
+
+        var outcome = await svc.IngestReceiptFileAsync(f); // no confirmed date
+
+        Assert.False(outcome.WasDuplicate);
+        Assert.Equal("2026-03-15", Assert.Single(ReceiptsRepo.ListRecentReceipts(db.Conn)).PurchaseDate);
+    }
+
+    [Fact]
+    public async Task Fuzzy_merchant_variant_merges_into_the_existing_store()
+    {
+        using var db = new TempDb();
+        // Different date/total (no signature dedupe) and different bytes (no file-hash dedupe).
+        var svc = BuildSeq(db,
+            Raw("Loblaws", "2026-06-01", 4.99, ("Milk", 1, 4.99, 4.99)),
+            Raw("Loblaws Store #1234", "2026-06-02", 3.50, ("Bread", 1, 3.50, 3.50)));
+
+        await svc.IngestReceiptFileAsync(WriteFile("f1"));
+        var second = await svc.IngestReceiptFileAsync(WriteFile("f2"));
+
+        Assert.False(second.WasDuplicate);
+        var store = Assert.Single(StoresRepo.ListStores(db.Conn)); // token-set >= 85 -> no duplicate store
+        Assert.Equal("Loblaws", store.Name);
+        Assert.All(ReceiptsRepo.ListRecentReceipts(db.Conn), r => Assert.Equal(store.Id, r.StoreId));
+    }
+
     // The load-bearing suppression property: a bulk backfill import never opens alerts (ImportBatchAsync has
     // no scan path at all); the receipt-scoped scan on a fresh receipt afterwards still does.
     [Fact]
