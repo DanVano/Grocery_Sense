@@ -82,6 +82,23 @@ public sealed class TripReconciliationServiceTests
     }
 
     [Fact]
+    public void Unplanned_total_derives_from_unit_price_and_quantity_when_line_total_missing()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var chips = ItemsRepo.CreateItem(db.Conn, "chips").Id;
+        var soda = ItemsRepo.CreateItem(db.Conn, "soda").Id;
+        var rid = AddReceipt(db, store, Today);
+        AddLine(db, rid, 0, chips, "CHIPS", "4.49", qty: 2); // line_total NULL → 4.49m * 2
+        AddLine(db, rid, 1, soda, "SODA", "3.25", qty: 0);   // qty <= 0 falls back to 1 → 3.25m
+
+        var result = new TripReconciliationService(db.Factory).Reconcile(rid);
+
+        Assert.Equal(2, result.UnplannedCount);
+        Assert.Equal(12.23m, result.UnplannedTotal); // 8.98 + 3.25, derived in decimal — nothing read from line_total
+    }
+
+    [Fact]
     public void Planned_at_this_store_but_missing_from_receipt_is_reported()
     {
         using var db = new TempDb();
