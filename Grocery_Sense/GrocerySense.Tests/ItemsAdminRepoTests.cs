@@ -224,4 +224,107 @@ public sealed class ItemsAdminRepoTests
         Assert.Equal("2% milk", ItemsRepo.GetItemById(db.Conn, other)!.CanonicalName); // unchanged
     }
 
+    // Two identical-description lines produce two identical price rows; fixing ONE line must move exactly
+    // ONE price row (the ORDER BY id LIMIT 1 subquery) — an unbounded UPDATE would move both and orphan
+    // the second correction.
+    [Fact]
+    public void CorrectLineMapping_with_duplicate_lines_moves_exactly_one_price_row()
+    {
+        using var db = new TempDb();
+        var (store, receipt, _) = Fixtures(db.Conn);
+        var wrong = ItemsRepo.CreateItem(db.Conn, "milk").Id;
+        var right = ItemsRepo.CreateItem(db.Conn, "2% milk").Id;
+
+        for (var i = 0; i < 2; i++)
+        {
+            Exec(db.Conn, $"INSERT INTO receipt_line_items (receipt_id, line_index, item_id, description) " +
+                          $"VALUES ({receipt}, {i}, {wrong}, 'MILK 2%')");
+            Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, receipt_id, raw_name, source, date, unit_price, unit) " +
+                          $"VALUES ({wrong}, {store}, {receipt}, 'MILK 2%', 'receipt', '2026-06-01', '4.99', 'each')");
+        }
+        var line1 = (int)(long)ExecScalar(db.Conn,
+            $"SELECT id FROM receipt_line_items WHERE receipt_id = {receipt} ORDER BY line_index LIMIT 1");
+
+        using (var tx = db.Conn.BeginTransaction())
+        {
+            ItemsAdminRepo.CorrectLineMapping(db.Conn, tx, line1, right);
+            tx.Commit();
+        }
+
+        Assert.Equal(1, Convert.ToInt32(ExecScalar(db.Conn, $"SELECT COUNT(*) FROM prices WHERE item_id = {right}")));
+        Assert.Equal(1, Convert.ToInt32(ExecScalar(db.Conn, $"SELECT COUNT(*) FROM prices WHERE item_id = {wrong}")));
+        Assert.Equal(right, (int)(long)ExecScalar(db.Conn, $"SELECT item_id FROM receipt_line_items WHERE id = {line1}"));
+        // The other line keeps its original mapping.
+        Assert.Equal(1, Convert.ToInt32(ExecScalar(db.Conn,
+            $"SELECT COUNT(*) FROM receipt_line_items WHERE receipt_id = {receipt} AND item_id = {wrong}")));
+        Assert.Equal(right, ItemAliasesRepo.GetByAlias(db.Conn, "MILK 2%")!.ItemId); // learned
+    }
+
+    // Originally-unmapped line (item_id NULL): re-point the line and learn the alias, touch zero price rows.
+    [Fact]
+    public void CorrectLineMapping_on_unmapped_line_repoints_and_learns_without_touching_prices()
+    {
+        using var db = new TempDb();
+        var (store, receipt, _) = Fixtures(db.Conn);
+        var right = ItemsRepo.CreateItem(db.Conn, "2% milk").Id;
+        var bystander = ItemsRepo.CreateItem(db.Conn, "milk").Id;
+
+        Exec(db.Conn, $"INSERT INTO receipt_line_items (receipt_id, line_index, item_id, description) " +
+                      $"VALUES ({receipt}, 0, NULL, 'MILK 2%')");
+        var line = (int)(long)ExecScalar(db.Conn, "SELECT last_insert_rowid()");
+        // Same receipt + raw_name but mapped to a bystander item — the null-old branch must not move it.
+        Exec(db.Conn, $"INSERT INTO prices (item_id, store_id, receipt_id, raw_name, source, date, unit_price, unit) " +
+                      $"VALUES ({bystander}, {store}, {receipt}, 'MILK 2%', 'receipt', '2026-06-01', '4.99', 'each')");
+
+        using (var tx = db.Conn.BeginTransaction())
+        {
+            ItemsAdminRepo.CorrectLineMapping(db.Conn, tx, line, right);
+            tx.Commit();
+        }
+
+        Assert.Equal(right, (int)(long)ExecScalar(db.Conn, $"SELECT item_id FROM receipt_line_items WHERE id = {line}"));
+        Assert.Equal(right, ItemAliasesRepo.GetByAlias(db.Conn, "MILK 2%")!.ItemId);
+        Assert.Equal(bystander, (int)(long)ExecScalar(db.Conn, "SELECT item_id FROM prices"));
+    }
+
+    // A PAUSED target watch must not trigger the dedupe delete — the source's live watch MOVES to the
+    // target instead of being silently deleted (the is_active = 1 scope in MergeItems).
+    [Fact]
+    public void Merge_moves_source_active_watch_when_target_watch_is_paused()
+    {
+        using var db = new TempDb();
+        var target = ItemsRepo.CreateItem(db.Conn, "milk").Id;
+        var source = ItemsRepo.CreateItem(db.Conn, "2% milk").Id;
+        Exec(db.Conn, $"INSERT INTO watchlist (item_id, is_active) VALUES ({target}, 0)");
+        Exec(db.Conn, $"INSERT INTO watchlist (item_id, is_active) VALUES ({source}, 1)");
+
+        using (var tx = db.Conn.BeginTransaction())
+        {
+            ItemsAdminRepo.MergeItems(db.Conn, tx, target, source);
+            tx.Commit();
+        }
+
+        Assert.Equal(1, Convert.ToInt32(ExecScalar(db.Conn,
+            $"SELECT COUNT(*) FROM watchlist WHERE item_id = {target} AND is_active = 1"))); // live watch moved
+        Assert.Equal(0, Convert.ToInt32(ExecScalar(db.Conn, $"SELECT COUNT(*) FROM watchlist WHERE item_id = {source}")));
+    }
+
+    // LIKE metacharacters in the query are literals: "2%" must not wildcard-match everything starting with 2,
+    // and "_" must not match any-single-char — an over-match feeds the merge picker, and a wrong pick
+    // destructively merges price history.
+    [Fact]
+    public void SearchItems_treats_like_metacharacters_as_literals()
+    {
+        using var db = new TempDb();
+        ItemsRepo.CreateItem(db.Conn, "2% milk");
+        ItemsRepo.CreateItem(db.Conn, "20 pack eggs");   // "2%" as a wildcard would match this
+        ItemsRepo.CreateItem(db.Conn, "a_b sauce");
+        ItemsRepo.CreateItem(db.Conn, "axb sauce");      // "a_b" with _ as any-char would match this
+
+        var percent = ItemsAdminRepo.SearchItems(db.Conn, "2%");
+        Assert.Equal("2% milk", Assert.Single(percent).CanonicalName);
+
+        var underscore = ItemsAdminRepo.SearchItems(db.Conn, "a_b");
+        Assert.Equal("a_b sauce", Assert.Single(underscore).CanonicalName);
+    }
 }
