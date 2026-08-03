@@ -149,6 +149,22 @@ public sealed class FamilyRequestsServiceTests : TempDirTestBase
         Assert.Equal(0, svc.UnreviewedCount());     // and marked reviewed
     }
 
+    // Defense-in-depth: even when a stale /family list surfaces an allergen recipe, PickMeal's own
+    // ProfileFilter recheck must refuse it — throw, and leave zero rows on the shared list.
+    [Fact]
+    public void Meal_pick_of_allergen_recipe_throws_and_writes_no_rows()
+    {
+        using var db = new TempDb();
+        var (svc, config, list) = Build(db);
+        SetMasterAllergies(config, "peanuts");
+        var kid = config.AddMember("Kid");
+
+        Assert.Throws<InvalidOperationException>(() => svc.PickMeal(kid.Id, "Peanut Chicken Noodles"));
+
+        Assert.Empty(list.GetActiveItems());
+        Assert.Equal(0, svc.UnreviewedCount());
+    }
+
     [Fact]
     public void Unknown_recipe_throws()
     {
@@ -195,6 +211,36 @@ public sealed class FamilyRequestsServiceTests : TempDirTestBase
         using (var cmd = db.Conn.CreateCommand())
         {
             cmd.CommandText = "DROP TRIGGER fail_req;";
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    // No-partial-rows (CLAUDE.md): RemoveRequest soft-deletes the pick's rows + marks reviewed in ONE
+    // transaction — if the reviewed-marking write fails, every soft-delete must roll back with it (a
+    // half-undone pick would leave rows gone but the request still claiming them).
+    [Fact]
+    public void Remove_request_rolls_back_soft_deletes_when_mark_reviewed_fails()
+    {
+        using var db = new TempDb();
+        var (svc, config, list) = Build(db);
+        var kid = config.AddMember("Kid");
+        var req = svc.PickMeal(kid.Id, "Beef Stir Fry")!;
+        Assert.Equal(5, list.GetActiveItems().Count);
+
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE TRIGGER fail_rev BEFORE UPDATE ON member_requests " +
+                              "BEGIN SELECT RAISE(ABORT, 'boom'); END;";
+            cmd.ExecuteNonQuery();
+        }
+
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => svc.RemoveRequest(req.Id));
+
+        Assert.Equal(5, list.GetActiveItems().Count); // no partial soft-delete survived the failed undo
+        Assert.Equal(1, svc.UnreviewedCount());       // and the request is still unreviewed
+        using (var cmd = db.Conn.CreateCommand())
+        {
+            cmd.CommandText = "DROP TRIGGER fail_rev;";
             cmd.ExecuteNonQuery();
         }
     }
