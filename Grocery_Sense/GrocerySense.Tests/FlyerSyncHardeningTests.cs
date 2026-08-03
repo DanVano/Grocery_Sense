@@ -126,6 +126,74 @@ public sealed class FlyerSyncHardeningTests : FlyerSyncTestBase
         Assert.Equal(1, provider.Calls);
     }
 
+    // Retry-After hygiene on the unofficial endpoint: a hostile 7-day header clamps to MaxRetryAfter
+    // (24 h) so the app can't be locked out for more than a day.
+    [Fact]
+    public async Task Hostile_retry_after_is_clamped_to_the_max_backoff()
+    {
+        using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
+        var svc = Build(new FuncProvider(_ =>
+            throw new FlyerProviderThrottledException("429", TimeSpan.FromDays(7))));
+
+        await svc.RunSyncAsync(force: true);
+
+        var rnb = svc.ReadMeta().RetryNotBefore;
+        Assert.NotNull(rnb);
+        var now = DateTimeOffset.UtcNow;
+        Assert.InRange(rnb!.Value,
+            now + FlyerSyncService.MaxRetryAfter - TimeSpan.FromMinutes(5),
+            now + FlyerSyncService.MaxRetryAfter + TimeSpan.FromMinutes(5));
+    }
+
+    // A missing Retry-After still backs off — by DefaultRetryAfter (1 h), not zero.
+    [Fact]
+    public async Task Missing_retry_after_backs_off_by_the_default()
+    {
+        using (var conn = _factory.Open()) StoresRepo.CreateStore(conn, "Mart");
+        var svc = Build(new FuncProvider(_ => throw new FlyerProviderThrottledException("429")));
+
+        await svc.RunSyncAsync(force: true);
+
+        var rnb = svc.ReadMeta().RetryNotBefore;
+        Assert.NotNull(rnb);
+        var now = DateTimeOffset.UtcNow;
+        Assert.InRange(rnb!.Value,
+            now + FlyerSyncService.DefaultRetryAfter - TimeSpan.FromMinutes(5),
+            now + FlyerSyncService.DefaultRetryAfter + TimeSpan.FromMinutes(5));
+    }
+
+    // Mid-run throttle ordering: stores committed BEFORE the throttle survive and count as a success;
+    // the remaining store is never fetched. (The throttle test above has every store failing — this one
+    // pins the partial-success half.)
+    [Fact]
+    public async Task Mid_run_throttle_keeps_earlier_committed_stores_and_skips_the_rest()
+    {
+        int storeA;
+        using (var conn = _factory.Open())
+        {
+            storeA = StoresRepo.CreateStore(conn, "Mart A").Id;   // ListStores orders by name — A, B, C
+            StoresRepo.CreateStore(conn, "Mart B");
+            StoresRepo.CreateStore(conn, "Mart C");
+        }
+        var provider = new FuncProvider(name => name switch
+        {
+            "Mart A" => new[] { Deal("Apples", 2.50) },
+            "Mart B" => throw new FlyerProviderThrottledException("429", TimeSpan.FromMinutes(30)),
+            _ => throw new InvalidOperationException("Mart C must never be fetched"),
+        });
+        var svc = Build(provider);
+
+        var result = await svc.RunSyncAsync(force: true);
+
+        Assert.Equal(2, provider.Calls);   // A + B; C never attempted
+        Assert.Equal(1, result.StoresSynced);
+        using (var conn = _factory.Open())
+            Assert.Single(FlyersRepo.ListActiveDeals(conn, storeId: storeA)); // A's commit survived the abort
+        var meta = svc.ReadMeta();
+        Assert.NotNull(meta.Success);      // a partial run with one committed store is still a success
+        Assert.NotNull(meta.RetryNotBefore);
+    }
+
     // ---------------- retention ----------------
 
     [Fact]
