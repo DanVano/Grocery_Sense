@@ -222,6 +222,25 @@ public sealed class PricesRepoTests
         Assert.Empty(PricesRepo.GetActiveFlyerPricesBatch(db.Conn, new[] { item }, new[] { store }));
     }
 
+    // The DESC+LIMIT+Reverse contract: limit picks the most-recent N, but the caller-facing order stays
+    // ASC (same as the no-limit path). Distinct dates + prices so a dropped Reverse() fails, not passes.
+    [Fact]
+    public void GetPricesForItem_with_limit_returns_most_recent_N_in_ascending_order()
+    {
+        using var db = new TempDb();
+        var (item, store) = Seed(db);
+        PricesRepo.AddPricePoint(db.Conn, item, store, 1.00, "each", source: "receipt", date: DaysAgo(10));
+        PricesRepo.AddPricePoint(db.Conn, item, store, 2.00, "each", source: "receipt", date: DaysAgo(8));
+        PricesRepo.AddPricePoint(db.Conn, item, store, 3.00, "each", source: "receipt", date: DaysAgo(4));
+        PricesRepo.AddPricePoint(db.Conn, item, store, 4.00, "each", source: "receipt", date: DaysAgo(2));
+
+        var rows = PricesRepo.GetPricesForItem(db.Conn, item, limit: 2);
+
+        // The two NEWEST points (d-4, d-2) survive the limit — and come back oldest-first.
+        Assert.Equal(new[] { DaysAgo(4), DaysAgo(2) }, rows.Select(p => p.Date).ToArray());
+        Assert.Equal(new[] { 3.00, 4.00 }, rows.Select(p => p.UnitPrice).ToArray());
+    }
+
     [Fact]
     public void LastSeenAtOrBelow_returns_most_recent_under_ceiling()
     {
