@@ -51,6 +51,22 @@ public sealed class MealSuggestionServiceTests
         Assert.DoesNotContain("Peanut Chicken Noodles", Names(s));
     }
 
+    // HIGH safety: WeeklyPlannerService calls SuggestMealsForWeek WITHOUT a profile in production, so a
+    // null profile must resolve through the injected defaultProfile Func — a broken fallback would
+    // silently drop the household's allergy filtering.
+    [Fact]
+    public void Null_profile_falls_back_to_default_profile_and_still_filters_allergens()
+    {
+        using var db = new TempDb();
+        var svc = new MealSuggestionService(new RecipeEngine(Fixtures.RecipesSamplePath), priceHistory: null,
+            factory: db.Factory, defaultProfile: () => new MealProfile { Allergies = ["peanuts"] });
+
+        var s = svc.SuggestMealsForWeek(profile: null, maxRecipes: 20);
+
+        Assert.NotEmpty(s); // the fallback produced a usable profile, not an empty candidate set
+        Assert.DoesNotContain("Peanut Chicken Noodles", Names(s));
+    }
+
     [Fact]
     public void Empty_after_filters_returns_empty()
     {
@@ -151,6 +167,33 @@ public sealed class MealSuggestionServiceTests
         var s = Svc(db).SuggestMealsForWeek(new MealProfile(), maxRecipes: 20);
         var chicken = s.First(m => m.Recipe.Name == "Chicken Thighs with Rice");
         Assert.True(chicken.PriceScore > 0);
+    }
+
+    // Baseline + cheaper deal branch: with a wired PriceHistoryService baseline AND an active flyer deal
+    // below it, the contribution is the clamped % discount with the "below your usual price" reason.
+    // (The flyer test above passes priceHistory: null, so only the 0.15 no-baseline fallback runs there.)
+    [Fact]
+    public void Flyer_deal_below_receipt_baseline_scores_the_discount_with_reason()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Deal Mart").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "chicken thighs").Id;
+        PricesRepo.AddPricePoint(db.Conn, item, store, 10.0, "each", source: "manual", date: DaysAgo(10));
+
+        var today = DateTime.Now;
+        var batch = FlyersRepo.CreateFlyerBatch(db.Conn, store,
+            today.AddDays(-1).ToString("yyyy-MM-dd"), today.AddDays(6).ToString("yyyy-MM-dd"), sourceType: "test");
+        FlyersRepo.AddDeals(db.Conn, new[] { Deal(batch, store, "chicken thighs", unitPrice: 6.0m) });
+
+        var svc = new MealSuggestionService(new RecipeEngine(Fixtures.RecipesSamplePath),
+            new PriceHistoryService(db.Factory), db.Factory);
+        var chicken = svc.SuggestMealsForWeek(new MealProfile(), maxRecipes: 20)
+            .First(m => m.Recipe.Name == "Chicken Thighs with Rice");
+
+        // (10 - 6) / 10 = 0.40 for the one priced ingredient, averaged over the recipe's 5 ingredients.
+        // 0.08 != 0.15/5 = 0.03, so this pins the discount branch, not the no-baseline fallback.
+        Assert.Equal(0.40 / 5, chicken.PriceScore, 5);
+        Assert.Contains(chicken.Reasons, r => r.Contains("below your usual price"));
     }
 
     [Fact]
