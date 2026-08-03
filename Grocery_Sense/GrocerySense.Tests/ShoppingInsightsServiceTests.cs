@@ -77,6 +77,26 @@ public sealed class ShoppingInsightsServiceTests : TempDirTestBase
         Assert.Equal("wait", insight.Badge);
     }
 
+    // PriceQuoteLadder's flyer branch through the service: at the planned store an active flyer deal is
+    // the quote (source "flyer"), not the most-recent receipt/manual price — and it feeds the subtotal.
+    [Fact]
+    public void Active_flyer_deal_prices_the_row_ahead_of_the_most_recent_store_price()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Milk").Id;
+        SeedUsualTen(db.Conn, item, store);
+        PricesRepo.AddPricePoint(db.Conn, item, store, 9.0, "each", source: "manual", date: DaysAgo(0));
+        SeedActiveFlyerDeal(db, store, "Milk 2L", "7.00", itemId: item, unit: "each"); // cheaper than the $9 latest
+        ShoppingListRepo.AddItem(db.Conn, "Milk", plannedStoreId: store, itemId: item);
+
+        var group = Assert.Single(Svc(db).BuildShopModeView());
+        var insight = Assert.Single(group.Items);
+        Assert.Equal(7.0, insight.CurrentPrice!.Value, 4);
+        Assert.Equal("flyer", insight.PriceSource);
+        Assert.Equal(7.0, group.SubtotalEstimated, 4); // the flyer quote is what the trip is costed at
+    }
+
     [Fact]
     public void Unmapped_or_unpriced_rows_get_no_badge_and_count_as_unpriced()
     {
