@@ -224,6 +224,137 @@ public sealed class BasketOptimizerServiceTests : TempDirTestBase
         Assert.DoesNotContain(r.Warnings, w => w.Contains("wait for sale"));
     }
 
+    // AggregatePriority: a normal row for the same item overrides a wait_for_sale row — the item is
+    // planned even though it is NOT on sale (both wait tests above use single-row items).
+    [Fact]
+    public void Normal_row_overrides_wait_for_sale_row_for_the_same_item()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        var a = Store(db, "A");
+        var steak = ItemsRepo.CreateItem(db.Conn, "steak").Id;
+        ShoppingListRepo.AddItem(db.Conn, "steak", itemId: steak, priority: "wait_for_sale");
+        ShoppingListRepo.AddItem(db.Conn, "steak", itemId: steak); // second row defaults to "normal"
+        Price(db, steak, a, 10); Price(db, steak, a, 10); Price(db, steak, a, 10); // usual ~10 => not on sale
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Equal(a, StoreOf(r, steak));
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("wait for sale"));
+    }
+
+    // PhraseSafeHit doubles as the Deals-page allergen gate — pin its whole-word/phrase semantics directly.
+    [Theory]
+    [InlineData("popcorn", "corn", false)]                    // whole-word: excluding corn must not hide popcorn
+    [InlineData("corn flakes", "corn", true)]
+    [InlineData("Corn Flakes", "CORN", true)]                 // case-insensitive on both sides
+    [InlineData("extra virgin olive oil", "olive oil", true)] // multi-word term matches its full phrase
+    [InlineData("olive tapenade", "olive oil", false)]        // ...never just one of its words
+    [InlineData("canola oil", "olive oil", false)]
+    public void PhraseSafeHit_matches_whole_words_and_full_phrases_only(string text, string term, bool expected)
+        => Assert.Equal(expected, BasketOptimizerService.PhraseSafeHit(text, term));
+
+    // ---------------- exact threshold boundaries at the default gates ----------------
+    // Move gate is coded `cand <= price * (1 - pct)` (inclusive), store gate `saving >= minSave`
+    // (inclusive). 10.00 * (1 - 0.10) == 9.00 exactly in doubles, so these boundaries are FP-safe.
+
+    // qty 6 makes the would-be saving $5.94/$6.00, comfortably over the $5 floor — so the ONLY thing
+    // separating these two tests is the percent comparison itself.
+    [Fact]
+    public void Item_exactly_ten_percent_cheaper_moves_stores()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        int a = Store(db, "A"), b = Store(db, "B");
+        int anchor = Listed(db, "anchor"), y = Listed(db, "y", quantity: 6);
+        Price(db, anchor, a, 1.00); Price(db, anchor, b, 50.00); // keeps A primary
+        Price(db, y, a, 10.00); Price(db, y, b, 9.00);           // exactly 10% cheaper
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Equal(2, r.Stores.Count);
+        Assert.Equal(b, StoreOf(r, y));
+    }
+
+    [Fact]
+    public void Item_just_under_ten_percent_cheaper_stays_at_primary()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        int a = Store(db, "A"), b = Store(db, "B");
+        int anchor = Listed(db, "anchor"), y = Listed(db, "y", quantity: 6);
+        Price(db, anchor, a, 1.00); Price(db, anchor, b, 50.00);
+        Price(db, y, a, 10.00); Price(db, y, b, 9.01);           // 9.9% cheaper — under the gate
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Single(r.Stores);
+        Assert.Equal(a, StoreOf(r, y));
+    }
+
+    // Both floor tests are 50% cheaper (far past the percent gate) — only the dollar floor decides.
+    [Fact]
+    public void Store_saving_of_exactly_five_dollars_joins()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        int a = Store(db, "A"), b = Store(db, "B");
+        int anchor = Listed(db, "anchor"), y = Listed(db, "y");
+        Price(db, anchor, a, 1.00); Price(db, anchor, b, 50.00);
+        Price(db, y, a, 10.00); Price(db, y, b, 5.00);           // saving exactly $5.00
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Equal(2, r.Stores.Count);
+        Assert.Equal(b, StoreOf(r, y));
+    }
+
+    [Fact]
+    public void Store_saving_just_under_five_dollars_is_refused()
+    {
+        using var db = new TempDb();
+        var (svc, _) = Build(db);
+        int a = Store(db, "A"), b = Store(db, "B");
+        int anchor = Listed(db, "anchor"), y = Listed(db, "y");
+        Price(db, anchor, a, 1.00); Price(db, anchor, b, 50.00);
+        Price(db, y, a, 10.00); Price(db, y, b, 5.01);           // saving $4.99
+
+        var r = svc.Optimize("best_savings");
+
+        Assert.Single(r.Stores);
+        Assert.Equal(a, StoreOf(r, y));
+    }
+
+    // The cap is `plannedStores.Count < maxStores`: the same fully-qualifying store refused at the
+    // default 3 is admitted once the setting says 4 — the cap alone was the refusal.
+    [Fact]
+    public void Fourth_qualifying_store_is_refused_at_cap_and_admitted_when_raised()
+    {
+        using var db = new TempDb();
+        var (svc, config) = Build(db); // default maxStores = 3
+        int a = Store(db, "A"), b = Store(db, "B"), c = Store(db, "C"), d = Store(db, "D");
+        // anchor stays at A so the primary's plan is never empty (an empty store plan is dropped from the result)
+        int anchor = Listed(db, "anchor");
+        Price(db, anchor, a, 1); Price(db, anchor, b, 50); Price(db, anchor, c, 50); Price(db, anchor, d, 50);
+        int i1 = Listed(db, "i1"), i2 = Listed(db, "i2"), i3 = Listed(db, "i3");
+        foreach (var id in new[] { i1, i2, i3 }) Price(db, id, a, 20);
+        // each rival is cheap on exactly one item (>=10% and >=$5), expensive elsewhere (A stays primary)
+        Price(db, i1, b, 14); Price(db, i2, b, 30); Price(db, i3, b, 30); // save 6 — the weakest rival
+        Price(db, i1, c, 30); Price(db, i2, c, 13); Price(db, i3, c, 30); // save 7
+        Price(db, i1, d, 30); Price(db, i2, d, 30); Price(db, i3, d, 12); // save 8
+
+        var capped = svc.Optimize("best_savings");
+        Assert.Equal(3, capped.Stores.Count);
+        Assert.DoesNotContain(capped.Stores, s => s.StoreId == b); // qualifies, refused by the cap alone
+        Assert.Equal(a, StoreOf(capped, i1));
+
+        config.Save(config.Load() with { MaxStores = 4 });
+        var raised = svc.Optimize("best_savings");
+        Assert.Equal(b, StoreOf(raised, i1)); // admitted now — the cap alone was the refusal
+        Assert.Equal(4, raised.Stores.Count); // anchor keeps A in the plan, B/C/D each carry one item
+        Assert.Equal(a, StoreOf(raised, anchor));
+    }
+
     // I2: usualAvg is now inflation-adjusted + recency-weighted, so an old cheap price no longer drags the
     // baseline down. A naive two-point mean of (2, 4) = 3 would report SaveVsUsual = 3 - 4 = -1 (looks like
     // overpaying); the weighted-adjusted baseline stays near the recent 4, so the phantom "overpay" vanishes.
