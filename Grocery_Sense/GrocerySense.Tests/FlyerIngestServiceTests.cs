@@ -205,26 +205,29 @@ public sealed class FlyerIngestServiceTests : TempDirTestBase
         Assert.Equal(0, result.DealsCount);
     }
 
-    // The whole flyer write (batch + assets + raw-json + deals) is one transaction: a mid-write failure
-    // leaves zero rows. Drive the same sequence the service uses and poison the deal insert with a bad FK.
+    // No-partial-rows (CLAUDE.md): the service's Phase B transaction (batch + assets + raw-json + deals)
+    // must roll back as a unit. Poison the LAST insert in the sequence with a trigger and drive the real
+    // IngestAssetsAsync — a service that moved any write outside the tx (or dropped the commit) fails here.
     [Fact]
-    public void Flyer_write_is_atomic_no_partial_rows_after_failure()
+    public async Task Flyer_write_is_atomic_no_partial_rows_after_failure()
     {
         using var db = new TempDb();
         var storeId = StoresRepo.CreateStore(db.Conn, "Mart").Id;
+        var svc = Build(db, CannedLayout());
 
-        using (var tx = db.Conn.BeginTransaction())
+        using (var cmd = db.Conn.CreateCommand())
         {
-            var flyerId = FlyersRepo.CreateFlyerBatch(db.Conn, storeId, "2026-06-20", "2026-06-27", tx: tx);
-            FlyersRepo.AddAsset(db.Conn, flyerId, "image", "/tmp/f.png", "sha", tx);
-            // deal pointing at a non-existent flyer_id -> FK violation on flyer_deals.flyer_id.
-            var poisoned = Deal(999999, storeId, "X", unitPrice: 1m, priceText: "$1"); // FK to a missing batch
-            Assert.ThrowsAny<SqliteException>(() => FlyersRepo.AddDeals(db.Conn, new[] { poisoned }, tx));
-            tx.Rollback();
+            cmd.CommandText = "CREATE TRIGGER fail_deal BEFORE INSERT ON flyer_deals " +
+                              "BEGIN SELECT RAISE(ABORT, 'boom'); END;";
+            cmd.ExecuteNonQuery();
         }
+
+        await Assert.ThrowsAnyAsync<SqliteException>(() =>
+            svc.IngestAssetsAsync(storeId, "2026-06-20", "2026-06-27", new[] { WriteAsset("flyer-bytes") }));
 
         Assert.Equal(0L, Count(db.Conn, "flyer_batches"));
         Assert.Equal(0L, Count(db.Conn, "flyer_assets"));
+        Assert.Equal(0L, Count(db.Conn, "flyer_raw_json"));
         Assert.Equal(0L, Count(db.Conn, "flyer_deals"));
     }
 
