@@ -11,12 +11,14 @@ public sealed class ScanAlertNotificationServiceTests
     private sealed class FakeLocalNotifier : ILocalNotifier
     {
         public bool Result = true;
+        public bool Throw; // platform notifier faulted outright (vs Result=false: shown attempt denied)
         public int Calls;
         public string? LastBody;
         public Task<bool> ShowAsync(string title, string body, CancellationToken ct = default)
         {
             Calls++;
             LastBody = body;
+            if (Throw) throw new InvalidOperationException("notifier down");
             return Task.FromResult(Result);
         }
     }
@@ -91,6 +93,22 @@ public sealed class ScanAlertNotificationServiceTests
         Assert.Equal(1, result.Opened);  // in-app line still shows
         Assert.False(result.Notified);
         Assert.Equal(1, notifier.Calls); // it WAS attempted
+    }
+
+    [Fact]
+    public async Task Notifier_throw_is_isolated_scan_result_still_returned()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var eggs = SeedUsual(db, store, "Eggs", 10.0);
+        var scanRid = AddScanReceipt(db, store, eggs, 7.0);
+        var notifier = new FakeLocalNotifier { Throw = true };
+
+        var result = await Svc(db, notifier).AfterSingleScanAsync(scanRid); // must not rethrow
+
+        Assert.Equal(1, result.Opened);  // the alert still opened; the in-app line still shows it
+        Assert.False(result.Notified);
+        Assert.Equal(1, notifier.Calls); // it WAS attempted before faulting
     }
 
     [Fact]
