@@ -131,6 +131,21 @@ public sealed class RecipeEngineTests : TempDirTestBase
         Assert.Contains("Coconut Rice", names);              // token match must NOT let "peanut" leak into "coconut"
     }
 
+    // Safety: a multi-word allergy is a whole-phrase match (ProfileFilter.WholeWord) — "sesame oil" must
+    // block the recipe containing it, but NOT recipes with only "sesame" or only "oil" (an over-broad
+    // token match would wrongly ban half the catalog; an under-match would let the allergen through).
+    [Fact]
+    public void Multi_word_allergy_blocks_only_the_whole_phrase()
+    {
+        var eng = new RecipeEngine(WriteJson(
+            """[{"id":1,"name":"Sesame Oil Noodles","ingredients":["sesame oil","rice"]},{"id":2,"name":"Sesame Seed Salad","ingredients":["sesame seeds","rice"]},{"id":3,"name":"Olive Oil Pasta","ingredients":["olive oil","rice"]}]"""));
+        var names = eng.FilterByIngredientsAndProfile(new[] { "rice" },
+            new MealProfile { Allergies = ["sesame oil"] }).Select(r => r.Name).ToHashSet();
+        Assert.DoesNotContain("Sesame Oil Noodles", names);
+        Assert.Contains("Sesame Seed Salad", names);
+        Assert.Contains("Olive Oil Pasta", names);
+    }
+
     [Fact]
     public void Avoid_ingredients_blocks_recipe() =>
         Assert.Empty(Sample().FilterByIngredientsAndProfile(new[] { "bread" },
