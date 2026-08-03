@@ -195,6 +195,27 @@ public sealed class ShoppingListServiceTests
         Assert.Contains("not price-tracked", row.Notes);
     }
 
+    // A deal whose ItemId went stale (item deleted/merged after flyer sync) must land as an unmapped row:
+    // flyer title as display name, item link dropped (FK safety), "not price-tracked" disclosed — no throw.
+    [Fact]
+    public void AddDealToList_stale_item_id_lands_unmapped_and_disclosed()
+    {
+        using var db = new TempDb();
+        var svc = new ShoppingListService(db.Factory, new IngredientMappingService(db.Factory));
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var deal = MakeDeal(store, title: "MILK 2L", priceText: "2/$5", itemId: 999999); // no such item
+
+        var rowId = svc.AddDealToList(deal);
+
+        var row = Assert.Single(svc.GetActiveItems());
+        Assert.Equal(rowId, row.Id);
+        Assert.Equal("MILK 2L", row.DisplayName); // flyer title, not a canonical name
+        Assert.Null(row.ItemId);                  // stale link dropped, never inserted dangling
+        Assert.Equal(store, row.PlannedStoreId);
+        Assert.Contains("From deal: 2/$5", row.Notes);
+        Assert.Contains("not price-tracked", row.Notes);
+    }
+
     [Fact]
     public void AddAlertToList_carries_suggested_quantity_and_note()
     {
