@@ -51,6 +51,41 @@ public sealed class InflationRatesTests
         Assert.Equal((1.0, false), InflationRates.Multiplier(new(2023, 5, 1), new(2023, 5, 1), Rates));
     }
 
+    // ---- WeightedAdjustedAverage (the I1 recency-weighted baseline) ----
+
+    [Fact]
+    public void Weighted_average_of_no_points_is_null_with_zero_samples()
+    {
+        var (baseline, n) = InflationRates.WeightedAdjustedAverage(
+            Array.Empty<(DateOnly, double)>(), new DateOnly(2026, 8, 1), Rates);
+        Assert.Null(baseline);
+        Assert.Equal(0, n);
+    }
+
+    [Fact]
+    public void Recent_point_outweighs_older_one_via_the_90_day_half_life()
+    {
+        // Empty rates => multiplier 1 for both points, so ONLY the recency weight differs:
+        // weights 1 and 0.5^(180/90) = 0.25 -> (10 + 20*0.25) / 1.25 = 12, not the unweighted 15.
+        var today = new DateOnly(2026, 8, 1);
+        var (baseline, n) = InflationRates.WeightedAdjustedAverage(
+            new[] { (today, 10.0), (today.AddDays(-180), 20.0) }, today, new Dictionary<string, double>());
+        Assert.Equal(12.0, baseline!.Value, precision: 6);
+        Assert.Equal(2, n);
+    }
+
+    [Fact]
+    public void Future_dated_point_is_treated_as_current_never_deflated()
+    {
+        // Multiplier(to <= from) = 1 and ageDays clamps to 0 (weight 1), so the price passes through
+        // untouched even with real rates in the table — no deflation, no down-weighting.
+        var today = new DateOnly(2024, 6, 1);
+        var (baseline, n) = InflationRates.WeightedAdjustedAverage(
+            new[] { (today.AddDays(30), 10.0) }, today, Rates);
+        Assert.Equal(10.0, baseline!.Value, precision: 6);
+        Assert.Equal(1, n);
+    }
+
     [Theory]
     [InlineData(-20.0, true)]
     [InlineData(50.0, true)]
