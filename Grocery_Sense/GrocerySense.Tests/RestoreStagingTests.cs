@@ -92,6 +92,54 @@ public sealed class RestoreStagingTests : IDisposable
         Assert.Equal("50.00", Scalar(liveFactory.DbPath, "SELECT total_amount FROM receipts"));
     }
 
+    // The realistic user mistake: picking some OTHER app's perfectly healthy SQLite file. It passes
+    // integrity_check, so the expected-tables sanity check is what must reject it.
+    [Fact]
+    public void Valid_sqlite_file_that_is_not_a_grocery_sense_db_is_rejected_at_validation()
+    {
+        var liveFactory = SeededDb("live.db", "50.00");
+        var alien = NewDbPath("alien.db");
+        using (var conn = new SqliteConnection($"Data Source={alien}"))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO notes (body) VALUES ('x');";
+            cmd.ExecuteNonQuery();
+        }
+        SqliteConnection.ClearAllPools();
+
+        var ex = Assert.Throws<InvalidDataException>(() => RestoreStaging.StageRestore(liveFactory.DbPath, alien));
+
+        Assert.Contains("not a Grocery Sense database", ex.Message);
+        Assert.False(RestoreStaging.HasPendingRestore(liveFactory.DbPath)); // no marker armed
+        Assert.Equal("50.00", Scalar(liveFactory.DbPath, "SELECT total_amount FROM receipts"));
+    }
+
+    [Fact]
+    public void Backup_with_orphan_rows_fails_foreign_key_check_and_is_rejected()
+    {
+        var sourceFactory = SeededDb("source.db", "12.34");
+        var backup = new DbMaintenanceService(sourceFactory).BackupDatabase(NewDbPath("backup.db"));
+        // Plant an orphan in the backup: a watchlist row pointing at a nonexistent item. FK enforcement is
+        // off on this connection so the write lands — exactly the damage foreign_key_check exists to catch.
+        using (var conn = new SqliteConnection($"Data Source={backup};Foreign Keys=False"))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT INTO watchlist (item_id) VALUES (999999)";
+            cmd.ExecuteNonQuery();
+        }
+        SqliteConnection.ClearAllPools();
+        var livePath = SeededDb("live.db", "50.00").DbPath;
+        SqliteConnection.ClearAllPools();
+
+        var ex = Assert.Throws<InvalidDataException>(() => RestoreStaging.StageRestore(livePath, backup));
+
+        Assert.Contains("foreign_key_check", ex.Message);
+        Assert.False(RestoreStaging.HasPendingRestore(livePath));
+        Assert.Equal("50.00", Scalar(livePath, "SELECT total_amount FROM receipts"));
+    }
+
     [Fact]
     public void Backup_with_a_newer_schema_version_is_rejected_at_restore()
     {
@@ -150,6 +198,46 @@ public sealed class RestoreStagingTests : IDisposable
         Assert.True(File.Exists(livePath)); // rolled back deterministically
         Assert.False(RestoreStaging.HasPendingRestore(livePath));
         Assert.Equal("42.00", Scalar(livePath, "SELECT total_amount FROM receipts"));
+    }
+
+    [Fact]
+    public void Crash_after_live_moved_out_finishes_the_swap_from_staged()
+    {
+        // Crash window: marker armed, live already moved to .pre-restore, staged not yet consumed.
+        // The rerun MUST finish the swap — otherwise the device boots with no database at all.
+        var liveFactory = SeededDb("live.db", "42.00");
+        var livePath = liveFactory.DbPath;
+        var stagedFactory = SeededDb("restore_staged.db", "12.34"); // name matches RestoreStaging.StagedName
+        SqliteConnection.ClearAllPools();
+
+        File.WriteAllText(RestoreStaging.MarkerPath(livePath), "restore_staged.db");
+        File.Move(livePath, RestoreStaging.PreRestorePath(livePath)); // earlier run got this far, then died
+
+        RestoreStaging.CompletePendingRestore(livePath);
+
+        Assert.True(File.Exists(livePath)); // the swap finished — a live DB exists
+        Assert.False(RestoreStaging.HasPendingRestore(livePath));
+        Assert.False(File.Exists(stagedFactory.DbPath)); // staged copy was consumed, not duplicated
+        Assert.Equal("12.34", Scalar(livePath, "SELECT total_amount FROM receipts")); // it's the STAGED data
+        Assert.Equal("42.00", Scalar(RestoreStaging.PreRestorePath(livePath), "SELECT total_amount FROM receipts"));
+    }
+
+    [Fact]
+    public void Crash_after_swap_finished_only_clears_the_marker_and_leaves_live_untouched()
+    {
+        // Crash window: swap fully done (staged consumed, live is the restored file), marker still armed.
+        // The rerun must ONLY delete the marker — the live DB stays byte-identical.
+        var liveFactory = SeededDb("live.db", "12.34");
+        var livePath = liveFactory.DbPath;
+        SqliteConnection.ClearAllPools();
+        File.WriteAllText(RestoreStaging.MarkerPath(livePath), "restore_staged.db");
+        var before = File.ReadAllBytes(livePath);
+
+        RestoreStaging.CompletePendingRestore(livePath);
+
+        Assert.False(RestoreStaging.HasPendingRestore(livePath));
+        Assert.Equal(before, File.ReadAllBytes(livePath)); // byte-identical, no second swap
+        Assert.False(File.Exists(RestoreStaging.PreRestorePath(livePath))); // nothing was moved out
     }
 
     [Fact]
