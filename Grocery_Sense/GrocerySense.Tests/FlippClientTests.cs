@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
+using GrocerySense.Core.Abstractions;
 using GrocerySense.Integrations;
 
 namespace GrocerySense.Tests;
@@ -102,6 +104,67 @@ public sealed class FlippClientTests
     {
         var (client, _) = Build(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
         await Assert.ThrowsAsync<HttpRequestException>(() => client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+    }
+
+    // 429/403 must surface as the typed throttle exception (not plain HttpRequestException) so
+    // FlyerSyncService can persist retry_not_before and abort the remaining stores.
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Throttle_status_throws_typed_exception_with_null_retry_after_when_header_absent(
+        HttpStatusCode status)
+    {
+        var (client, _) = Build(_ => new HttpResponseMessage(status));
+
+        var ex = await Assert.ThrowsAsync<FlyerProviderThrottledException>(
+            () => client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+
+        Assert.Null(ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task Retry_after_delta_header_is_surfaced()
+    {
+        var (client, _) = Build(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Headers = { RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(90)) },
+        });
+
+        var ex = await Assert.ThrowsAsync<FlyerProviderThrottledException>(
+            () => client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+
+        Assert.Equal(TimeSpan.FromSeconds(90), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task Retry_after_date_header_is_converted_to_delay()
+    {
+        var (client, _) = Build(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Headers = { RetryAfter = new RetryConditionHeaderValue(DateTimeOffset.UtcNow.AddMinutes(5)) },
+        });
+
+        var ex = await Assert.ThrowsAsync<FlyerProviderThrottledException>(
+            () => client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+
+        Assert.NotNull(ex.RetryAfter);
+        Assert.InRange(ex.RetryAfter!.Value, TimeSpan.FromMinutes(4), TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public async Task Item_level_validity_dates_override_flyer_window()
+    {
+        const string items =
+            """
+            [{"name":"Ribeye Steak","current_price":9.99,"valid_from":"2026-07-11T00:00:00-04:00","valid_to":"2026-07-12T00:00:00-04:00"}]
+            """;
+        var (client, _) = Build(req =>
+            req.RequestUri!.AbsolutePath.EndsWith("/flyer_items") ? Json(items) : Json(FlyersJson));
+
+        var deal = Assert.Single(await client.FetchFlyersForStoreAsync("No Frills", "M5V"));
+
+        Assert.Equal("2026-07-11", deal.ValidFrom); // item's own window wins over the flyer's 07-09..07-16
+        Assert.Equal("2026-07-12", deal.ValidTo);
     }
 
     [Fact]
