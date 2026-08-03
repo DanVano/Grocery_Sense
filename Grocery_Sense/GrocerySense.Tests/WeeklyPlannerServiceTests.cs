@@ -1,5 +1,6 @@
 using GrocerySense.Core;
 using GrocerySense.Data.Repositories;
+using Microsoft.Data.Sqlite;
 using static GrocerySense.Tests.TestSeed;
 
 namespace GrocerySense.Tests;
@@ -200,4 +201,24 @@ public sealed class WeeklyPlannerServiceTests
         }
     }
 
+    // Multi-row tx-write convention: one poisoned insert rolls the whole persist back — never a partial list.
+    [Fact]
+    public void Persist_leaves_zero_rows_when_one_insert_fails()
+    {
+        using var db = new TempDb();
+        var planner = Planner(db);
+        var plan = planner.BuildWeeklyPlan(numRecipes: 2);
+        Assert.True(plan.PlannedIngredients.Count >= 2); // earlier rows must exist for "partial" to be possible
+
+        // Poison the LAST ingredient's insert, so every earlier row has already landed inside the tx.
+        var poisoned = plan.PlannedIngredients[^1].Name.Trim().Replace("'", "''");
+        Exec(db.Conn, $"""
+            CREATE TRIGGER poison_persist BEFORE INSERT ON shopping_list
+            WHEN NEW.display_name = '{poisoned}'
+            BEGIN SELECT RAISE(ABORT, 'poisoned'); END;
+            """);
+
+        Assert.ThrowsAny<SqliteException>(() => planner.PersistToShoppingList(plan));
+        Assert.Equal(0L, Count(db.Conn, "shopping_list"));
+    }
 }
