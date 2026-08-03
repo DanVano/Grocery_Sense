@@ -95,6 +95,38 @@ public sealed class PriceDropAlertServiceTests
         Assert.Single(svc.GetAlerts(0));
     }
 
+    // The refresh DELETE is scoped `source = 'engine'` — losing that filter would silently wipe the
+    // user-visible receipt-sourced alerts on every engine refresh.
+    [Fact]
+    public void RefreshEngineAlerts_does_not_delete_open_receipt_alerts()
+    {
+        using var db = new TempDb();
+        var (_, _, recent) = SeedStapleWithDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.ScanReceipt(recent));
+        Assert.Equal(1, svc.RefreshEngineAlerts());
+
+        var alerts = svc.GetAlerts(0);
+        Assert.Equal(2, alerts.Count);
+        Assert.Contains(alerts, a => a.Source == "receipt"); // survived the engine-scoped DELETE
+        Assert.Contains(alerts, a => a.Source == "engine");
+    }
+
+    [Fact]
+    public void ScanReceipt_does_not_reopen_a_dismissed_alert()
+    {
+        using var db = new TempDb();
+        var (_, _, recent) = SeedStapleWithDrop(db);
+        var svc = new PriceDropAlertService(db.Factory);
+        Assert.Equal(1, svc.ScanReceipt(recent));
+
+        svc.DismissAlert(svc.GetAlerts(0).Single().Id!.Value);
+
+        Assert.Equal(0, svc.ScanReceipt(recent)); // within the 30-day suppression window
+        Assert.Empty(svc.GetAlerts(0));
+    }
+
     [Fact]
     public void StaplesOnly_false_scans_non_staple_tracked_items()
     {
@@ -140,6 +172,30 @@ public sealed class PriceDropAlertServiceTests
         Assert.Equal("both", a.AlertKind);
         Assert.Equal(1.0, a.SuggestedQty!.Value, 4);
         Assert.Contains("week", a.SuggestedQtyNote);
+    }
+
+    // Cooldown BLOCKING path (the test above covers the 40-day pass): same shape, but the $7 low was seen
+    // 10 days ago — inside the 30-day stock-up cooldown — so the near-low signal must NOT upgrade the
+    // 30%-below-usual alert from "below_usual" to "both".
+    [Fact]
+    public void Low_seen_inside_the_stockup_cooldown_blocks_the_stockup_kind()
+    {
+        using var db = new TempDb();
+        var store = StoresRepo.CreateStore(db.Conn, "Loblaws").Id;
+        var item = ItemsRepo.CreateItem(db.Conn, "Oats").Id;
+        foreach (var (d, price) in new[] { (80, 10.0), (60, 10.0), (40, 10.0), (10, 7.0) })
+        {
+            var rid = AddReceipt(db.Conn, store, DaysAgo(d));
+            PricesRepo.AddPricePoint(db.Conn, item, store, price, "each", quantity: 1.0,
+                source: "receipt", date: DaysAgo(d), receiptId: rid);
+        }
+        var svc = new PriceDropAlertService(db.Factory);
+
+        Assert.Equal(1, svc.RefreshEngineAlerts());
+
+        var a = Assert.Single(svc.GetAlerts());
+        Assert.Equal("below_usual", a.AlertKind); // not "both"
+        Assert.Null(a.SuggestedQty);              // stock-up qty only accompanies stock_up/both
     }
 
     // Split-brain regression (flyer unification): a synced flyer_deals row is the "current price" the
