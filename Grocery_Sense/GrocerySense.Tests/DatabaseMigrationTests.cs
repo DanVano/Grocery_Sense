@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using GrocerySense.Data;
 
 namespace GrocerySense.Tests;
@@ -123,6 +126,80 @@ public sealed class DatabaseMigrationTests : IDisposable
         // Must SEARCH the coalesced-date index, and must NOT fall back to scanning the prices table.
         Assert.Contains(details, d => d.Contains("idx_prices_coalesced_date", StringComparison.Ordinal));
         Assert.DoesNotContain(details, d => d.Contains("SCAN prices", StringComparison.Ordinal));
+    }
+
+    // Append-only content guard: the other tests check schema SHAPE, so an edited shipped migration that
+    // still yields a working fresh install slips through — exactly what the "never edit a shipped
+    // migration" rule forbids (it forks fresh installs from already-upgraded devices). Pin each entry's
+    // text by hash. Appending migration N+1 = append one hash here; any other diff = a shipped edit.
+    // Reflection (not InternalsVisibleTo) so the guard needs zero changes in Data; tests never run AOT.
+    [Fact]
+    public void Shipped_migration_text_is_pinned_append_only()
+    {
+        string[] expected =
+        {
+            "8DFBBB605F42", "99E952033B8D", "1438C084820C", "09F9DFAC0688", "0A6501CC0611",
+            "7429205583F9", "D1C5E8CFA323", "5705D9AB3C21", "DA19DBE7B07B",
+        };
+
+        var field = typeof(Database).GetField("_migrations", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(field); // renamed ledger field = update this guard deliberately
+        var migrations = (string[])field!.GetValue(null)!;
+        // Normalize newlines: the raw string literals inherit the checkout's line endings.
+        var actual = migrations
+            .Select(m => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(m.Replace("\r\n", "\n"))))[..12])
+            .ToArray();
+
+        for (var i = 0; i < Math.Min(expected.Length, actual.Length); i++)
+            Assert.True(expected[i] == actual[i],
+                $"Shipped migration {i + 1} changed (hash {actual[i]}, pinned {expected[i]}). " +
+                "Never edit a shipped migration — append a new one instead.");
+        Assert.True(actual.Length >= expected.Length,
+            $"Shipped migration(s) deleted: ledger has {actual.Length}, {expected.Length} pinned.");
+        Assert.True(actual.Length == expected.Length,
+            "New migration(s) appended — pin them by extending expected to:\n" +
+            "{ " + string.Join(", ", actual.Select(h => $"\"{h}\"")) + " }");
+    }
+
+    // "Money = TEXT, never REAL" lives only in comments; nothing stops a future migration shipping a REAL
+    // money column (floats drop cents). Sweep every money-pattern column; the allowlist names the
+    // pre-existing REAL engine-math columns (normalized/derived comparison values, not money-of-record).
+    [Fact]
+    public void Money_pattern_columns_are_text_never_real()
+    {
+        var allowlist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "prices.norm_unit_price",            // normalized per-kg/each comparison value
+            "price_drop_alerts.current_price",   // alert engine unit-price doubles (ported shape)
+            "price_drop_alerts.usual_price",
+            "watchlist.target_price",            // user-set threshold compared against engine doubles
+        };
+        string[] moneyPatterns = { "price", "amount", "total", "discount" };
+
+        var factory = NewFactory();
+        Database.Initialize(factory);
+        using var conn = factory.Open();
+
+        var offenders = new List<string>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT m.name, p.name, p.type FROM sqlite_master m JOIN pragma_table_info(m.name) p " +
+            "WHERE m.type = 'table'";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var table = reader.GetString(0);
+            var column = reader.GetString(1);
+            var declared = reader.GetString(2);
+            if (!moneyPatterns.Any(p => column.Contains(p, StringComparison.OrdinalIgnoreCase))) continue;
+            if (!declared.Contains("REAL", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!allowlist.Contains($"{table}.{column}")) offenders.Add($"{table}.{column} ({declared})");
+        }
+
+        Assert.True(offenders.Count == 0,
+            "REAL money column(s) found — money must be TEXT round-tripping decimal (floats drop cents): " +
+            string.Join(", ", offenders) +
+            ". If a column is genuinely engine-math (not money-of-record), allowlist it here deliberately.");
     }
 
     private static int ReadVersion(Microsoft.Data.Sqlite.SqliteConnection conn)
