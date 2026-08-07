@@ -45,7 +45,7 @@ public static class ItemsAdminRepo
         // history rather than with the handful of rows actually returned.
         using var cmd = Db.Command(conn, tx, $"""
             WITH selected AS (
-                SELECT i.id, i.canonical_name, i.is_tracked, i.default_unit
+                SELECT i.id, i.canonical_name, i.is_tracked, i.default_unit, i.category
                 FROM items i
                 {where}
                 ORDER BY COALESCE(i.is_tracked, 0) DESC, i.canonical_name ASC
@@ -57,7 +57,7 @@ public static class ItemsAdminRepo
                 GROUP BY p.item_id
             )
             SELECT s.id, COALESCE(s.canonical_name, ''), COALESCE(s.is_tracked, 0), s.default_unit,
-                   COALESCE(ps.price_points, 0), ps.last_price_date
+                   COALESCE(ps.price_points, 0), ps.last_price_date, s.category
             FROM selected s
             LEFT JOIN price_stats ps ON ps.item_id = s.id
             ORDER BY COALESCE(s.is_tracked, 0) DESC, s.canonical_name ASC
@@ -69,7 +69,33 @@ public static class ItemsAdminRepo
         var rows = new List<ItemAdminRow>();
         while (r.Read())
             rows.Add(new ItemAdminRow(r.GetInt32(0), r.GetString(1), r.GetInt32(2) != 0,
-                r.GetStringOrNull(3)?.Trim().ToLowerInvariant(), r.GetInt32(4), r.GetStringOrNull(5)));
+                r.GetStringOrNull(3)?.Trim().ToLowerInvariant(), r.GetInt32(4), r.GetStringOrNull(5),
+                r.GetStringOrNull(6)));
+        return rows;
+    }
+
+    // V3 (finding 6): the swap feature's own coverage note tells users to "set categories on the Items
+    // page" — this is the write that makes that advice actionable. Empty clears. Categories drive
+    // same-category shopping substitutions ONLY, never protein/whole-food inference (grill F3 rule).
+    public static void SetItemCategory(SqliteConnection conn, int itemId, string? category,
+        SqliteTransaction? tx = null)
+    {
+        var cat = (category ?? "").Trim();
+        using var cmd = Db.Command(conn, tx, "UPDATE items SET category = $cat WHERE id = $id");
+        cmd.Parameters.AddWithValue("$cat", cat.Length == 0 ? DBNull.Value : cat);
+        cmd.Parameters.AddWithValue("$id", itemId);
+        if (cmd.ExecuteNonQuery() == 0)
+            throw new ArgumentException($"Item not found: {itemId}", nameof(itemId));
+    }
+
+    // Distinct existing categories (for the editor's suggestions — free vocabulary, consistency helps swaps).
+    public static IReadOnlyList<string> ListDistinctCategories(SqliteConnection conn, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "SELECT DISTINCT category FROM items WHERE category IS NOT NULL AND TRIM(category) <> '' ORDER BY category");
+        using var r = cmd.ExecuteReader();
+        var rows = new List<string>();
+        while (r.Read()) rows.Add(r.GetString(0));
         return rows;
     }
 

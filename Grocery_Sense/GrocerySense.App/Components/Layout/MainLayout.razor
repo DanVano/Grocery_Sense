@@ -26,7 +26,8 @@
         <MudNavMenu>
             <MudNavLink Href="/items" Icon="@Icons.Material.Filled.Category">Items</MudNavLink>
             <MudNavLink Href="/stores" Icon="@Icons.Material.Filled.Storefront">Stores</MudNavLink>
-            <MudNavLink Href="/plan" Icon="@Icons.Material.Filled.Route">Plan</MudNavLink>
+            @* /plan retired from nav (V3 grill Q10): its budget-defer view moved into the List page's trip
+               preview. The route stays alive as a safety net until on-device validation, then delete. *@
             <MudNavLink Href="/meals" Icon="@Icons.Material.Filled.Restaurant">Meals</MudNavLink>
             <MudNavLink Href="/family" Icon="@Icons.Material.Filled.Groups">
                 <div class="d-flex align-center">

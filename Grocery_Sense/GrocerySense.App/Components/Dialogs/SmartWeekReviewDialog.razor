@@ -1,0 +1,104 @@
+@* V3 Smart Week pantry review (grill Q6/F3): every ingredient grouped by state, every pantry inference
+   user-overridable via the checkbox. Returns the checked SmartWeekConfirmIngredient list, or cancels. *@
+@using GrocerySense.Core
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            Uncheck anything you already have or don't want on the list. Quantities merge into existing
+            list rows where they match.
+        </MudText>
+
+        @foreach (var (title, hint, rows) in Groups())
+        {
+            @if (rows.Count > 0)
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-2">@title</MudText>
+                @if (hint is not null)
+                {
+                    <MudText Typo="Typo.caption">@hint</MudText>
+                }
+                <MudList T="string" Dense="true">
+                    @foreach (var row in rows)
+                    {
+                        <MudListItem T="string">
+                            <div class="d-flex align-center">
+                                <MudCheckBox T="bool" Value="@_checked[Key(row)]"
+                                             ValueChanged="@(v => _checked[Key(row)] = v)" Dense="true" />
+                                <MudText Typo="Typo.body2" Class="ml-1">
+                                    @row.Name — @row.NeededQty.ToString("0.##") @row.Unit
+                                </MudText>
+                                @if (row.LikelyHave)
+                                {
+                                    <MudTooltip Text="@(row.LikelyHaveReason ?? "")">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-1">likely have</MudChip>
+                                    </MudTooltip>
+                                }
+                                @if (row.Cost is { } c)
+                                {
+                                    <MudText Typo="Typo.caption" Class="ml-2">≈ $@c.ToString("0.00")</MudText>
+                                }
+                                <MudSpacer />
+                                <MudText Typo="Typo.caption">@string.Join(", ", row.RecipeNames)</MudText>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Confirm">
+            Add @_checked.Count(kv => kv.Value) item(s) to list
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public PlanCostEstimate Estimate { get; set; } = default!;
+    [Parameter] public IReadOnlySet<string> AlreadyOnList { get; set; } = new HashSet<string>();
+
+    private readonly Dictionary<string, bool> _checked = new();
+
+    private static string Key(PlanIngredientCost i) => i.Name.ToLowerInvariant();
+
+    protected override void OnInitialized()
+    {
+        foreach (var i in Estimate.Ingredients)
+            _checked[Key(i)] = !i.LikelyHave; // pantry hint pre-unchecks; everything else defaults in
+    }
+
+    // Group order mirrors the plan: likely have · already on list · uncertain mapping · unpriced · need to buy.
+    private IEnumerable<(string Title, string? Hint, List<PlanIngredientCost> Rows)> Groups()
+    {
+        var all = Estimate.Ingredients;
+        var likely = all.Where(i => i.LikelyHave).ToList();
+        var onList = all.Where(i => !i.LikelyHave && AlreadyOnList.Contains(Key(i))).ToList();
+        var uncertain = all.Where(i => !i.LikelyHave && !AlreadyOnList.Contains(Key(i))
+            && i.Status == PlanCostService.StatusUnmapped).ToList();
+        var unpriced = all.Where(i => !i.LikelyHave && !AlreadyOnList.Contains(Key(i))
+            && i.Status is PlanCostService.StatusUnpriced or PlanCostService.StatusUnitMismatch
+                or PlanCostService.StatusNoQuantity).ToList();
+        var need = all.Where(i => !i.LikelyHave && !AlreadyOnList.Contains(Key(i))
+            && i.Status == PlanCostService.StatusPriced).ToList();
+
+        yield return ("Likely already have", "Pantry guess from your receipt cadence — unchecked by default, override freely.", likely);
+        yield return ("Already on your list", "Checking these merges quantities into the existing row.", onList);
+        yield return ("Mapping uncertain", "Not matched to a catalog item — added as plain rows, no price tracking.", uncertain);
+        yield return ("No usable price", "Added without an estimate — the basket total won't include them.", unpriced);
+        yield return ("Need to buy", null, need);
+    }
+
+    private void Confirm()
+    {
+        var picked = Estimate.Ingredients
+            .Where(i => _checked.GetValueOrDefault(Key(i)))
+            .Select(i => new SmartWeekConfirmIngredient(i.Name, i.NeededQty, i.Unit, i.ItemId,
+                i.MatchConfidence, i.RecipeNames))
+            .ToList();
+        MudDialog.Close(DialogResult.Ok(picked));
+    }
+}

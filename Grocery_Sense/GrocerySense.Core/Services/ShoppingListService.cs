@@ -43,6 +43,25 @@ public sealed class ShoppingListService
         return ShoppingListRepo.ListActiveItems(conn, includeCheckedOff: includeCheckedOff);
     }
 
+    // V3 actionable swaps (finding 7): repoint the row at the cheaper same-category item in place —
+    // qty/unit/priority/planned store/attribution survive; the shopper sees where the row came from.
+    public void ApplySwap(int rowId, SwapSuggestion swap)
+    {
+        if (swap.SwapToItemId <= 0)
+            throw new ArgumentException("Swap suggestion carries no target item.", nameof(swap));
+        using var conn = _factory.Open();
+        using var tx = conn.BeginTransaction();
+        var row = ShoppingListRepo.GetItem(conn, rowId, tx)
+            ?? throw new ArgumentException($"Shopping list row not found: {rowId}", nameof(rowId));
+        ShoppingListRepo.RepointItem(conn, rowId, swap.SwapToItemId, swap.SwapToName, tx);
+        var note = $"Swapped from {row.DisplayName}";
+        var notes = string.IsNullOrWhiteSpace(row.Notes) ? note
+            : row.Notes.Contains(note, StringComparison.OrdinalIgnoreCase) ? row.Notes
+            : row.Notes + " | " + note;
+        ShoppingListRepo.UpdateItemDetails(conn, rowId, row.Quantity, row.Unit, notes, tx);
+        tx.Commit();
+    }
+
     public int AddSingleItem(string name, double? quantity = null, string unit = "", int? plannedStoreId = null,
         string? notes = null, string? addedBy = null, int? itemId = null)
     {

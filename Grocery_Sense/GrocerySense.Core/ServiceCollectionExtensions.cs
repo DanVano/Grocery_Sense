@@ -63,6 +63,8 @@ public static class ServiceCollectionExtensions
         // V3 Phase 2: quantity-aware plan costing (Smart Week budget claims ride this, not the legacy
         // 1-unit-per-ingredient estimate).
         services.AddSingleton<PlanCostService>();
+        // V3 Phase 3: confirmed-plan snapshot + plan->list upsert (one transaction).
+        services.AddSingleton<SmartWeekService>();
 
         // Family meal-picks (Phase 5): names-only members + parent review queue.
         services.AddSingleton<FamilyRequestsService>();

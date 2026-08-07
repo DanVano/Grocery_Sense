@@ -378,6 +378,21 @@ public static class Database
         // no item_id prefix) lets the range seek instead, so the cost tracks the window, not total history.
         // Additive index only; no data change.
         "CREATE INDEX idx_prices_coalesced_date ON prices(date(COALESCE(date, created_at)));",
+
+        // ----- Migration 10: the confirmed Smart Week plan (V3 Phase 3, grill Q11) -----
+        // SINGLETON row (CHECK id = 1, INSERT OR REPLACE): the one currently-confirmed plan. Lives in
+        // SQLite, not config JSON, so it commits atomically WITH the shopping-list upsert and rides DB
+        // backup/export. snapshot_json holds recipe ids/names, confirmed goals, and reviewed
+        // ingredient->item mappings — item ids inside JSON escape MergeItems remapping (the FK sweep only
+        // covers item_id COLUMNS), so every read path must validate ids and fall back by normalized name.
+        """
+        CREATE TABLE selected_smart_week_plan (
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
+            week_start    TEXT NOT NULL,
+            confirmed_at  TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL
+        );
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

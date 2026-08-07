@@ -100,8 +100,10 @@ public sealed record ShopModeGroup(
     double SubtotalEstimated, int UnpricedCount);
 
 // A cheaper same-category alternative at the row's planned store (ShoppingInsightsService swaps).
+// SwapToItemId (V3): carries the target item so Shop Mode can APPLY the swap in place, not just show it.
 public sealed record SwapSuggestion(
-    int RowId, string ForName, string SwapToName, double SwapPrice, double CurrentPrice, double SavePct);
+    int RowId, string ForName, string SwapToName, double SwapPrice, double CurrentPrice, double SavePct,
+    int SwapToItemId = 0);
 
 // CoverageNote is the disclosed degrade when too few list items carry a category to suggest honestly.
 public sealed record SwapResult(IReadOnlyList<SwapSuggestion> Suggestions, string? CoverageNote);
@@ -176,6 +178,13 @@ public sealed record MealProfile
     public IReadOnlyList<string> PreferMeats { get; init; } = [];
     public IReadOnlyList<string> AvoidMeats { get; init; } = [];
     public IReadOnlyList<string> FavoriteTags { get; init; } = [];
+    // V3 Smart Week (grill Q4/Q10): magnitudes for PreferMeats (config PreferredProteinWeights — collected
+    // since v2, previously collapsed to a boolean), the soft protein-per-serving goal (null = off), and the
+    // whole-food-forward preference. All soft: they rank, never exclude.
+    public IReadOnlyDictionary<string, double> PreferMeatWeights { get; init; } =
+        new Dictionary<string, double>();
+    public double? ProteinPerServingGoal { get; init; }
+    public bool PreferWholeFoodForward { get; init; }
 }
 
 // A scored meal suggestion (port of meal_suggestion_service.SuggestedMeal). Scores are the components that
@@ -226,6 +235,13 @@ public sealed record BudgetedWeeklyPlan(WeeklyPlan Plan, double BudgetCap, doubl
 // A kid-pickable recipe with a one-glance deal flag (Family page). OnSaleThisWeek = "uses ingredients
 // that are on sale this week": DealScore > 0.2, i.e. >20% of ingredients have a live priced deal.
 public sealed record PickableRecipe(string Name, bool OnSaleThisWeek);
+
+// V3 Smart Week build result: the capped pick + swap alternatives + the exact quantity-aware plan
+// estimate. Skipped counts are DISCLOSED (low coverage = budget-ineligible under the 0.7 bar; over
+// budget = the cap, not the meal count, rejected them).
+public sealed record SmartWeekBuild(
+    IReadOnlyList<SuggestedMeal> Suggestions, IReadOnlyList<SuggestedMeal> Alternatives,
+    PlanCostEstimate Estimate, int SkippedOverBudget, int SkippedLowCoverage);
 
 // One overdue staple on the restock draft (StapleRestockService). No quantity suggestion on purpose:
 // receipt quantities carry units (kg/L/each) that can't be honestly mapped onto a new list row.

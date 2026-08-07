@@ -12,17 +12,93 @@ public sealed class WeeklyPlannerService
     private readonly MealSuggestionService _meals;
     private readonly IngredientMappingService _mapper;
     private readonly SqliteConnectionFactory _factory;
+    private readonly PlanCostService? _planCost;   // null only in legacy test construction
+    private readonly SmartWeekService? _smartWeek; // supplies recentlyUsedRecipeIds (variety)
 
     public WeeklyPlannerService(MealSuggestionService meals, IngredientMappingService mapper,
-        SqliteConnectionFactory factory)
+        SqliteConnectionFactory factory, PlanCostService? planCost = null, SmartWeekService? smartWeek = null)
     {
         _meals = meals;
         _mapper = mapper;
         _factory = factory;
+        _planCost = planCost;
+        _smartWeek = smartWeek;
     }
 
     public WeeklyPlan BuildWeeklyPlan(int numRecipes = 6) =>
         FinishPlan(_meals.SuggestMealsForWeek(maxRecipes: numRecipes));
+
+    // ---- V3 Smart Week build (Phase 3): quantity-aware, cap on the INCREMENTAL basis (grill Q8) ----
+
+    // Candidate scores already include the protein/whole-food soft bonuses; the previous confirmed plan's
+    // recipes feed the variety score. With a cap: recipes priced below the 0.7 coverage bar are budget-
+    // ineligible (counted, disclosed — grill Q9); the pick is count-first greedy + score-improving swaps
+    // (the SelectUnderBudget pattern) over SOLO incremental costs. Solo costs are an additive
+    // approximation for the cap check — shared ingredients only make the real total CHEAPER, so the
+    // check never overshoots the cap; the returned estimate is the exact plan-level number with sharing.
+    // targetIngredients: Cook-This-Deal entry (V3 F2) — candidates are filtered to recipes actually using
+    // them (engine ranks by overlap); allergies/exclusions still apply before ranking.
+    public SmartWeekBuild BuildSmartWeek(int numRecipes = 6, int householdServings = 0, double? groceryCap = null,
+        IEnumerable<string>? targetIngredients = null)
+    {
+        if (_planCost is null)
+            throw new InvalidOperationException("BuildSmartWeek requires PlanCostService (DI-constructed).");
+
+        var recent = _smartWeek?.RecentRecipeIds();
+        var candidates = _meals.SuggestMealsForWeek(targetIngredients: targetIngredients,
+            maxRecipes: int.MaxValue, recentlyUsedRecipeIds: recent);
+
+        List<SuggestedMeal> picked;
+        int skippedOverBudget = 0, skippedLowCoverage = 0;
+        if (groceryCap is not { } cap)
+        {
+            picked = candidates.Take(numRecipes).ToList();
+        }
+        else
+        {
+            var solo = candidates.ToDictionary(c => c,
+                c => _planCost.EstimatePlanCost([c.Recipe], householdServings));
+            var usable = candidates
+                .Where(c => solo[c].CoverageRatio >= PlanCostService.MinCoverageForBudget).ToList();
+            skippedLowCoverage = candidates.Count - usable.Count;
+
+            picked = new List<SuggestedMeal>();
+            var total = 0.0;
+            foreach (var c in usable.OrderBy(c => solo[c].IncrementalTotal).ThenByDescending(c => c.TotalScore))
+            {
+                if (picked.Count >= numRecipes) break;
+                if (total + solo[c].IncrementalTotal > cap) continue;
+                picked.Add(c);
+                total += solo[c].IncrementalTotal;
+            }
+            foreach (var cand in usable.Except(picked).OrderByDescending(c => c.TotalScore).ToList())
+                foreach (var worst in picked.Where(p => p.TotalScore < cand.TotalScore)
+                             .OrderBy(p => p.TotalScore).ToList())
+                {
+                    var newTotal = total - solo[worst].IncrementalTotal + solo[cand].IncrementalTotal;
+                    if (newTotal > cap) continue;
+                    picked[picked.IndexOf(worst)] = cand;
+                    total = newTotal;
+                    break;
+                }
+
+            // Budget only "rejected" leftovers when the CAP stopped us, not the requested meal count.
+            skippedOverBudget = picked.Count < numRecipes ? usable.Count - picked.Count : 0;
+            picked = picked.OrderByDescending(p => p.TotalScore).ToList();
+        }
+
+        var estimate = _planCost.EstimatePlanCost(picked.Select(p => p.Recipe).ToList(), householdServings);
+        var alternatives = candidates.Where(c => !picked.Contains(c)).Take(10).ToList();
+        return new SmartWeekBuild(picked, alternatives, estimate, skippedOverBudget, skippedLowCoverage);
+    }
+
+    // Re-price an explicit selection (after the user swaps/removes meals in the UI).
+    public PlanCostEstimate EstimateSelection(IReadOnlyList<Recipe> recipes, int householdServings = 0)
+    {
+        if (_planCost is null)
+            throw new InvalidOperationException("EstimateSelection requires PlanCostService (DI-constructed).");
+        return _planCost.EstimatePlanCost(recipes, householdServings);
+    }
 
     // Aggregate + map/annotate — shared by the plain and budget-capped builders.
     private WeeklyPlan FinishPlan(IReadOnlyList<SuggestedMeal> suggestions)
@@ -138,7 +214,7 @@ public sealed class WeeklyPlannerService
         var lastMap = PricesRepo.GetLastReceiptPurchaseBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
         var cadence = PricesRepo.GetPurchaseCadenceBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now); // local calendar date (V3 local-date convention)
         return planned.Select(p =>
         {
             if (p.ItemId is not { } id) return p;

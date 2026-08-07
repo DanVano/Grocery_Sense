@@ -81,6 +81,31 @@ public static class ShoppingListRepo
         return (int)Db.LastRowId(conn, tx);
     }
 
+    // Repoint a row at a different catalog item (V3 actionable swaps): display name + item_id change,
+    // everything else (qty/unit/notes/priority/planned store/attribution) is preserved by not touching it.
+    public static void RepointItem(SqliteConnection conn, int rowId, int itemId, string displayName,
+        SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "UPDATE shopping_list SET item_id = $item, display_name = $name WHERE id = $id");
+        cmd.Parameters.AddWithValue("$item", itemId);
+        cmd.Parameters.AddWithValue("$name", (displayName ?? "").Trim());
+        cmd.Parameters.AddWithValue("$id", rowId);
+        if (cmd.ExecuteNonQuery() == 0)
+            throw new ArgumentException($"Shopping list row not found: {rowId}", nameof(rowId));
+    }
+
+    // Backfill a NULL item_id after a trusted name match (V3 upsert, grill Q6). Guarded in SQL: a row that
+    // already has a DIFFERENT item_id is never overwritten — conflicting mappings surface instead of merging.
+    public static void SetItemIdIfNull(SqliteConnection conn, int rowId, int itemId, SqliteTransaction? tx = null)
+    {
+        using var cmd = Db.Command(conn, tx,
+            "UPDATE shopping_list SET item_id = $item WHERE id = $id AND item_id IS NULL");
+        cmd.Parameters.AddWithValue("$item", itemId);
+        cmd.Parameters.AddWithValue("$id", rowId);
+        cmd.ExecuteNonQuery();
+    }
+
     // Update the user-editable details of one row (F05). An unknown row throws — a silent no-op would
     // read as a successful save.
     public static void UpdateItemDetails(SqliteConnection conn, int rowId, double quantity, string unit,

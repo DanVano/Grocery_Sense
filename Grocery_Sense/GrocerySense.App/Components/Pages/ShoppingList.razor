@@ -5,6 +5,7 @@
 @inject ShoppingInsightsService Insights
 @inject StapleRestockService Restock
 @inject BasketOptimizerService Optimizer
+@inject BudgetService Budget
 @inject ShopModeState ShopState
 @inject IDialogService DialogService
 
@@ -30,8 +31,8 @@
     </MudStack>
 
     @* Plan trip: optimize → preview → confirm → drop into Shop Mode, all on the List page.
-       No hop to /plan for the core trip-prep flow (Phase 1b). The /plan page stays for the
-       power path (budget-defer view). *@
+       V3: the budget-defer check (previously the /plan page's one distinct feature) now lives in this
+       preview; /plan is retired from the nav and slated for deletion after device validation. *@
     <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center" Class="mt-3">
         <MudRadioGroup T="string" @bind-Value="_planMode">
             <MudRadio T="string" Value="@("best_savings")" Color="Color.Primary" Dense="true">Best savings</MudRadio>
@@ -69,7 +70,20 @@
                     {
                         <MudChip T="string" Color="Color.Default">vs 6-mo low $@F2(sl)</MudChip>
                     }
+                    @if (_budget is { Budget: not null, Remaining: { } left })
+                    {
+                        <MudChip T="string" Color="@(IsOverRemaining(preview) ? Color.Error : Color.Default)">
+                            $@F2((double)left) left this month
+                        </MudChip>
+                    }
                 </MudStack>
+                @if (IsOverRemaining(preview) && _deferCandidates.Count > 0)
+                {
+                    <MudAlert Class="mb-2" Severity="Severity.Warning" Dense="true">
+                        This basket exceeds what's left of the monthly budget.
+                        Consider deferring (not must-have, priciest first): @string.Join(", ", _deferCandidates).
+                    </MudAlert>
+                }
                 @foreach (var store in preview.Stores)
                 {
                     <MudPaper Class="pa-2 mb-2" Outlined="true">
@@ -197,9 +211,18 @@
                                     }
                                     @if (_swapByRow.TryGetValue(i.Row.Id, out var swap))
                                     {
-                                        <MudText Typo="Typo.caption" Color="Color.Success">
-                                            Swap: @swap.SwapToName $@F2(swap.SwapPrice) (save @swap.SavePct.ToString("0")%)
-                                        </MudText>
+                                        <div class="d-flex align-center gap-1">
+                                            <MudText Typo="Typo.caption" Color="Color.Success">
+                                                Swap: @swap.SwapToName $@F2(swap.SwapPrice) (save @swap.SavePct.ToString("0")%)
+                                            </MudText>
+                                            @if (swap.SwapToItemId > 0)
+                                            {
+                                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success"
+                                                           Disabled="@_busy" OnClick="@(() => ApplySwapAsync(i.Row.Id, swap))">
+                                                    Swap it
+                                                </MudButton>
+                                            }
+                                        </div>
                                     }
                                 </div>
                             </div>
@@ -269,11 +292,19 @@ else
     private string _newItems = "";
     private string _planMode = "best_savings";
     private BasketOptimizationResult? _planPreview;
+    private BudgetStatus? _budget;
+    private List<string> _deferCandidates = [];
 
-    protected override Task OnInitializedAsync()
+    // Smart Week handoff (V3 F3): /list?plan=1 auto-runs the trip planner so confirm → optimize →
+    // Shop Mode is one guided flow. Query param + existing page state — no new coordinator service.
+    [SupplyParameterFromQuery(Name = "plan")] public string? AutoPlan { get; set; }
+
+    protected override async Task OnInitializedAsync()
     {
         _shopMode = ShopState.Enabled; // survive a tab-away/return (Phase 2b)
-        return ReloadAsync();
+        await ReloadAsync();
+        if (AutoPlan == "1" && !_shopMode && _items is { Count: > 0 })
+            await PlanTripAsync();
     }
 
 
@@ -392,18 +423,56 @@ else
     }
 
     // Plan trip (Phase 1b): run the optimizer and hold the result as a preview — nothing is written until
-    // the user confirms. Reuses the same service the /plan page drives.
+    // the user confirms. V3: the preview now carries the budget-defer check that used to live on /plan.
     private async Task PlanTripAsync()
     {
         _busy = true;
         try
         {
             _error = null;
+            _budget = null;
+            _deferCandidates = [];
             _planPreview = await Task.Run(() => Optimizer.Optimize(_planMode));
+            if (_planPreview is { } preview)
+            {
+                var check = await Task.Run(() => BuildBudgetCheck(preview));
+                (_budget, _deferCandidates) = (check.Status, check.Defer);
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
     }
+
+    private bool IsOverRemaining(BasketOptimizationResult opt) =>
+        _budget is { Budget: not null, Remaining: { } left } && (decimal)opt.BasketTotalEstimated > left;
+
+    private sealed record BudgetCheck(BudgetStatus Status, List<string> Defer);
+
+    // Basket estimate vs remaining monthly budget; over-budget lists the priciest non-must_have lines as
+    // defer candidates. Display only — nothing is removed automatically. (Moved from /plan, V3 F3.)
+    private BudgetCheck BuildBudgetCheck(BasketOptimizationResult opt)
+    {
+        var status = Budget.GetBudgetStatus();
+        var defer = new List<string>();
+        if (status.Budget is not null && status.Remaining is { } left && (decimal)opt.BasketTotalEstimated > left)
+        {
+            var mustHave = Shopping.GetActiveItems()
+                .Where(r => r.ItemId is not null && r.Priority == "must_have")
+                .Select(r => r.ItemId!.Value)
+                .ToHashSet();
+            defer = opt.Stores.SelectMany(s => s.Items)
+                .Where(i => !i.HardExcluded && !i.PriceUnknown && i.UnitPrice is not null && !mustHave.Contains(i.ItemId))
+                .OrderByDescending(i => i.UnitPrice)
+                .Take(5)
+                .Select(i => $"{i.Name} (${F2(i.UnitPrice!.Value)})")
+                .ToList();
+        }
+        return new BudgetCheck(status, defer);
+    }
+
+    // V3 actionable swap (finding 7): replace the row in place, metadata preserved; reload re-prices.
+    private Task ApplySwapAsync(int rowId, SwapSuggestion swap) =>
+        RunAsync(() => Shopping.ApplySwap(rowId, swap));
 
     // Confirm: write the previewed plan back to the active list, then drop straight into Shop Mode —
     // that store-grouped shopping view is the whole point of the flow. A failed apply keeps the preview

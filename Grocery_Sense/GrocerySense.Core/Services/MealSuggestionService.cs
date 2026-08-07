@@ -65,7 +65,9 @@ public sealed class MealSuggestionService
 
             // total intentionally excludes dealScore: flyer value already flows through priceScore. dealScore
             // is explanatory only (drives the Family page's OnSaleThisWeek flag at DealScore > 0.2).
-            var total = (0.5 * priceScore) + (0.3 * preferenceScore) + (0.2 * varietyScore);
+            // The V3 nutrition bonus is ADDITIVE so behavior is byte-identical when both prefs are off.
+            var total = (0.5 * priceScore) + (0.3 * preferenceScore) + (0.2 * varietyScore)
+                + NutritionBonus(r, profile, reasons);
 
             if (preferenceScore > 0.5) reasons.Add("Matches your meat or tag preferences.");
             if (varietyScore < 0) reasons.Add("You cooked this recently, slightly deprioritized.");
@@ -109,7 +111,7 @@ public sealed class MealSuggestionService
         var lastMap = PricesRepo.GetLastReceiptPurchaseBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
         var cadence = PricesRepo.GetPurchaseCadenceBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now); // local calendar date (V3 local-date convention)
         foreach (var (name, item) in itemsByName)
         {
             if (!lastMap.TryGetValue(item.Id, out var lastIso) || !DateOnly.TryParse(lastIso, out var last)) continue;
@@ -147,14 +149,52 @@ public sealed class MealSuggestionService
         return (total, perServing, ratio);
     }
 
+    // V3 Smart Week soft preferences (grill Q4/Q5): protein-goal bonus (0.25) outranks whole-food bonus
+    // (0.15 mostly_whole / 0.05 mixed) per the plan's constraint order. Unrated recipes (no Details) get
+    // 0 — the UI says "nutrition not rated", the score never guesses. Purely additive: 0 when both prefs
+    // are off, so every pre-V3 ranking is unchanged.
+    internal static double NutritionBonus(Recipe r, MealProfile profile, List<string>? reasons = null)
+    {
+        var bonus = 0.0;
+        var d = r.Details;
+        if (profile.ProteinPerServingGoal is { } goal && d?.ProteinGPerServing is { } p)
+        {
+            if (p >= goal)
+            {
+                bonus += 0.25;
+                reasons?.Add($"Meets your {goal:0}g protein goal ({p:0}g per serving).");
+            }
+            else
+                reasons?.Add($"{p:0}g per serving is below your {goal:0}g protein goal.");
+        }
+        if (profile.PreferWholeFoodForward && d is { StructuredIngredients.Count: > 0 })
+        {
+            var (cls, whole, total) = d.WholeFoodRollup();
+            if (cls == RecipeDetails.MostlyWhole)
+            {
+                bonus += 0.15;
+                reasons?.Add($"Mostly whole ingredients ({whole} of {total}).");
+            }
+            else if (cls == RecipeDetails.Mixed)
+                bonus += 0.05;
+        }
+        return bonus;
+    }
+
     // Preference score in [0,1], recentred so neutral = 0.5 (avoid-only lands below neutral, not at 0).
+    // Preferred-meat bonuses scale by the config weight magnitude (V3 finding 10 — the weights were
+    // collected then discarded): weight 2.0 = the full legacy +0.3, lighter weights scale down. No weight
+    // recorded (legacy profiles, direct test construction) keeps the flat +0.3.
     internal static double PreferenceScore(Recipe recipe, MealProfile profile)
     {
         var text = string.Join(" ", recipe.Ingredients).ToLowerInvariant();
         var tags = recipe.Tags.ToHashSet();
 
         var score = 0.0;
-        foreach (var meat in Lower(profile.PreferMeats)) if (text.Contains(meat)) score += 0.3;
+        foreach (var meat in Lower(profile.PreferMeats))
+            if (text.Contains(meat))
+                score += 0.3 * (profile.PreferMeatWeights.TryGetValue(meat, out var w)
+                    ? Math.Min(1.0, w / 2.0) : 1.0);
         foreach (var meat in Lower(profile.AvoidMeats)) if (text.Contains(meat)) score -= 0.5;
         foreach (var tag in Lower(profile.FavoriteTags)) if (tags.Contains(tag)) score += 0.2;
 

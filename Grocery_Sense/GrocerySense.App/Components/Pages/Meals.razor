@@ -1,30 +1,33 @@
 @page "/meals"
 @inherits BusyComponent
 @inject WeeklyPlannerService Planner
+@inject SmartWeekService SmartWeek
 @inject UserRecipeService Recipes
+@inject ConfigStore Config
+@inject BudgetService Budget
 @inject IDialogService DialogService
+@inject NavigationManager Nav
 
-<MudText Typo="Typo.h5" GutterBottom="true">Meal planning</MudText>
+<MudText Typo="Typo.h5" GutterBottom="true">Smart Week</MudText>
 <MudText Typo="Typo.body2" Class="mb-2">
-    Suggests value-focused recipes from your preferences, current flyer deals, and receipt-price history,
-    then aggregates their ingredients into a shopping list.
+    Plan a week of meals around protein, whole foods, and this week's prices — then review the pantry,
+    confirm the list, and shop it store by store.
 </MudText>
 
-<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-2">
-    <MudNumericField T="int" @bind-Value="_numRecipes" Label="Recipes" Min="1" Max="12" Style="max-width:110px" />
-    <MudSelect T="string" @bind-Value="_sortBy" Label="Sort" Dense="true" Style="max-width:180px">
-        <MudSelectItem T="string" Value="@("score")">Best value</MudSelectItem>
-        <MudSelectItem T="string" Value="@("new_spend")">Lowest new spend</MudSelectItem>
+<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Class="mb-2">
+    <MudNumericField T="int" @bind-Value="_servings" Label="Servings" Min="1" Max="12" Style="max-width:110px" />
+    <MudNumericField T="int" @bind-Value="_numRecipes" Label="Meals" Min="1" Max="12" Style="max-width:100px" />
+    <MudNumericField T="double?" @bind-Value="_groceryCap" Label="Grocery cap $ (optional)"
+                     Min="0" Style="max-width:180px" HelperText="@_capHelper" />
+    <MudSelect T="double?" @bind-Value="_proteinGoal" Label="Protein/serving" Dense="true" Style="max-width:150px">
+        <MudSelectItem T="double?" Value="@((double?)null)">Off</MudSelectItem>
+        <MudSelectItem T="double?" Value="20.0">20 g</MudSelectItem>
+        <MudSelectItem T="double?" Value="25.0">25 g</MudSelectItem>
+        <MudSelectItem T="double?" Value="30.0">30 g</MudSelectItem>
     </MudSelect>
-    <MudNumericField T="double?" @bind-Value="_weekBudget" Label="Week budget $ (optional)"
-                     Min="0" Style="max-width:170px" />
+    <MudSwitch T="bool" @bind-Value="_wholeFood" Label="Prefer whole foods" Color="Color.Primary" />
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restaurant"
-               OnClick="SuggestAsync" Disabled="@_busy">Suggest meals</MudButton>
-    @if (_plan is not null && !_persisted)
-    {
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddShoppingCart"
-                   OnClick="AddToListAsync" Disabled="@_busy">Add ingredients to list</MudButton>
-    }
+               OnClick="PlanWeekAsync" Disabled="@_busy">Plan my week</MudButton>
     @if (_busy)
     {
         <MudProgressCircular Size="Size.Small" Indeterminate="true" aria-label="Working" />
@@ -36,65 +39,85 @@
     <MudAlert Class="mb-2" Severity="@_messageSeverity" Dense="true">@_message</MudAlert>
 }
 
-@if (_plan is not null)
+@if (_selection is { Count: > 0 } && _estimate is not null)
 {
-    @if (_plan.Suggestions.Count == 0)
-    {
-        <MudText Typo="Typo.body2">No recipes matched your preferences. Loosen an allergy/exclude in Preferences.</MudText>
-    }
-    else
-    {
-        <MudExpansionPanels MultiExpansion="false" Class="mb-3">
-            @foreach (var meal in SortedSuggestions())
-            {
-                <MudExpansionPanel>
-                    <TitleContent>
-                        <div class="d-flex align-center">
-                            <MudText>@meal.Recipe.Name</MudText>
-                            <MudSpacer />
-                            <MudText Typo="Typo.caption">
-                                score @meal.TotalScore.ToString("0.00")@(CostLabel(meal))@(NewSpendLabel(meal))
-                            </MudText>
-                        </div>
-                    </TitleContent>
-                    <ChildContent>
-                        @if (meal.Reasons.Count > 0)
-                        {
-                            <ul class="mb-2">@foreach (var r in meal.Reasons) { <li>@r</li> }</ul>
-                        }
-                        <MudText Typo="Typo.caption">Ingredients</MudText>
-                        <div>@foreach (var ing in meal.Recipe.Ingredients) { <MudChip T="string" Size="Size.Small">@ing</MudChip> }</div>
-                    </ChildContent>
-                </MudExpansionPanel>
-            }
-        </MudExpansionPanels>
+    <MudText Typo="Typo.body2" Class="mb-1">
+        <b>≈ $@_estimate.IncrementalTotal.ToString("0.00")</b> new spend
+        (@_estimate.PricedTotal.ToString("0.00") before pantry)@(_groceryCap is { } cap ? $" of your ${cap:0} cap" : "")
+        · priced @_estimate.PricedCount of @_estimate.TotalCount ingredients
+        @if (_estimate.CoverageRatio < 0.7)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">estimate partial — treat as a target</MudChip>
+        }
+    </MudText>
 
-        <MudText Typo="Typo.subtitle2">Shopping list (@_plan.PlannedIngredients.Count items)</MudText>
-        <MudSimpleTable Dense="true">
-            <thead><tr><th style="text-align:left">Ingredient</th><th>Qty</th><th style="text-align:left">Used in</th></tr></thead>
-            <tbody>
-                @foreach (var ing in _plan.PlannedIngredients)
-                {
-                    <tr>
-                        <td>
-                            @ing.Name
-                            @if (ing.ItemId is null)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">new item</MudChip>
-                            }
-                            @if (ing.LikelyHave)
-                            {
-                                <MudTooltip Text="@(ing.LikelyHaveReason ?? "")">
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-1">likely have</MudChip>
-                                </MudTooltip>
-                            }
-                        </td>
-                        <td style="text-align:center">@ing.ApproximateCount</td>
-                        <td>@string.Join(", ", ing.RecipeNames)</td>
-                    </tr>
-                }
-            </tbody>
-        </MudSimpleTable>
+    <MudExpansionPanels MultiExpansion="false" Class="mb-3">
+        @foreach (var meal in _selection)
+        {
+            <MudExpansionPanel>
+                <TitleContent>
+                    <div class="d-flex align-center">
+                        <MudText>@meal.Recipe.Name</MudText>
+                        @foreach (var chip in NutritionChips(meal.Recipe))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="@chip.Color" Class="ml-1">@chip.Text</MudChip>
+                        }
+                        <MudSpacer />
+                        <MudText Typo="Typo.caption">
+                            score @meal.TotalScore.ToString("0.00")@(CostLabel(meal))
+                        </MudText>
+                    </div>
+                </TitleContent>
+                <ChildContent>
+                    @if (meal.Recipe.Details is { } d)
+                    {
+                        <MudText Typo="Typo.caption" Class="mb-1">
+                            @(d.ProteinGPerServing is { } p ? $"≈ {p:0} g protein/serving (curated estimate) · " : "")
+                            @WholeFoodBasis(d) · @meal.Recipe.Servings serving(s) as written
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Class="mb-1">Nutrition not rated (your own recipe or legacy entry).</MudText>
+                    }
+                    @if (meal.Reasons.Count > 0)
+                    {
+                        <ul class="mb-2">@foreach (var r in meal.Reasons) { <li>@r</li> }</ul>
+                    }
+                    <MudText Typo="Typo.caption">Ingredients</MudText>
+                    <div class="mb-2">@foreach (var ing in meal.Recipe.Ingredients) { <MudChip T="string" Size="Size.Small">@ing</MudChip> }</div>
+                    @if (meal.Recipe.Steps.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption">Steps</MudText>
+                        <ol class="mb-2">@foreach (var s in meal.Recipe.Steps) { <li><MudText Typo="Typo.body2">@s</MudText></li> }</ol>
+                    }
+                    <MudStack Row="true" Spacing="1">
+                        @if (_alternatives.Count > 0)
+                        {
+                            <MudMenu Label="Replace with…" Size="Size.Small" Variant="Variant.Outlined" Dense="true">
+                                @foreach (var alt in _alternatives.Take(8))
+                                {
+                                    <MudMenuItem OnClick="@(() => ReplaceMealAsync(meal, alt))">
+                                        @alt.Recipe.Name (score @alt.TotalScore.ToString("0.00"))
+                                    </MudMenuItem>
+                                }
+                            </MudMenu>
+                        }
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                   OnClick="@(() => RemoveMealAsync(meal))">Remove</MudButton>
+                    </MudStack>
+                </ChildContent>
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Checklist"
+               OnClick="ReviewAndConfirmAsync" Disabled="@(_busy || _confirmed)">
+        Review pantry &amp; add to list
+    </MudButton>
+    @if (_confirmed)
+    {
+        <MudText Typo="Typo.caption" Class="mt-1">Plan confirmed — continue on the Shopping list page.</MudText>
     }
 }
 
@@ -107,7 +130,7 @@
 </div>
 <MudText Typo="Typo.caption" Class="mb-1">
     Your own recipes join the catalog everywhere — suggestions, weekly plan, and family picks.
-    A recipe with the same name as a catalog one replaces it.
+    A recipe with the same name as a catalog one replaces it. Custom recipes show "nutrition not rated".
 </MudText>
 @if (_myRecipes is { Count: > 0 })
 {
@@ -133,12 +156,188 @@ else if (_myRecipes is not null)
 }
 
 @code {
-    private WeeklyPlan? _plan;
-    private bool _persisted;
     private int _numRecipes = 6;
+    private int _servings = 4;
+    private double? _groceryCap;
+    private double? _proteinGoal;
+    private bool _wholeFood;
+    private string? _capHelper;
+
+    private List<SuggestedMeal>? _selection;
+    private List<SuggestedMeal> _alternatives = [];
+    private PlanCostEstimate? _estimate;
+    private int _skippedOverBudget, _skippedLowCoverage;
+    private bool _confirmed;
+
     private IReadOnlyList<UserRecipeRow>? _myRecipes;
 
-    protected override async Task OnInitializedAsync() => await ReloadRecipesAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        var cfg = Config.Load();
+        _proteinGoal = cfg.ProteinPerServingGoal;
+        _wholeFood = cfg.PreferWholeFoodForward;
+        _servings = Math.Max(2, cfg.Household.Members.Count);
+        try
+        {
+            var status = await Task.Run(() => Budget.GetBudgetStatus());
+            if (status.Remaining is { } rem)
+                _capHelper = $"≈ ${rem:0} of your monthly budget remains";
+        }
+        catch { /* budget context is a hint; the planner works without it */ }
+        await ReloadRecipesAsync();
+    }
+
+    private async Task PlanWeekAsync()
+    {
+        _busy = true;
+        _message = null;
+        _confirmed = false;
+        try
+        {
+            // The Smart Week prefs are config prefs — persist what the user set before planning with it.
+            var cfg = Config.Load();
+            if (cfg.ProteinPerServingGoal != _proteinGoal || cfg.PreferWholeFoodForward != _wholeFood)
+                Config.Save(cfg with { ProteinPerServingGoal = _proteinGoal, PreferWholeFoodForward = _wholeFood });
+
+            var n = _numRecipes;
+            var servings = _servings;
+            var cap = _groceryCap;
+            var build = await Task.Run(() => Planner.BuildSmartWeek(n, servings, cap));
+            _selection = build.Suggestions.ToList();
+            _alternatives = build.Alternatives.ToList();
+            _estimate = build.Estimate;
+            _skippedOverBudget = build.SkippedOverBudget;
+            _skippedLowCoverage = build.SkippedLowCoverage;
+
+            _messageSeverity = Severity.Info;
+            _message = _selection.Count == 0
+                ? (cap is not null && _skippedLowCoverage > 0
+                    ? "Price coverage is too thin for a budget-fit week — scan receipts or sync flyers, or plan without a cap."
+                    : "No recipes matched your preferences. Loosen an allergy/exclude in Preferences.")
+                : $"{_selection.Count} meal(s) planned"
+                  + (_skippedOverBudget > 0 ? $" · {_skippedOverBudget} skipped over the cap" : "")
+                  + (_skippedLowCoverage > 0 ? $" · {_skippedLowCoverage} not price-covered enough for budget fit (excluded)" : "");
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveMealAsync(SuggestedMeal meal)
+    {
+        if (_selection is null) return;
+        _selection.Remove(meal);
+        _alternatives.Remove(meal);
+        await ReEstimateAsync();
+    }
+
+    private async Task ReplaceMealAsync(SuggestedMeal current, SuggestedMeal replacement)
+    {
+        if (_selection is null) return;
+        var idx = _selection.IndexOf(current);
+        if (idx < 0) return;
+        _selection[idx] = replacement;
+        _alternatives.Remove(replacement);
+        _alternatives.Add(current);
+        await ReEstimateAsync();
+    }
+
+    private async Task ReEstimateAsync()
+    {
+        if (_selection is null) return;
+        _busy = true;
+        try
+        {
+            var recipes = _selection.Select(s => s.Recipe).ToList();
+            var servings = _servings;
+            _estimate = await Task.Run(() => Planner.EstimateSelection(recipes, servings));
+        }
+        catch (Exception ex) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task ReviewAndConfirmAsync()
+    {
+        if (_selection is null || _estimate is null || _confirmed) return;
+
+        var confirmables = _estimate.Ingredients
+            .Select(i => new SmartWeekConfirmIngredient(i.Name, i.NeededQty, i.Unit, i.ItemId,
+                i.MatchConfidence, i.RecipeNames))
+            .ToList();
+        var already = await Task.Run(() => SmartWeek.PreviewExistingMatches(confirmables));
+
+        var parameters = new DialogParameters { ["Estimate"] = _estimate, ["AlreadyOnList"] = already };
+        var dialog = await DialogService.ShowAsync<SmartWeekReviewDialog>("Review before adding", parameters);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not List<SmartWeekConfirmIngredient> picked) return;
+
+        _busy = true;
+        try
+        {
+            var estimate = _estimate;
+            var selection = _selection;
+            var snapshot = new SmartWeekPlanSnapshot(
+                WeekStart: WeekStartIso(), ConfirmedAt: DateTime.UtcNow.ToString("o"),
+                Servings: _servings, GroceryCap: _groceryCap, ProteinGoal: _proteinGoal,
+                WholeFoodPreferred: _wholeFood,
+                Recipes: selection.Select(s => new SmartWeekSnapshotRecipe(s.Recipe.Id, s.Recipe.Name)).ToList(),
+                Ingredients: estimate.Ingredients.Select(i =>
+                    new SmartWeekSnapshotIngredient(i.Name, i.NeededQty, i.Unit, i.ItemId,
+                        i.RecipeNames)).ToList());
+
+            var outcomes = await Task.Run(() => SmartWeek.ConfirmPlan(snapshot, picked));
+            _confirmed = true;
+            _messageSeverity = Severity.Success;
+            var merged = outcomes.Count(o => o.Action.StartsWith("merged"));
+            _message = $"Added {outcomes.Count(o => o.Action == "added")} item(s)"
+                + (merged > 0 ? $", merged {merged} into existing rows" : "")
+                + " — taking you to the list to plan the trip.";
+            Nav.NavigateTo("/list?plan=1");
+        }
+        catch (Exception ex) { Fail($"Confirm failed: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    // Local Monday of the current week (V3 local-date convention).
+    private static string WeekStartIso()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        return today.AddDays(-(((int)today.DayOfWeek + 6) % 7)).ToString("yyyy-MM-dd");
+    }
+
+    private IEnumerable<(string Text, Color Color)> NutritionChips(Recipe r)
+    {
+        if (r.Details is not { } d)
+        {
+            yield return ("not rated", Color.Default);
+            yield break;
+        }
+        if (d.ProteinGPerServing is { } p)
+        {
+            var meets = _proteinGoal is { } goal && p >= goal;
+            yield return ($"{p:0}g protein", meets ? Color.Success : Color.Default);
+        }
+        var cls = d.WholeFoodRollup().Class;
+        if (cls == RecipeDetails.MostlyWhole) yield return ("mostly whole", Color.Success);
+        else if (cls == RecipeDetails.MostlyProcessed) yield return ("mostly processed", Color.Warning);
+    }
+
+    private static string WholeFoodBasis(RecipeDetails d)
+    {
+        var (cls, whole, total) = d.WholeFoodRollup();
+        var label = cls switch
+        {
+            RecipeDetails.MostlyWhole => "Mostly whole",
+            RecipeDetails.MostlyProcessed => "Mostly processed",
+            _ => "Mixed",
+        };
+        return $"{label} ({whole} of {total} ingredients whole)";
+    }
+
+    private static string CostLabel(SuggestedMeal meal) => meal.CostPerServing is double c
+        ? $" · ≈ ${c:0.00}/serving{(meal.CostKnownRatio < 1.0 ? " (partial)" : "")}"
+        : "";
+
+    // ---- My recipes (unchanged) ----
 
     private async Task ReloadRecipesAsync()
     {
@@ -182,79 +381,4 @@ else if (_myRecipes is not null)
         catch (Exception ex) { Fail(ex.Message); }
         finally { _busy = false; }
     }
-
-    private double? _weekBudget;
-    private BudgetedWeeklyPlan? _budgeted;
-
-    private async Task SuggestAsync()
-    {
-        _busy = true;
-        _message = null;
-        _budgeted = null;
-        try
-        {
-            var n = _numRecipes;
-            var cap = _weekBudget;
-            if (cap is > 0)
-            {
-                _budgeted = await Task.Run(() => Planner.BuildWeeklyPlanUnderBudget(cap.Value, numRecipes: n));
-                _plan = _budgeted.Plan;
-                _messageSeverity = Severity.Info;
-                _message = _plan.Suggestions.Count == 0
-                    ? (_budgeted.SkippedNoEstimate > 0 && _budgeted.SkippedOverBudget == 0
-                        ? "No recipes have usable price estimates yet — scan receipts or sync flyers first."
-                        : $"Nothing fits under ${cap.Value:0}. Cheapest estimates exceeded the budget.")
-                    : $"{_plan.Suggestions.Count} meal(s), estimated ≈ ${_budgeted.EstimatedTotal:0.00} of ${cap.Value:0}"
-                      + (_budgeted.SkippedOverBudget > 0 ? $" · {_budgeted.SkippedOverBudget} over budget" : "")
-                      + (_budgeted.SkippedNoEstimate > 0 ? $" · {_budgeted.SkippedNoEstimate} without usable estimates (excluded)" : "")
-                      + (_budgeted.AvgCostKnownRatio < 1.0 ? " · estimates are partial — treat as a target, not a guarantee" : "");
-            }
-            else
-            {
-                _plan = await Task.Run(() => Planner.BuildWeeklyPlan(numRecipes: n));
-            }
-            _persisted = false; // a fresh suggestion can be added again
-        }
-        catch (Exception ex) { Fail(ex.Message); }
-        finally { _busy = false; }
-    }
-
-    private async Task AddToListAsync()
-    {
-        if (_plan is null || _persisted) return;
-        _busy = true;
-        _message = null;
-        try
-        {
-            // Persist the exact plan the user reviewed — do NOT rebuild (a rebuild reads the current recipe
-            // count + live DB/deal state and can diverge from what's shown). _persisted guards a double-tap.
-            var plan = _plan;
-            await Task.Run(() => Planner.PersistToShoppingList(plan, addedBy: "Meal plan"));
-            _persisted = true;
-            _messageSeverity = Severity.Success;
-            _message = $"Added {plan.PlannedIngredients.Count} ingredient(s) to your shopping list.";
-        }
-        catch (Exception ex) { Fail($"Add to list failed: {ex.Message}"); }
-        finally { _busy = false; }
-    }
-
-    private string _sortBy = "score";
-
-    // Display-order only — PersistToShoppingList still gets the original _plan, and ingredient
-    // aggregation is order-independent.
-    private IEnumerable<SuggestedMeal> SortedSuggestions() =>
-        _plan is null ? Array.Empty<SuggestedMeal>()
-        : _sortBy == "new_spend"
-            ? _plan.Suggestions.OrderBy(m => m.MarginalCostTotal ?? double.MaxValue)
-            : _plan.Suggestions;
-
-    private static string NewSpendLabel(SuggestedMeal meal) =>
-        meal.MarginalCostTotal is double m && meal.NewIngredientCount is int n
-            ? $" · {n} new ≈ ${m:0.00}"
-            : "";
-
-    private static string CostLabel(SuggestedMeal meal) => meal.CostPerServing is double c
-        ? $" · ≈ ${c:0.00}/serving{(meal.CostKnownRatio < 1.0 ? " (partial)" : "")}"
-        : "";
-
 }

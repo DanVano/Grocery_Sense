@@ -135,7 +135,7 @@ public sealed class ShoppingInsightsService
                 var savePct = (current - p) / current * 100.0;
                 if (best is null || p < best.SwapPrice)
                     best = new SwapSuggestion(insight.Row.Id, insight.Row.DisplayName, cand.CanonicalName,
-                        p, current, savePct);
+                        p, current, savePct, cand.Id);
             }
             if (best is not null) suggestions.Add(best);
         }

@@ -29,7 +29,8 @@ public record Item(
 
 // Item-manager list row: an item plus light price stats (port of items_admin_repo.ItemRow).
 public record ItemAdminRow(
-    int Id, string CanonicalName, bool IsTracked, string? DefaultUnit, int PricePoints, string? LastPriceDate);
+    int Id, string CanonicalName, bool IsTracked, string? DefaultUnit, int PricePoints, string? LastPriceDate,
+    string? Category = null);
 
 public record PricePoint(
     int Id,

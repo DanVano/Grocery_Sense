@@ -36,6 +36,7 @@ public sealed class PreferencesService
     {
         var eff = ComputeEffectivePreferences();
         var proteins = eff.ExcludedProteinsHard.OrderBy(x => x, StringComparer.Ordinal).ToList();
+        var cfg = _config.Load();
         return new MealProfile
         {
             Allergies = eff.HardExcludes.OrderBy(x => x, StringComparer.Ordinal).ToList(),
@@ -43,6 +44,12 @@ public sealed class PreferencesService
             PreferMeats = eff.ProteinWeights.Where(kv => kv.Value > 1.0).Select(kv => kv.Key).ToList(),
             AvoidMeats = proteins,
             FavoriteTags = eff.CuisinesPreferred.ToList(),
+            // V3: carry the weight MAGNITUDES through (previously discarded at this exact spot) plus the
+            // Smart Week nutrition preferences.
+            PreferMeatWeights = eff.ProteinWeights.Where(kv => kv.Value > 1.0)
+                .ToDictionary(kv => kv.Key, kv => kv.Value),
+            ProteinPerServingGoal = cfg.ProteinPerServingGoal,
+            PreferWholeFoodForward = cfg.PreferWholeFoodForward,
         };
     }
 

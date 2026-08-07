@@ -32,6 +32,19 @@ else
         </MudPaper>
     }
 
+    @* Smart Week entry point (V3 F1, grill Q10): one compact card, no new nav destination. *@
+    @if (_pickedUp == 0)
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">Plan an affordable week</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                Protein-focused meals from this week's prices, pantry-checked, straight onto your list.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Restaurant" Href="/meals">Smart Week</MudButton>
+        </MudPaper>
+    }
+
     <MudPaper Class="pa-3 mb-2" Outlined="true">
         <MudText Typo="Typo.subtitle1">Deals</MudText>
         <MudText Typo="Typo.body2" Class="mb-2">

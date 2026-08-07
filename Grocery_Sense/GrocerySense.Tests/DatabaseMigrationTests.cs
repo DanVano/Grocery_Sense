@@ -31,6 +31,7 @@ public sealed class DatabaseMigrationTests : IDisposable
             "receipt_raw_json", "receipt_file_hashes", "receipt_signatures",
             "flyer_batches", "flyer_assets", "flyer_raw_json", "flyer_deals",
             "price_drop_alerts", "watchlist", "member_requests", "user_recipes",
+            "selected_smart_week_plan",
         };
         foreach (var t in expected)
             Assert.Contains(t, tables);
@@ -140,6 +141,7 @@ public sealed class DatabaseMigrationTests : IDisposable
         {
             "8DFBBB605F42", "99E952033B8D", "1438C084820C", "09F9DFAC0688", "0A6501CC0611",
             "7429205583F9", "D1C5E8CFA323", "5705D9AB3C21", "DA19DBE7B07B",
+            "47025ABA51FC", // 10: selected_smart_week_plan (V3 Smart Week snapshot, grill Q11)
         };
 
         var field = typeof(Database).GetField("_migrations", BindingFlags.NonPublic | BindingFlags.Static);
