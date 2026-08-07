@@ -224,6 +224,7 @@ public sealed class ConfigStore
             : new Dictionary<string, double>(InflationRates.Seed),
         Household = EnsureHousehold(c.Household),
         Preferences = NormalizePreferences(c.Preferences),
+        ProteinPerServingGoal = c.ProteinPerServingGoal is > 0 ? c.ProteinPerServingGoal : null,
     };
 
     // Ensures: >=1 member, >=1 master (tied to primary if possible), valid primary/active ids, non-null

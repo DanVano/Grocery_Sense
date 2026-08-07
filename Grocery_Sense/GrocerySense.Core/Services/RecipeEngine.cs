@@ -12,9 +12,44 @@ namespace GrocerySense.Core;
 // Here the engine is a plain instance that callers inject and use directly — no global, no singleton bug.
 
 // A recipe, normalized on load: name trimmed, blank ingredients dropped, tags trimmed + lowercased.
+// Details is the optional v3 curated layer (structured quantities, protein, whole-food classes); null for
+// user recipes and legacy JSON — consumers must render "nutrition not rated", never a guess.
 public sealed record Recipe(
     int? Id, string Name, int? Servings,
-    IReadOnlyList<string> Ingredients, IReadOnlyList<string> Steps, IReadOnlyList<string> Tags);
+    IReadOnlyList<string> Ingredients, IReadOnlyList<string> Steps, IReadOnlyList<string> Tags,
+    RecipeDetails? Details = null);
+
+// One structured ingredient: quantity/unit for cost scaling, Class in {whole, processed, ultra_processed}
+// (NOVA-inspired, curated — never inferred from item names).
+public sealed record RecipeIngredientDetail(string Name, double Quantity, string Unit, string Class);
+
+public sealed record RecipeDetails(
+    IReadOnlyList<RecipeIngredientDetail> StructuredIngredients,
+    double? ProteinGPerServing,
+    IReadOnlyList<string> ProteinSources,
+    string Provenance) // "curated" | "user_entered" | "unknown"
+{
+    public const string ClassWhole = "whole";
+    public const string ClassProcessed = "processed";
+    public const string ClassUltraProcessed = "ultra_processed";
+    public const string MostlyWhole = "mostly_whole";
+    public const string Mixed = "mixed";
+    public const string MostlyProcessed = "mostly_processed";
+
+    // Whole-food rollup BY INGREDIENT COUNT (grill Q5): >=70% whole -> mostly_whole; >=50%
+    // processed/ultra -> mostly_processed; else mixed. Deliberately not quantity-weighted — converting
+    // grams against "each" would manufacture precision the data can't carry. Computed, never stored,
+    // so the per-ingredient classes stay the single source of truth.
+    public (string Class, int WholeCount, int Total) WholeFoodRollup()
+    {
+        var total = StructuredIngredients.Count;
+        if (total == 0) return (Mixed, 0, 0);
+        var whole = StructuredIngredients.Count(i => i.Class == ClassWhole);
+        if ((double)whole / total >= 0.7) return (MostlyWhole, whole, total);
+        if ((double)(total - whole) / total >= 0.5) return (MostlyProcessed, whole, total);
+        return (Mixed, whole, total);
+    }
+}
 
 public sealed class RecipeEngine
 {
@@ -151,7 +186,31 @@ public sealed class RecipeEngine
         Servings: j.Servings,
         Ingredients: (j.Ingredients ?? new()).Select(i => (i ?? "").Trim()).Where(i => i.Length > 0).ToList(),
         Steps: (j.Steps ?? new()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!).ToList(),
-        Tags: (j.Tags ?? new()).Select(t => (t ?? "").Trim().ToLowerInvariant()).Where(t => t.Length > 0).ToList());
+        Tags: (j.Tags ?? new()).Select(t => (t ?? "").Trim().ToLowerInvariant()).Where(t => t.Length > 0).ToList(),
+        Details: ToDetails(j.Details));
+
+    // Tolerant runtime mapping: malformed entries are dropped, an empty details block becomes null (renders
+    // as "nutrition not rated"). The CATALOG is held to a stricter bar by RecipeCatalogValidationTests —
+    // this leniency exists for user-entered/legacy JSON, not to excuse bad curated data.
+    private static RecipeDetails? ToDetails(RecipeDetailsJson? j)
+    {
+        if (j is null) return null;
+        var ings = (j.StructuredIngredients ?? new())
+            .Where(i => i is not null
+                && !string.IsNullOrWhiteSpace(i.Name)
+                && i.Quantity is > 0
+                && !string.IsNullOrWhiteSpace(i.Unit)
+                && !string.IsNullOrWhiteSpace(i.Class))
+            .Select(i => new RecipeIngredientDetail(
+                i!.Name!.Trim(), i.Quantity!.Value, i.Unit!.Trim().ToLowerInvariant(),
+                i.Class!.Trim().ToLowerInvariant()))
+            .ToList();
+        var sources = (j.ProteinSources ?? new())
+            .Select(s => (s ?? "").Trim()).Where(s => s.Length > 0).ToList();
+        if (ings.Count == 0 && j.ProteinGPerServing is null && sources.Count == 0) return null;
+        return new RecipeDetails(ings, j.ProteinGPerServing, sources,
+            string.IsNullOrWhiteSpace(j.Provenance) ? "unknown" : j.Provenance!.Trim().ToLowerInvariant());
+    }
 
     private static HashSet<string> NormalizeSet(IEnumerable<string> values) =>
         values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim().ToLowerInvariant()).ToHashSet();
@@ -165,6 +224,25 @@ internal sealed class RecipeJson
     public List<string?>? Ingredients { get; set; }
     public List<string?>? Steps { get; set; }
     public List<string?>? Tags { get; set; }
+    public RecipeDetailsJson? Details { get; set; }
+}
+
+// The context's CamelCase policy would silently null-out snake_case keys, so every multi-word key below is
+// bound explicitly (grill Q2, Codex-verified). Keep [JsonPropertyName] in sync with recipes.json.
+internal sealed class RecipeDetailsJson
+{
+    [JsonPropertyName("structured_ingredients")] public List<RecipeIngredientJson?>? StructuredIngredients { get; set; }
+    [JsonPropertyName("protein_g_per_serving")] public double? ProteinGPerServing { get; set; }
+    [JsonPropertyName("protein_sources")] public List<string?>? ProteinSources { get; set; }
+    [JsonPropertyName("provenance")] public string? Provenance { get; set; }
+}
+
+internal sealed class RecipeIngredientJson
+{
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    [JsonPropertyName("quantity")] public double? Quantity { get; set; }
+    [JsonPropertyName("unit")] public string? Unit { get; set; }
+    [JsonPropertyName("class")] public string? Class { get; set; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,

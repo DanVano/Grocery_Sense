@@ -267,4 +267,8 @@ public record UserConfig(
     double MinStoreSaving = 5.0,
     // Editable CAD food-inflation rate table {year-string -> annual %}. null on older configs; ConfigStore
     // seeds InflationRates.Seed when absent and never overwrites a user-edited table (Stage 4 I0).
-    IReadOnlyDictionary<string, double>? FoodInflationByYear = null);
+    IReadOnlyDictionary<string, double>? FoodInflationByYear = null,
+    // Smart Week (v3, grill Q4): soft preference only — meals meeting the goal outrank misses, never a
+    // hard filter. null = off. Whole-food preference nudges mostly_whole recipes up, never excludes.
+    double? ProteinPerServingGoal = null,
+    bool PreferWholeFoodForward = false);

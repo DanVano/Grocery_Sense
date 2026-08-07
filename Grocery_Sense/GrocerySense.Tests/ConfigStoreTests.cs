@@ -45,6 +45,30 @@ public sealed class ConfigStoreTests : TempDirTestBase
         Assert.Equal(450.0, reloaded.MonthlyBudget);
     }
 
+    // ---- v3 Smart Week prefs (grill Q4): backward-compatible nullable goal + whole-food toggle ----
+
+    [Fact]
+    public void Smart_week_prefs_default_off_and_round_trip()
+    {
+        var store = New();
+        var cfg = store.Load();
+        Assert.Null(cfg.ProteinPerServingGoal);   // old configs lack the fields -> defaults
+        Assert.False(cfg.PreferWholeFoodForward);
+
+        store.Save(cfg with { ProteinPerServingGoal = 25.0, PreferWholeFoodForward = true });
+        var reloaded = New().Load();
+        Assert.Equal(25.0, reloaded.ProteinPerServingGoal);
+        Assert.True(reloaded.PreferWholeFoodForward);
+    }
+
+    [Fact]
+    public void Invalid_protein_goal_normalizes_to_null()
+    {
+        var store = New();
+        store.Save(store.Load() with { ProteinPerServingGoal = -5.0 });
+        Assert.Null(New().Load().ProteinPerServingGoal);
+    }
+
     [Fact]
     public void Load_rereads_after_external_file_change()
     {
