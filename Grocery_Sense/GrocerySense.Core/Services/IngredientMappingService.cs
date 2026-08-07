@@ -61,9 +61,18 @@ public sealed class IngredientMappingService
         return MapToItem(conn, rawText);
     }
 
+    // READ-ONLY mapping (V3 Phase 2, grill Q6/Codex): identical resolution, but never buffers alias learns
+    // or cache touches — for estimate paths (plan costing, pantry checks) that must not persist side effects
+    // a later unrelated FlushLearnedAliases would commit.
+    public MappingResult MapToItemReadOnly(SqliteConnection conn, string rawText, SqliteTransaction? tx = null)
+        => MapCore(conn, rawText, tx, learn: false);
+
     // Bulk overload: reuse the caller's connection (and transaction, when the caller is mid-write) so an ingest
     // loop maps every line on one connection instead of opening one per line.
     public MappingResult MapToItem(SqliteConnection conn, string rawText, SqliteTransaction? tx = null)
+        => MapCore(conn, rawText, tx, learn: true);
+
+    private MappingResult MapCore(SqliteConnection conn, string rawText, SqliteTransaction? tx, bool learn)
     {
         lock (_sync)
         {
@@ -85,7 +94,7 @@ public sealed class IngredientMappingService
             }
             if (alias is not null)
             {
-                _pendingTouches.Add(matchedKey);
+                if (learn) _pendingTouches.Add(matchedKey);
                 return new MappingResult(alias.ItemId, null, alias.Confidence, "alias", normalized);
             }
 
@@ -107,7 +116,7 @@ public sealed class IngredientMappingService
             if (confidence < AcceptThreshold)
                 return new MappingResult(null, null, confidence, "none", normalized);
 
-            if (confidence >= LearnThreshold)
+            if (learn && confidence >= LearnThreshold)
                 _pendingLearns.Add((normalized, bestItemId, confidence, "auto_fuzzy"));
 
             return new MappingResult(bestItemId, choices[best.Index].Name, confidence, "fuzzy", normalized);

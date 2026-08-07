@@ -8,8 +8,10 @@ public sealed class BudgetServiceTests : TempDirTestBase
 {
 
 
+    // Stamp with LOCAL now — BudgetService's "current month" is local (V3 date convention); a UtcNow stamp
+    // would land these receipts in next month's key during evening rollover hours and flake the suite.
     private static void AddReceipt(SqliteConnection conn, int storeId, decimal total) =>
-        AddReceiptOn(conn, storeId, total, MonthDate(DateTime.UtcNow));
+        AddReceiptOn(conn, storeId, total, MonthDate(DateTime.Now));
 
     [Fact]
     public void Status_is_unset_without_a_budget_but_still_reports_spend()

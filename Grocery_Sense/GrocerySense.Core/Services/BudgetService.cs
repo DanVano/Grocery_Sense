@@ -7,26 +7,34 @@ namespace GrocerySense.Core;
 // Port of reference-python/.../services/budget_service.py — this month's spend vs budget + spend trend.
 // Gas-cost get/save are dropped (the optimizer redesign cut distance/gas; the field is never surfaced).
 // Dict return replaced with the typed BudgetStatus record.
+//
+// V3 local-date convention (grill Q15): "current month" / "today" derive from the LOCAL clock, captured
+// once per operation — DateTime.UtcNow put the Budget page on next month's key during the evening hours
+// where UTC had rolled over but Vancouver had not. The clock is injectable (TimeProvider) so rollover
+// boundaries are testable with a fixed clock; stored receipt dates are untouched (already local calendar
+// dates). UTC remains correct for true instants elsewhere (sync/dismissal timestamps, Db.NowIso).
 public sealed class BudgetService
 {
     private readonly ConfigStore _config;
     private readonly SqliteConnectionFactory _factory;
+    private readonly TimeProvider _clock;
 
-    public BudgetService(ConfigStore config, SqliteConnectionFactory factory)
+    public BudgetService(ConfigStore config, SqliteConnectionFactory factory, TimeProvider? clock = null)
     {
         _config = config;
         _factory = factory;
+        _clock = clock ?? TimeProvider.System;
     }
 
     public BudgetStatus GetBudgetStatus()
     {
-        var month = CurrentYearMonth();
+        var now = LocalNow();
+        var month = YearMonth(now);
         MonthSpend spend;
         using (var conn = _factory.Open()) spend = ReceiptsRepo.GetMonthSpend(conn, month);
 
         // Month-end projection: current pace held for the rest of the month.
         // ponytail: naive linear extrapolation; add weekday/pay-cycle weighting only if it demonstrably misleads.
-        var now = DateTime.UtcNow;
         var daysInMonth = DateTime.DaysInMonth(now.Year, now.Month);
         var projected = decimal.Round(spend.Total / now.Day * daysInMonth, 2); // now.Day is 1..31, never 0
 
@@ -54,14 +62,14 @@ public sealed class BudgetService
     public IReadOnlyList<StoreMonthSpend> GetMonthStoreBreakdown()
     {
         using var conn = _factory.Open();
-        return ReceiptsRepo.GetMonthSpendByStore(conn, CurrentYearMonth());
+        return ReceiptsRepo.GetMonthSpendByStore(conn, YearMonth(LocalNow()));
     }
 
     // Monthly spend for the last N months (oldest first).
     public IReadOnlyList<MonthSpend> GetTrend(int months = 12)
     {
         using var conn = _factory.Open();
-        return ReceiptsRepo.GetSpendTrend(conn, months);
+        return ReceiptsRepo.GetSpendTrend(conn, months, todayIso: LocalNow().ToString("yyyy-MM-dd"));
     }
 
     // Year-over-year context line for the Budget page (Stage 4 I3). Compares this month's spend to the same
@@ -71,9 +79,9 @@ public sealed class BudgetService
     // often won't exist yet; it fills in with normal use.
     public InflationContext GetInflationContext()
     {
-        var now = DateTime.UtcNow;
-        var currentKey = now.ToString("yyyy-MM");
-        var lastYearKey = now.AddYears(-1).ToString("yyyy-MM");
+        var now = LocalNow();
+        var currentKey = YearMonth(now);
+        var lastYearKey = YearMonth(now.AddYears(-1));
 
         var byMonth = GetTrend(13).ToDictionary(p => p.Month, p => p.Total);
         if (!byMonth.TryGetValue(currentKey, out var current) || !byMonth.TryGetValue(lastYearKey, out var prior)
@@ -95,5 +103,8 @@ public sealed class BudgetService
         _config.Save(cfg with { MonthlyBudget = amount is { } a && a > 0 ? a : null });
     }
 
-    private static string CurrentYearMonth() => DateTime.UtcNow.ToString("yyyy-MM");
+    private DateTime LocalNow() => _clock.GetLocalNow().DateTime;
+
+    // Pure so the month-rollover boundary is testable with fixed dates (no static clock mutation).
+    internal static string YearMonth(DateTime localNow) => localNow.ToString("yyyy-MM");
 }

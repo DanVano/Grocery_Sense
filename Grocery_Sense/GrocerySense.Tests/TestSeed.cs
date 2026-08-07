@@ -8,7 +8,9 @@ namespace GrocerySense.Tests;
 internal static class TestSeed
 {
     // Negative n is a future date (DaysAgo(-1) == tomorrow) — already the convention at the call sites.
-    public static string DaysAgo(int n) => DateTime.UtcNow.AddDays(-n).ToString("yyyy-MM-dd");
+    // LOCAL now: production windows are local-date based (V3 convention); a UTC stamp here would drift one
+    // day off the service's "today" during evening rollover hours and flake date-window assertions.
+    public static string DaysAgo(int n) => DateTime.Now.AddDays(-n).ToString("yyyy-MM-dd");
     public static string Today => DaysAgo(0);
 
     public static int AddReceipt(SqliteConnection conn, int storeId, string date)

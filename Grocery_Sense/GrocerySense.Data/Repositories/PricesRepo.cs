@@ -139,7 +139,7 @@ public static class PricesRepo
         var sql =
             "SELECT unit_price FROM prices WHERE item_id = $item " +
             "AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 " +
-            "AND date(COALESCE(date, created_at)) >= date('now', $since)";
+            "AND date(COALESCE(date, created_at)) >= $cutoff";
         if (storeId is not null) sql += " AND store_id = $store";
 
         var sourceParams = new List<string>();
@@ -154,7 +154,7 @@ public static class PricesRepo
 
         using var cmd = Db.Command(conn, tx, sql);
         cmd.Parameters.AddWithValue("$item", itemId);
-        cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+        cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
         if (storeId is not null) cmd.Parameters.AddWithValue("$store", storeId.Value);
         if (!receiptOnly && sources is { Count: > 0 })
             for (var i = 0; i < sources.Count; i++) cmd.Parameters.AddWithValue(sourceParams[i], sources[i]);
@@ -201,12 +201,12 @@ public static class PricesRepo
             FROM prices INDEXED BY idx_prices_coalesced_date
             WHERE item_id IS NOT NULL AND unit_price IS NOT NULL
               AND (source = 'receipt' OR receipt_id IS NOT NULL)
-              AND date(COALESCE(date, created_at)) >= date('now', $since)
+              AND date(COALESCE(date, created_at)) >= $cutoff
             GROUP BY item_id
             HAVING line_count >= $minLines OR receipt_count >= $minReceipts
             ORDER BY receipt_count DESC, line_count DESC
             """);
-        cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+        cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
         cmd.Parameters.AddWithValue("$minLines", minLineItems);
         cmd.Parameters.AddWithValue("$minReceipts", minDistinctReceipts);
         using var r = cmd.ExecuteReader();
@@ -236,9 +236,9 @@ public static class PricesRepo
                 "CASE WHEN (source = 'receipt' OR receipt_id IS NOT NULL) THEN 1 ELSE 0 END AS is_receipt " +
                 $"FROM prices WHERE item_id IN ({ph}) " +
                 "AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 " +
-                "AND date(COALESCE(date, created_at)) >= date('now', $since) ORDER BY item_id");
+                "AND date(COALESCE(date, created_at)) >= $cutoff ORDER BY item_id");
             BindIn(cmd, chunk);
-            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -280,10 +280,10 @@ public static class PricesRepo
                 "           ORDER BY CAST(unit_price AS REAL) ASC, COALESCE(date, created_at) ASC) AS rn " +
                 $"  FROM prices WHERE item_id IN ({ph}) " +
                 "    AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 " +
-                "    AND date(COALESCE(date, created_at)) >= date('now', $since) " +
+                "    AND date(COALESCE(date, created_at)) >= $cutoff " +
                 ") WHERE rn = 1");
             BindIn(cmd, chunk);
-            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -311,9 +311,9 @@ public static class PricesRepo
             using var cmd = Db.Command(conn, tx,
                 "SELECT item_id, unit_price, COALESCE(date, created_at) AS when_iso FROM prices " +
                 $"WHERE item_id IN ({ph}) AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 " +
-                "AND date(COALESCE(date, created_at)) >= date('now', $since) ORDER BY item_id, when_iso DESC");
+                "AND date(COALESCE(date, created_at)) >= $cutoff ORDER BY item_id, when_iso DESC");
             BindIn(cmd, chunk);
-            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -390,7 +390,7 @@ public static class PricesRepo
         var result = new Dictionary<(int, int), PriceQuote>();
         if (items.Count == 0 || stores.Count == 0) return result;
 
-        var onDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var onDate = DateTime.Now.ToString("yyyy-MM-dd"); // local calendar date (V3 local-date convention)
         var storePh = Placeholders(stores.Count, "s");
         foreach (var chunk in items.Chunk(ParamChunk))
         {
@@ -435,9 +435,9 @@ public static class PricesRepo
                 "       MAX(COALESCE(norm_unit_price, CAST(unit_price AS REAL))), " +
                 "       AVG(COALESCE(norm_unit_price, CAST(unit_price AS REAL))), COUNT(*) " +
                 $"FROM prices WHERE item_id IN ({ph}) AND unit_price IS NOT NULL " +
-                "AND date(COALESCE(date, created_at)) >= date('now', $since) GROUP BY item_id");
+                "AND date(COALESCE(date, created_at)) >= $cutoff GROUP BY item_id");
             BindIn(cmd, chunk);
-            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -466,9 +466,9 @@ public static class PricesRepo
                 "       AVG(CASE WHEN quantity IS NOT NULL AND quantity > 0 THEN quantity END) AS avg_qty " +
                 $"FROM prices WHERE item_id IN ({ph}) " +
                 "  AND (source = 'receipt' OR receipt_id IS NOT NULL) " +
-                "  AND date(COALESCE(date, created_at)) >= date('now', $since) GROUP BY item_id");
+                "  AND date(COALESCE(date, created_at)) >= $cutoff GROUP BY item_id");
             BindIn(cmd, chunk);
-            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -506,9 +506,9 @@ public static class PricesRepo
             using var cmd = Db.Command(conn, tx,
                 "SELECT item_id, MAX(date(COALESCE(date, created_at))) FROM prices " +
                 $"WHERE item_id IN ({ph}) AND (source = 'receipt' OR receipt_id IS NOT NULL) " +
-                "  AND date(COALESCE(date, created_at)) >= date('now', $since) GROUP BY item_id");
+                "  AND date(COALESCE(date, created_at)) >= $cutoff GROUP BY item_id");
             BindIn(cmd, chunk);
-            cmd.Parameters.AddWithValue("$since", SinceClause(sinceDays));
+            cmd.Parameters.AddWithValue("$cutoff", CutoffIso(sinceDays));
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 if (!r.IsDBNull(1))
@@ -528,12 +528,48 @@ public static class PricesRepo
         return n % 2 == 1 ? v[mid] : (v[mid - 1] + v[mid]) / 2.0;
     }
 
-    // SQLite date('now', ?) modifier, e.g. "-180 day". Floor at 1 day (matches Python).
-    private static string SinceClause(int days) => $"-{Math.Max(1, days)} day";
-
-    // ISO date `since_days` ago (UTC), for the `date >= ?` lexical range filters.
+    // ISO date `since_days` ago, LOCAL calendar time, for the `date >= ?` lexical range filters. V3
+    // local-date convention (grill Q15): price rows carry local calendar dates, so cutoffs must be
+    // computed from local "today" — SQLite's date('now') is UTC and shifted windows at day rollover.
     private static string CutoffIso(int sinceDays) =>
-        DateTime.UtcNow.Date.AddDays(-sinceDays).ToString("yyyy-MM-dd");
+        DateTime.Now.Date.AddDays(-Math.Max(1, sinceDays)).ToString("yyyy-MM-dd");
+
+    // V3 trip close-out (grill Q12): receipt-sourced unit prices STRICTLY BEFORE a date, excluding one
+    // receipt, read as DECIMAL. The general Usual readers are unusable for realized-savings math — they
+    // include the just-scanned receipt (baseline contamination), return doubles, and fall back to
+    // non-receipt sources. Values keep their unit string so the caller can hold the comparison to the
+    // dominant unit instead of mixing per-kg with per-each.
+    public static IReadOnlyDictionary<int, List<(decimal Price, string Unit)>> ListReceiptUnitPricesBeforeBatch(
+        SqliteConnection conn, IReadOnlyList<int> itemIds, string beforeDateIso, int excludeReceiptId,
+        SqliteTransaction? tx = null)
+    {
+        var ids = CoerceIds(itemIds);
+        var result = new Dictionary<int, List<(decimal, string)>>();
+        if (ids.Count == 0) return result;
+        foreach (var id in ids) result[id] = new List<(decimal, string)>();
+
+        foreach (var chunk in ids.Chunk(ParamChunk))
+        {
+            var ph = Placeholders(chunk.Length);
+            using var cmd = Db.Command(conn, tx,
+                $"SELECT item_id, unit_price, COALESCE(unit, '') FROM prices WHERE item_id IN ({ph}) " +
+                "AND unit_price IS NOT NULL AND CAST(unit_price AS REAL) > 0 " +
+                "AND (source = 'receipt' OR receipt_id IS NOT NULL) " +
+                "AND (receipt_id IS NULL OR receipt_id <> $exclude) " +
+                "AND date(COALESCE(date, created_at)) < $before");
+            BindIn(cmd, chunk);
+            cmd.Parameters.AddWithValue("$exclude", excludeReceiptId);
+            cmd.Parameters.AddWithValue("$before", beforeDateIso);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                if (r.IsDBNull(1)) continue;
+                if (result.TryGetValue(r.GetInt32(0), out var list))
+                    list.Add((r.GetDecimal(1), r.GetString(2).Trim().ToLowerInvariant()));
+            }
+        }
+        return result;
+    }
 
     private static List<int> CoerceIds(IEnumerable<int> ids) => ids.Where(x => x > 0).Distinct().ToList();
 

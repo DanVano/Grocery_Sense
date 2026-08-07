@@ -133,7 +133,7 @@ public sealed class BasketOptimizerService
             basketIds = basketIds.Where(id => !waitIds.Contains(id)).ToList();
 
         var priceable = basketIds.Where(id => anyBest[id] is not null).ToList();
-        var primary = PickPrimary(stores, priceable, priceByStore, anyBest);
+        var primary = PickPrimary(stores, priceable, priceByStore, anyBest, qtyByItem);
 
         // Initialize the plan at the primary store.
         var plan = new Dictionary<int, Assignment>();
@@ -196,12 +196,16 @@ public sealed class BasketOptimizerService
 
     private static Store PickPrimary(IReadOnlyList<Store> stores, List<int> priceable,
         Dictionary<int, Dictionary<int, (double Price, string Unit, string Source)>> priceByStore,
-        Dictionary<int, (double Price, int StoreId, string Unit, string Source)?> anyBest)
+        Dictionary<int, (double Price, int StoreId, string Unit, string Source)?> anyBest,
+        Dictionary<int, double> qtyByItem)
     {
         // Cheapest single store for the basket (missing items fall back to their cheapest-anywhere price so
-        // every store is comparable). Tie-break: favorite, then priority, then id.
+        // every store is comparable). QTY-WEIGHTED (V3 finding 8): the store-join gate and result totals
+        // already weight by quantity — an unweighted primary pick disagreed with them whenever the basket
+        // had multi-quantity rows. Tie-break: favorite, then priority, then id.
         double Total(Store s) => priceable.Sum(id =>
-            priceByStore[id].TryGetValue(s.Id, out var p) ? p.Price : anyBest[id]!.Value.Price);
+            (priceByStore[id].TryGetValue(s.Id, out var p) ? p.Price : anyBest[id]!.Value.Price)
+            * qtyByItem.GetValueOrDefault(id, 1.0));
 
         return stores
             .OrderBy(Total)

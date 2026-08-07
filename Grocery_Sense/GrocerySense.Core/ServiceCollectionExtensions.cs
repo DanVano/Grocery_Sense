@@ -60,6 +60,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<SqliteConnectionFactory>(),
             () => sp.GetRequiredService<PreferencesService>().GetMealProfile()));
         services.AddSingleton<WeeklyPlannerService>();
+        // V3 Phase 2: quantity-aware plan costing (Smart Week budget claims ride this, not the legacy
+        // 1-unit-per-ingredient estimate).
+        services.AddSingleton<PlanCostService>();
 
         // Family meal-picks (Phase 5): names-only members + parent review queue.
         services.AddSingleton<FamilyRequestsService>();

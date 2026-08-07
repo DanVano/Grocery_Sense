@@ -102,7 +102,7 @@ public sealed class FlyerSyncService
         // preserves it (the cooldown still applies) and never writes success.
         WriteMeta(meta with { Attempt = now });
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now); // local calendar date (V3 local-date convention)
         var defaultFrom = today.ToString("yyyy-MM-dd");
         var defaultTo = today.AddDays(7).ToString("yyyy-MM-dd");
 

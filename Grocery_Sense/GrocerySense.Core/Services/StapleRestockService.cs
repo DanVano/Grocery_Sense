@@ -31,7 +31,7 @@ public sealed class StapleRestockService
         var last = PricesRepo.GetLastReceiptPurchaseBatch(conn, ids, PriceDropAlertService.UsualLookbackDays);
         var items = ItemsRepo.GetItemsByIds(conn, ids);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now); // local calendar date (V3 local-date convention)
         var result = new List<RestockSuggestion>();
         foreach (var id in ids)
         {
