@@ -3,6 +3,7 @@
 @inject PriceDropAlertService Alerts
 @inject FamilyRequestsService Family
 @inject StapleRestockService Restock
+@inject BudgetService Budget
 @inject SqliteConnectionFactory Db
 @inject ShopModeState ShopState
 @inject NavigationManager Nav
@@ -30,6 +31,22 @@ else
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.ShoppingCartCheckout"
                        OnClick="ResumeShopping">Resume shopping</MudButton>
+        </MudPaper>
+    }
+
+    @* Realized savings (V3 Phase 5): only closed trips with computable savings speak here — no trips or
+       all-null savings = no card, never a fabricated $0. Negative reads as spent-more, honestly. *@
+    @if (_monthSavings is { Total: { } saved })
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">
+                @(saved >= 0 ? $"Saved ${saved:0.00} this month" : $"Spent ${Math.Abs(saved):0.00} more than usual this month")
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                vs your usual prices, across @_monthSavings.TripsWithSavings closed trip(s).
+            </MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Savings" Href="/budget">See budget</MudButton>
         </MudPaper>
     }
 
@@ -112,6 +129,7 @@ else
     private string? _topAlert;
     private int _familyCount;
     private int _essentialsDue;
+    private MonthlySavings? _monthSavings;
 
     // Every figure here is a cheap read of already-persisted state — Home must not recompute the
     // deal/alert engines on the landing screen. Alerts are read, never refreshed, for the same reason.
@@ -133,6 +151,7 @@ else
 
                 _familyCount = Family.UnreviewedCount();
                 _essentialsDue = Restock.GetSuggestions().Count;
+                _monthSavings = Budget.GetMonthRealizedSavings();
 
                 using var conn = Db.Open();
                 _dealCount = FlyersRepo.CountActiveDeals(conn); // COUNT, not 5 000 materialized rows

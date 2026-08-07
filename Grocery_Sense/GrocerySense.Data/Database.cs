@@ -393,6 +393,34 @@ public static class Database
             snapshot_json TEXT NOT NULL
         );
         """,
+
+        // ----- Migration 11: trip close-out ledger (V3 Phase 5, grill Q12 — Codex-hardened) -----
+        // One row per CLOSED trip. UNIQUE(receipt_id) makes double-close impossible (and with it, monthly
+        // double-counting); ON DELETE CASCADE ties the ledger row's life to its receipt — the delete-with-
+        // backup flow snapshots it (ReceiptSnapshot.Trip) and restore relinks it to the new receipt id.
+        // Money columns are TEXT-decimal per house rule; realized_saving is NULL (not $0) when no line
+        // qualified. No item_id column and no per-line table — line detail stays derivable from
+        // receipt_line_items; close-time medians are recorded only in aggregate (basis + counts).
+        """
+        CREATE TABLE trips (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            receipt_id             INTEGER NOT NULL UNIQUE REFERENCES receipts(id) ON DELETE CASCADE,
+            store_id               INTEGER REFERENCES stores(id),
+            trip_date              TEXT NOT NULL,
+            planned_estimate       TEXT,
+            planned_estimate_basis TEXT,
+            planned_unknown_count  INTEGER,
+            actual_total           TEXT,
+            realized_saving        TEXT,
+            saving_basis           TEXT,
+            mapped_line_count      INTEGER NOT NULL DEFAULT 0,
+            qualifying_line_count  INTEGER NOT NULL DEFAULT 0,
+            matched_planned_count  INTEGER NOT NULL DEFAULT 0,
+            unplanned_count        INTEGER NOT NULL DEFAULT 0,
+            created_at             TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_trips_trip_date ON trips(trip_date);
+        """,
     };
 
     /// <summary>Highest schema version this build knows how to produce.</summary>

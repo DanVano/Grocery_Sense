@@ -224,6 +224,16 @@ public sealed record TripReconciliation(
     int MatchedPlanned, int UnplannedCount, decimal UnplannedTotal,
     IReadOnlyList<TripLineFlag> Flags, IReadOnlyList<string> PlannedNotBought, string? DataNote);
 
+// V3 trip close-out result: the ledger row id, the realized saving (null = no line qualified,
+// rendered "unavailable" never $0), coverage counts, and the reconciliation shown alongside.
+public sealed record TripCloseResult(
+    int TripId, decimal? RealizedSaving, int QualifyingLines, int MappedLines,
+    TripReconciliation Reconciliation);
+
+// Monthly realized-savings summary for the Home/Budget card. Total null = no trip this month had
+// computable savings; a NEGATIVE total reads "spent more than usual", never "saved -$X".
+public sealed record MonthlySavings(string Month, decimal? Total, int TripsWithSavings, int TripCount);
+
 // A weekly plan constrained to an ESTIMATED spending cap (WeeklyPlannerService.BuildWeeklyPlanUnderBudget).
 // Selection is count-first (most meals), then best-effort score swaps. SkippedNoEstimate covers both
 // unpriced recipes and partial estimates below MinKnownRatioForBudget (they'd understate cost);

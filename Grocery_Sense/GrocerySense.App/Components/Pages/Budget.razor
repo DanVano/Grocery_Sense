@@ -52,6 +52,23 @@ else
         }
     </MudPaper>
 
+    @* Realized savings (V3 Phase 5): closed-trip ledger only. Unavailable states stay visible and honest
+       — a month with trips but no computable savings says so, never $0. *@
+    @if (_savings is { } sav && sav.TripCount > 0)
+    {
+        <MudPaper Class="pa-3 mb-3" Outlined="true">
+            <MudText Typo="Typo.subtitle1" GutterBottom="true">Realized savings</MudText>
+            <MudText Typo="Typo.body2">
+                @(sav.Total is { } t
+                    ? t >= 0
+                        ? $"Saved ${t:0.00} vs your usual prices across {sav.TripsWithSavings} closed trip(s)."
+                        : $"Spent ${Math.Abs(t):0.00} more than usual across {sav.TripsWithSavings} closed trip(s)."
+                    : $"{sav.TripCount} closed trip(s), but not enough prior price history to compute savings yet.")
+            </MudText>
+            <MudText Typo="Typo.caption">Basis: prior receipt medians, same unit, this receipt excluded.</MudText>
+        </MudPaper>
+    }
+
     <MudPaper Class="pa-3 mb-3" Outlined="true">
         <MudText Typo="Typo.subtitle1" GutterBottom="true">Month-end forecast</MudText>
         <MudText Typo="Typo.body2">
@@ -122,6 +139,7 @@ else
     private IReadOnlyList<MonthSpend>? _trend;
     private IReadOnlyList<StoreMonthSpend>? _byStore;
     private InflationContext? _inflation;
+    private MonthlySavings? _savings;
     private double? _budgetInput;
 
     protected override Task OnInitializedAsync() => ReloadAsync();
@@ -138,9 +156,9 @@ else
         try
         {
             _error = null;
-            (_status, _trend, _byStore, _inflation) = await Task.Run(() =>
+            (_status, _trend, _byStore, _inflation, _savings) = await Task.Run(() =>
                 (BudgetSvc.GetBudgetStatus(), BudgetSvc.GetTrend(), BudgetSvc.GetMonthStoreBreakdown(),
-                 BudgetSvc.GetInflationContext()));
+                 BudgetSvc.GetInflationContext(), BudgetSvc.GetMonthRealizedSavings()));
             _budgetInput = _status.Budget is decimal b ? (double)b : null;
         }
         catch (Exception ex) { _error = ex.Message; }

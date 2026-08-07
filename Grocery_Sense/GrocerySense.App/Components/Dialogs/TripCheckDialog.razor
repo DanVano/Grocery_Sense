@@ -37,6 +37,14 @@
         }
     </DialogContent>
     <DialogActions>
+        @if (CanCloseTrip)
+        {
+            @* V3 Phase 5: closes the loop — writes the trips ledger row and clears picked-up list rows. *@
+            <MudButton Color="Color.Success" Variant="Variant.Filled"
+                       OnClick="@(() => MudDialog.Close(DialogResult.Ok("close_trip")))">
+                Close trip — record savings &amp; clear picked-up items
+            </MudButton>
+        }
         <MudButton Color="Color.Primary" OnClick="@(() => MudDialog.Close())">Close</MudButton>
     </DialogActions>
 </MudDialog>
@@ -44,4 +52,5 @@
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public TripReconciliation Result { get; set; } = default!;
+    [Parameter] public bool CanCloseTrip { get; set; }
 }

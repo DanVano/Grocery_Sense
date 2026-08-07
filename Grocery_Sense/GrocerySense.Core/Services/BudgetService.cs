@@ -96,6 +96,16 @@ public sealed class BudgetService
         return new InflationContext(spendYoyPct, foodPct, EnoughHistory: true);
     }
 
+    // V3 Phase 5: this month's realized savings from closed trips (Home/Budget card). Same local month
+    // key as everything else on this page; C# decimal sums over TEXT columns; null total = unavailable.
+    public MonthlySavings GetMonthRealizedSavings()
+    {
+        var month = YearMonth(LocalNow());
+        using var conn = _factory.Open();
+        var (total, withSavings, count) = TripsRepo.GetMonthRealizedSavings(conn, month);
+        return new MonthlySavings(month, total, withSavings, count);
+    }
+
     // Persist a new monthly budget; null/non-positive clears it.
     public void SaveMonthlyBudget(double? amount)
     {

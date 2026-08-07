@@ -117,7 +117,7 @@ public static class FlyersRepo
     // materialize 5 000 deal rows to show a number.
     public static int CountActiveDeals(SqliteConnection conn, string? onDate = null, SqliteTransaction? tx = null)
     {
-        onDate ??= DateTime.UtcNow.ToString("yyyy-MM-dd");
+        onDate ??= DateTime.Now.ToString("yyyy-MM-dd"); // local calendar date (V3 local-date convention)
         using var cmd = Db.Command(conn, tx,
             "SELECT COUNT(*) FROM flyer_deals d JOIN flyer_batches b ON b.id = d.flyer_id " +
             "WHERE b.status = 'active' " +
@@ -130,7 +130,7 @@ public static class FlyersRepo
     public static IReadOnlyList<FlyerDeal> ListActiveDeals(SqliteConnection conn, int? storeId = null,
         string? onDate = null, int limit = 5000, SqliteTransaction? tx = null)
     {
-        onDate ??= DateTime.UtcNow.ToString("yyyy-MM-dd");
+        onDate ??= DateTime.Now.ToString("yyyy-MM-dd"); // local calendar date (V3 local-date convention)
         var sql =
             $"SELECT {PrefixCols("d")} FROM flyer_deals d JOIN flyer_batches b ON b.id = d.flyer_id " +
             "WHERE b.status = 'active' " +

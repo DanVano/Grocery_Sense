@@ -167,16 +167,19 @@ public static class ReceiptsRepo
             .ToList();
     }
 
+    // todayIso: local calendar "today" (V3 local-date convention) — SQLite's DATE('now') is UTC and made
+    // the trend window drift at day rollover for zones behind UTC. Callers pass local today; defaults local.
     public static IReadOnlyList<MonthSpend> GetSpendTrend(SqliteConnection conn, int months = 12,
-        SqliteTransaction? tx = null)
+        SqliteTransaction? tx = null, string? todayIso = null)
     {
         months = Math.Max(1, months);
         using var cmd = Db.Command(conn, tx,
             """
             SELECT STRFTIME('%Y-%m', purchase_date) AS month, total_amount
             FROM receipts
-            WHERE total_amount IS NOT NULL AND purchase_date >= DATE('now', $delta || ' months')
+            WHERE total_amount IS NOT NULL AND purchase_date >= DATE($today, $delta || ' months')
             """);
+        cmd.Parameters.AddWithValue("$today", todayIso ?? DateTime.Now.ToString("yyyy-MM-dd"));
         cmd.Parameters.AddWithValue("$delta", $"-{months}");
 
         var agg = new SortedDictionary<string, (decimal Total, int Count)>(StringComparer.Ordinal);
@@ -507,6 +510,15 @@ public static class ReceiptsRepo
                 }
             }
 
+            // Trip close-out relink (V3): re-insert the ledger row against the NEW receipt id — without
+            // this, delete-with-backup silently lost the trip. trip_date/created_at survive verbatim.
+            if (snapshot.Trip is { } trip)
+                TripsRepo.Insert(conn, receiptId, trip.StoreId, trip.TripDate ?? rec.PurchaseDate ?? "",
+                    trip.PlannedEstimate, trip.PlannedEstimateBasis, trip.PlannedUnknownCount,
+                    trip.ActualTotal, trip.RealizedSaving, trip.SavingBasis,
+                    trip.MappedLineCount, trip.QualifyingLineCount, trip.MatchedPlannedCount,
+                    trip.UnplannedCount, t);
+
             // The backup is CONSUMED by a successful restore (same transaction): restoring the same
             // backup twice would insert a second identical receipt whose dedupe keys silently conflict.
             using (var consume = Db.Command(conn, t, "DELETE FROM deleted_receipt_backups WHERE id = $id"))
@@ -643,6 +655,30 @@ public static class ReceiptsRepo
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 snap.Signatures.Add(new SnapSignature { Signature = r.GetStringOrNull(0), CreatedAt = r.GetStringOrNull(1) });
+        }
+
+        // Trip close-out row (V3) — CASCADE would silently drop it on delete; capture it so restore relinks.
+        using (var cmd = Db.Command(conn, tx,
+            """
+            SELECT store_id, trip_date, planned_estimate, planned_estimate_basis, planned_unknown_count,
+                   actual_total, realized_saving, saving_basis, mapped_line_count, qualifying_line_count,
+                   matched_planned_count, unplanned_count, created_at
+            FROM trips WHERE receipt_id = $id
+            """))
+        {
+            cmd.Parameters.AddWithValue("$id", receiptId);
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+                snap.Trip = new SnapTrip
+                {
+                    StoreId = r.GetIntOrNull(0), TripDate = r.GetStringOrNull(1),
+                    PlannedEstimate = r.GetMoneyOrNull(2), PlannedEstimateBasis = r.GetStringOrNull(3),
+                    PlannedUnknownCount = r.GetIntOrNull(4), ActualTotal = r.GetMoneyOrNull(5),
+                    RealizedSaving = r.GetMoneyOrNull(6), SavingBasis = r.GetStringOrNull(7),
+                    MappedLineCount = r.GetInt32(8), QualifyingLineCount = r.GetInt32(9),
+                    MatchedPlannedCount = r.GetInt32(10), UnplannedCount = r.GetInt32(11),
+                    CreatedAt = r.GetStringOrNull(12),
+                };
         }
 
         return snap;

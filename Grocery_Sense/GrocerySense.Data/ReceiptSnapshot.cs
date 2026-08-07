@@ -15,6 +15,27 @@ internal sealed class ReceiptSnapshot
     public List<SnapPrice> Prices { get; set; } = new();
     public List<SnapFileHash> FileHashes { get; set; } = new();
     public List<SnapSignature> Signatures { get; set; } = new();
+    // V3 trips ledger (grill Q12): the receipt's close-out row, if it was closed. CASCADE deletes it with
+    // the receipt, so without this capture "Delete (backup kept)" would silently lose the ledger entry.
+    // Null on pre-V3 backups — restore simply skips it.
+    public SnapTrip? Trip { get; set; }
+}
+
+internal sealed class SnapTrip
+{
+    public int? StoreId { get; set; }
+    public string? TripDate { get; set; }
+    public decimal? PlannedEstimate { get; set; }
+    public string? PlannedEstimateBasis { get; set; }
+    public int? PlannedUnknownCount { get; set; }
+    public decimal? ActualTotal { get; set; }
+    public decimal? RealizedSaving { get; set; }
+    public string? SavingBasis { get; set; }
+    public int MappedLineCount { get; set; }
+    public int QualifyingLineCount { get; set; }
+    public int MatchedPlannedCount { get; set; }
+    public int UnplannedCount { get; set; }
+    public string? CreatedAt { get; set; }
 }
 
 internal sealed class SnapReceipt

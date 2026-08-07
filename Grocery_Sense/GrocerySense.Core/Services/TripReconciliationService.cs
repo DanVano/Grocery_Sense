@@ -29,7 +29,7 @@ public sealed class TripReconciliationService
 
         if (!DateOnly.TryParse(receipt.PurchaseDate, out var purchased))
             throw new InvalidOperationException($"Receipt {receiptId} has no parseable purchase date.");
-        var ageDays = DateOnly.FromDateTime(DateTime.UtcNow).DayNumber - purchased.DayNumber;
+        var ageDays = DateOnly.FromDateTime(DateTime.Now).DayNumber - purchased.DayNumber; // local (V3 date convention)
         if (ageDays < 0 || ageDays > RecentTripDays)
             throw new InvalidOperationException(
                 $"Trip check compares against the CURRENT list and flyers — only valid within {RecentTripDays} day(s) of the trip.");
@@ -91,5 +91,79 @@ public sealed class TripReconciliationService
 
         return new TripReconciliation(receiptId, receipt.StoreName, receipt.PurchaseDate,
             matchedPlanned, unplannedItemIds.Count, unplannedTotal, flags, notBought, string.Join(" ", notes));
+    }
+
+    // ---- V3 Phase 5: trip close-out (grill Q12, Codex-hardened) ----
+
+    public const string SavingBasis = "prior_receipt_median_same_unit";
+
+    // Close the trip: reconcile (same guards), compute realized savings against PRIOR receipt medians,
+    // write the trips row and clear checked-off list rows in ONE transaction. Realized savings math is a
+    // dedicated decimal computation — NOT GetUsualUnitPriceBatch, which includes the just-scanned receipt
+    // (baseline contamination), mixes units, returns doubles, and falls back to estimated medians:
+    //   per mapped line: effective paid unit = line_total ÷ qty (multibuy discounts already netted) else
+    //   unit_price; baseline = median of >= MinReceiptSamplesForUsual receipt-sourced prices BEFORE the
+    //   trip date (this receipt excluded), dominant unit only; contribution = (baseline − paid) × qty.
+    // Negatives included (overpays net against savings); ambiguous lines skipped; null when nothing
+    // qualifies — the UI shows "unavailable", never $0.
+    public TripCloseResult CloseTrip(int receiptId)
+    {
+        var recon = Reconcile(receiptId); // throws on missing/undated/stale receipts — same rules as the check
+
+        using var conn = _factory.Open();
+        if (TripsRepo.HasTripForReceipt(conn, receiptId))
+            throw new InvalidOperationException("This trip is already closed — its savings are on the ledger.");
+
+        var receipt = ReceiptsRepo.GetReceipt(conn, receiptId)!;
+        var lines = ReceiptsRepo.ListReceiptLineItems(conn, receiptId);
+        var mapped = lines.Where(l => l.ItemId is not null).ToList();
+        var ids = mapped.Select(l => l.ItemId!.Value).Distinct().ToList();
+        var history = PricesRepo.ListReceiptUnitPricesBeforeBatch(conn, ids, receipt.PurchaseDate, receiptId);
+
+        decimal sum = 0m;
+        var qualifying = 0;
+        foreach (var line in mapped)
+        {
+            var qty = line.Quantity is > 0 ? (decimal)line.Quantity.Value : 1m;
+            decimal? paid = line.LineTotal is { } lt ? lt / qty : line.UnitPrice;
+            if (paid is not { } paidUnit || paidUnit <= 0) continue;
+
+            var prior = history.GetValueOrDefault(line.ItemId!.Value);
+            if (prior is null || prior.Count == 0) continue;
+            // Dominant unit only — mixing per-kg history with per-each paid prices is not a comparison.
+            var dominant = prior.GroupBy(p => p.Unit).OrderByDescending(g => g.Count()).First().ToList();
+            if (dominant.Count < PriceDropAlertService.MinReceiptSamplesForUsual) continue;
+
+            sum += (Median(dominant.Select(d => d.Price).ToList()) - paidUnit) * qty;
+            qualifying++;
+        }
+        decimal? realized = qualifying > 0 ? decimal.Round(sum, 2) : null;
+
+        int tripId;
+        using (var tx = conn.BeginTransaction())
+        {
+            tripId = TripsRepo.Insert(conn, receiptId, receipt.StoreId, receipt.PurchaseDate,
+                plannedEstimate: null, plannedEstimateBasis: null, plannedUnknownCount: null,
+                actualTotal: receipt.TotalAmount, realizedSaving: realized,
+                savingBasis: realized is null ? null : SavingBasis,
+                mappedLineCount: mapped.Count, qualifyingLineCount: qualifying,
+                matchedPlannedCount: recon.MatchedPlanned, unplannedCount: recon.UnplannedCount, tx: tx);
+            ShoppingListRepo.ClearCheckedOffItems(conn, tx);
+            tx.Commit();
+        }
+        return new TripCloseResult(tripId, realized, qualifying, mapped.Count, recon);
+    }
+
+    public bool IsTripClosed(int receiptId)
+    {
+        using var conn = _factory.Open();
+        return TripsRepo.HasTripForReceipt(conn, receiptId);
+    }
+
+    private static decimal Median(List<decimal> values)
+    {
+        values.Sort();
+        var mid = values.Count / 2;
+        return values.Count % 2 == 1 ? values[mid] : (values[mid - 1] + values[mid]) / 2m;
     }
 }

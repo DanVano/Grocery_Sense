@@ -8,6 +8,7 @@
 @inject TripReconciliationService TripCheck
 @inject PendingSharedReceiptsService PendingShared
 @inject ItemManagerService ItemManager
+@inject ShoppingListService Shopping
 
 <MudText Typo="Typo.h5" GutterBottom="true">Receipts</MudText>
 
@@ -219,21 +220,46 @@ else
     private static bool IsRecentReceipt(ReceiptSummary r)
     {
         if (!DateOnly.TryParse(r.PurchaseDate, out var d)) return false;
-        var age = DateOnly.FromDateTime(DateTime.UtcNow).DayNumber - d.DayNumber;
+        var age = DateOnly.FromDateTime(DateTime.Now).DayNumber - d.DayNumber; // local (V3 date convention)
         return age >= 0 && age <= TripReconciliationService.RecentTripDays;
     }
 
-    private async Task TripCheckAsync(int receiptId)
+    // silentIfIneligible: the post-scan auto-prompt must not replace a successful import message with an
+    // eligibility error (backdated receipt, already closed) — those are only shown on an explicit tap.
+    private async Task TripCheckAsync(int receiptId, bool silentIfIneligible = false)
     {
         _busy = true;
         try
         {
-            var result = await Task.Run(() => TripCheck.Reconcile(receiptId));
-            var parameters = new DialogParameters { ["Result"] = result };
-            await DialogService.ShowAsync<TripCheckDialog>("Trip check", parameters);
+            var (result, canClose) = await Task.Run(() =>
+                (TripCheck.Reconcile(receiptId), !TripCheck.IsTripClosed(receiptId)));
+            var parameters = new DialogParameters { ["Result"] = result, ["CanCloseTrip"] = canClose };
+            var dialog = await DialogService.ShowAsync<TripCheckDialog>("Trip check", parameters);
+            var outcome = await dialog.Result;
+            if (outcome is { Canceled: false, Data: "close_trip" })
+                await CloseTripAsync(receiptId);
         }
+        catch (InvalidOperationException ex) when (silentIfIneligible) { _ = ex; }
         catch (Exception ex) { Fail(ex.Message); }
         finally { _busy = false; }
+    }
+
+    // V3 Phase 5: one transaction in the service — trips row + checked-row clear. Savings phrasing is
+    // honest: negative = "spent more than usual", null = unavailable, never $0.
+    private async Task CloseTripAsync(int receiptId)
+    {
+        try
+        {
+            var closed = await Task.Run(() => TripCheck.CloseTrip(receiptId));
+            _messageSeverity = Severity.Success;
+            _message = closed.RealizedSaving is { } s
+                ? (s >= 0
+                    ? $"Trip closed — saved ${s:0.00} vs your usual prices ({closed.QualifyingLines} of {closed.MappedLines} items had enough history)."
+                    : $"Trip closed — spent ${Math.Abs(s):0.00} more than usual ({closed.QualifyingLines} of {closed.MappedLines} items had enough history).")
+                : "Trip closed — savings unavailable (not enough prior price history yet). Picked-up items cleared.";
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Fail(ex.Message); }
     }
 
     protected override async Task OnInitializedAsync()
@@ -357,6 +383,7 @@ else
             // not notify. An ingest failure throws (receipt uncommitted → the catch below drops the copy).
             var outcome = await ScanIngest.IngestScannedFileAsync(copyPath, _replaceDuplicates, _cts.Token);
             var ingest = outcome.Ingest;
+            int? promptTripCheck = null;
 
             if (ingest.ReplaceConflict)
             {
@@ -392,8 +419,16 @@ else
                     if (outcome.AlertsOpened > 0)
                         _message += $" · {outcome.AlertsOpened} new price alert(s) — see Savings";
                 }
+                promptTripCheck = ingest.ReceiptId; // fresh import — maybe the trip just ended
             }
             await ReloadAsync();
+
+            // Post-scan trip-check prompt (V3 Phase 5): a fresh receipt while list rows are checked off
+            // almost certainly IS the trip — offer the check right here instead of hoping the user finds
+            // the per-receipt button. Silent on ineligibility so the import message survives.
+            if (promptTripCheck is { } freshId
+                && await Task.Run(() => Shopping.GetActiveItems(includeCheckedOff: true).Any(i => i.IsCheckedOff)))
+                await TripCheckAsync(freshId, silentIfIneligible: true);
         }
         catch (OperationCanceledException)
         {
