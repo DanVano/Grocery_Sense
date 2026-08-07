@@ -65,6 +65,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PlanCostService>();
         // V3 Phase 3: confirmed-plan snapshot + plan->list upsert (one transaction).
         services.AddSingleton<SmartWeekService>();
+        // V3 Phase 4: staples + cadence + prices + watches + plan links in one Savings view.
+        services.AddSingleton<SmartEssentialsService>();
 
         // Family meal-picks (Phase 5): names-only members + parent review queue.
         services.AddSingleton<FamilyRequestsService>();

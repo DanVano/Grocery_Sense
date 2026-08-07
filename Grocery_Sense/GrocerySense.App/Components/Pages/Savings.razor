@@ -3,6 +3,7 @@
 @inject WatchlistService Watchlist
 @inject PriceDropAlertService Alerts
 @inject ShoppingListService Shopping
+@inject SmartEssentialsService Essentials
 @inject ISnackbar Snackbar
 
 <MudText Typo="Typo.h5" GutterBottom="true">Savings</MudText>
@@ -13,6 +14,68 @@
 }
 
 <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true">
+    <MudTabPanel Text="Essentials">
+        @* V3 F4: staples + cadence + price ladder + watches + plan links in one view. Pull-only surfacing
+           (grill Q16): the Home card and this tab, no OS notifications. *@
+        @if (_essentials is null)
+        {
+            <Loading />
+        }
+        else if (_essentials.Count == 0)
+        {
+            <MudText Typo="Typo.body2">
+                No staples identified yet — essentials appear once items show up on a few receipts.
+            </MudText>
+        }
+        else
+        {
+            <MudPaper Outlined="true">
+                <MudList T="int" Dense="true">
+                    @foreach (var e in _essentials)
+                    {
+                        <MudListItem T="int">
+                            <div class="d-flex align-center gap-1">
+                                <div>
+                                    <MudText Typo="Typo.body2">
+                                        <b>@e.Name</b>
+                                        @if (e.DueSoon)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                                                due — last bought @(e.DaysSinceLast)d ago (every ~@(e.IntervalDays)d)
+                                            </MudChip>
+                                        }
+                                        @if (e.HasOpenAlert)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Success">price alert</MudChip>
+                                        }
+                                        @if (e.SupportsRecipes.Count > 0)
+                                        {
+                                            <MudTooltip Text="@string.Join(", ", e.SupportsRecipes)">
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Info">in your plan</MudChip>
+                                            </MudTooltip>
+                                        }
+                                    </MudText>
+                                    <MudText Typo="Typo.caption">@EssentialPriceLine(e)</MudText>
+                                </div>
+                                <MudSpacer />
+                                <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart" Size="Size.Small"
+                                               OnClick="@(() => AddEssentialAsync(e))" aria-label="Add to shopping list" />
+                                @if (!e.Watched)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                   OnClick="@(() => WatchEssentialAsync(e))" aria-label="Watch price" />
+                                }
+                                <MudIconButton Icon="@Icons.Material.Filled.Restaurant" Size="Size.Small"
+                                               Href="@($"/meals?find={Uri.EscapeDataString(e.Name)}")"
+                                               aria-label="Find meals using this" />
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+    </MudTabPanel>
+
     <MudTabPanel Text="Watchlist">
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-3">
             <MudAutocomplete T="string" @bind-Value="_pickName" Label="Item" SearchFunc="SearchItems"
@@ -46,6 +109,9 @@
                                 <MudSpacer />
                                 <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart" Size="Size.Small"
                                                OnClick="@(() => AddHitAsync(h))" aria-label="Add to shopping list" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Restaurant" Size="Size.Small"
+                                               Href="@($"/meals?find={Uri.EscapeDataString(h.ItemName)}")"
+                                               aria-label="Find meals using this" />
                             </div>
                         </MudListItem>
                     }
@@ -124,6 +190,9 @@
                                            OnClick="@(() => AddAlertAsync(a))">
                                     @(a.SuggestedQty is double sq ? $"Add to list (qty {sq:0.##})" : "Add to list")
                                 </MudButton>
+                                <MudIconButton Icon="@Icons.Material.Filled.Restaurant" Size="Size.Small"
+                                               Href="@($"/meals?find={Uri.EscapeDataString(a.ItemName)}")"
+                                               aria-label="Find meals using this" />
                                 @if (a.Id is not null)
                                 {
                                     <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
@@ -142,9 +211,40 @@
     private IReadOnlyList<SavingsWatchItem>? _watches;
     private IReadOnlyList<WatchlistHit>? _hits;
     private IReadOnlyList<PriceDropAlert>? _alerts;
+    private IReadOnlyList<EssentialRow>? _essentials;
     private IReadOnlyList<(int Id, string Name)> _items = Array.Empty<(int, string)>();
     private string? _pickName;
     private double? _target;
+
+    private static string EssentialPriceLine(EssentialRow e)
+    {
+        if (e.CurrentPrice is not double c) return "no current price";
+        var line = $"${c:0.00} ({e.PriceSource})";
+        if (e.UsualPrice is double u) line += $" · usual ${u:0.00}";
+        if (e.SixMonthLow is double l) line += $" · 6-mo low ${l:0.00}";
+        if (e.TargetPrice is double t) line += $" · target ${t:0.00}";
+        if (e.SuggestedStockUpQty is double q) line += $" · stock up ×{q:0.##}";
+        return line;
+    }
+
+    private async Task AddEssentialAsync(EssentialRow e)
+    {
+        var qty = e.SuggestedStockUpQty;
+        await GuardAsync(() => Shopping.AddSingleItem(e.Name, quantity: qty, itemId: e.ItemId,
+            addedBy: "Essentials",
+            notes: e.DueSoon && e.IntervalDays is { } iv ? $"You buy this every ~{iv} day(s)" : null));
+        if (_error is null) Snackbar.Add($"Added {e.Name} — see Shopping List", Severity.Success);
+    }
+
+    private async Task WatchEssentialAsync(EssentialRow e)
+    {
+        await GuardAsync(() => Watchlist.AddWatch(e.ItemId, null));
+        await ReloadWatchlistAsync();
+        await ReloadEssentialsAsync();
+    }
+
+    private async Task ReloadEssentialsAsync() =>
+        _essentials = await GuardAsync(() => Essentials.BuildEssentials()) ?? Array.Empty<EssentialRow>();
 
 
     private static string KindLabel(string kind) => kind switch
@@ -163,6 +263,7 @@
         // engine rows, honors the 30-day dismissed suppression) and coexists with the SyncCompleted DI hook.
         await GuardAsync(() => Alerts.RefreshEngineAlerts(staplesOnly: true));
         await ReloadAlertsAsync();
+        await ReloadEssentialsAsync();
     }
 
     private async Task ReloadAlertsAsync() =>

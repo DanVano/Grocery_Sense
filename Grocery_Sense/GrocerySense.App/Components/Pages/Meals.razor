@@ -171,6 +171,10 @@ else if (_myRecipes is not null)
 
     private IReadOnlyList<UserRecipeRow>? _myRecipes;
 
+    // Cook This Deal (V3 F2): /meals?find=<ingredient> plans a targeted week around that ingredient.
+    // Query param + existing page state — no new coordinator service.
+    [SupplyParameterFromQuery(Name = "find")] public string? FindIngredient { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         var cfg = Config.Load();
@@ -185,6 +189,8 @@ else if (_myRecipes is not null)
         }
         catch { /* budget context is a hint; the planner works without it */ }
         await ReloadRecipesAsync();
+        if (!string.IsNullOrWhiteSpace(FindIngredient))
+            await PlanWeekAsync();
     }
 
     private async Task PlanWeekAsync()
@@ -202,7 +208,9 @@ else if (_myRecipes is not null)
             var n = _numRecipes;
             var servings = _servings;
             var cap = _groceryCap;
-            var build = await Task.Run(() => Planner.BuildSmartWeek(n, servings, cap));
+            var find = string.IsNullOrWhiteSpace(FindIngredient) ? null : FindIngredient.Trim();
+            var build = await Task.Run(() => Planner.BuildSmartWeek(n, servings, cap,
+                targetIngredients: find is null ? null : [find]));
             _selection = build.Suggestions.ToList();
             _alternatives = build.Alternatives.ToList();
             _estimate = build.Estimate;
@@ -211,10 +219,13 @@ else if (_myRecipes is not null)
 
             _messageSeverity = Severity.Info;
             _message = _selection.Count == 0
-                ? (cap is not null && _skippedLowCoverage > 0
-                    ? "Price coverage is too thin for a budget-fit week — scan receipts or sync flyers, or plan without a cap."
-                    : "No recipes matched your preferences. Loosen an allergy/exclude in Preferences.")
-                : $"{_selection.Count} meal(s) planned"
+                ? (find is not null
+                    ? $"No recipes with a confident match for \"{find}\" fit your preferences."
+                    : cap is not null && _skippedLowCoverage > 0
+                        ? "Price coverage is too thin for a budget-fit week — scan receipts or sync flyers, or plan without a cap."
+                        : "No recipes matched your preferences. Loosen an allergy/exclude in Preferences.")
+                : (find is not null ? $"Meals using {find} — " : "")
+                  + $"{_selection.Count} meal(s) planned"
                   + (_skippedOverBudget > 0 ? $" · {_skippedOverBudget} skipped over the cap" : "")
                   + (_skippedLowCoverage > 0 ? $" · {_skippedLowCoverage} not price-covered enough for budget fit (excluded)" : "");
         }

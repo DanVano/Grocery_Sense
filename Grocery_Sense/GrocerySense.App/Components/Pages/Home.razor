@@ -2,6 +2,7 @@
 @inject ShoppingListService Shopping
 @inject PriceDropAlertService Alerts
 @inject FamilyRequestsService Family
+@inject StapleRestockService Restock
 @inject SqliteConnectionFactory Db
 @inject ShopModeState ShopState
 @inject NavigationManager Nav
@@ -69,6 +70,17 @@ else
         </MudPaper>
     }
 
+    @* Essentials surfacing (V3 grill Q16): pull-based card, no OS notifications. *@
+    @if (_essentialsDue > 0)
+    {
+        <MudPaper Class="pa-3 mb-2" Outlined="true">
+            <MudText Typo="Typo.subtitle1">@_essentialsDue essential(s) due soon</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Staples you usually rebuy about now.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Inventory" Href="/savings">See essentials</MudButton>
+        </MudPaper>
+    }
+
     @if (_familyCount > 0)
     {
         <MudPaper Class="pa-3 mb-2" Outlined="true">
@@ -99,9 +111,12 @@ else
     private int _alertCount;
     private string? _topAlert;
     private int _familyCount;
+    private int _essentialsDue;
 
     // Every figure here is a cheap read of already-persisted state — Home must not recompute the
     // deal/alert engines on the landing screen. Alerts are read, never refreshed, for the same reason.
+    // Restock cadence is the one computed figure: three batch queries over a small DB, deliberately
+    // allowed so the essentials card can exist without a notification pipeline (grill Q16).
     protected override async Task OnInitializedAsync()
     {
         try
@@ -117,6 +132,7 @@ else
                 _topAlert = alerts.Count > 0 ? alerts[0].ItemName : null;
 
                 _familyCount = Family.UnreviewedCount();
+                _essentialsDue = Restock.GetSuggestions().Count;
 
                 using var conn = Db.Open();
                 _dealCount = FlyersRepo.CountActiveDeals(conn); // COUNT, not 5 000 materialized rows

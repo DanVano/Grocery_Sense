@@ -102,6 +102,12 @@ else
                                 }
                             </MudText>
                             <MudSpacer />
+                            @if (deal.CanonicalName is { Length: > 0 } canonical)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Restaurant" Size="Size.Small"
+                                               Href="@($"/meals?find={Uri.EscapeDataString(canonical)}")"
+                                               aria-label="Find meals using this" />
+                            }
                             <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart" Size="Size.Small"
                                            OnClick="@(() => AddDealAsync(deal.Row))" aria-label="Add to shopping list" />
                         </div>
@@ -118,7 +124,10 @@ else
 }
 
 @code {
-    private sealed record DealView(FlyerDeal Row, bool SoftExcluded, double? EffectiveUnit, double? UsualPrice);
+    // CanonicalName present only for credibly-mapped deals — the "Find meals" hop uses it, never guessed
+    // flyer text (V3 F2 rule: no confident match = no button).
+    private sealed record DealView(FlyerDeal Row, bool SoftExcluded, double? EffectiveUnit, double? UsualPrice,
+        string? CanonicalName = null);
     private sealed record StoreDeals(string StoreName, IReadOnlyList<DealView> Deals);
 
     // Verdict chip threshold: an effective price less than this % below usual reads "≈ usual — skip".
@@ -200,6 +209,7 @@ else
                 var usualMap = PricesRepo.GetUsualUnitPriceBatch(conn, mappedIds, receiptOnly: true,
                     minSamples: PriceDropAlertService.MinReceiptSamplesForUsual,
                     sinceDays: PriceDropAlertService.UsualLookbackDays);
+                var mappedNames = ItemsRepo.GetItemsByIds(conn, mappedIds); // for the Find-meals hop
 
                 var hiddenCount = 0;
                 var views = new List<(int StoreId, DealView View)>();
@@ -223,10 +233,14 @@ else
                         effUnit = adjusted.UnitPrice;
 
                     double? usual = null;
+                    string? canonical = null;
                     if (deal.ItemId is { } mappedId)
+                    {
                         usual = usualMap.GetValueOrDefault(mappedId, (null, 0, "unknown")).Price;
+                        canonical = mappedNames.TryGetValue(mappedId, out var it) ? it.CanonicalName : null;
+                    }
 
-                    views.Add((deal.StoreId, new DealView(deal, soft, effUnit, usual)));
+                    views.Add((deal.StoreId, new DealView(deal, soft, effUnit, usual, canonical)));
                 }
 
                 var grouped = views.GroupBy(v => v.StoreId)
